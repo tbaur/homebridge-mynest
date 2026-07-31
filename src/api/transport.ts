@@ -97,7 +97,11 @@ export interface NestTransportOptions {
 
 /** Counter hooks used by the platform diagnostics collector. */
 export interface TransportMetrics {
-  apiRequest?: (latencyMs: number, ok: boolean, networked?: boolean) => void
+  apiRequest?: (
+    latencyMs: number,
+    ok: boolean,
+    options?: boolean | { networked?: boolean, sampleLatency?: boolean },
+  ) => void
   sessionLogin?: () => void
   restCycle?: (ok: boolean, durationMs: number) => void
   observeReconnect?: () => void
@@ -579,7 +583,11 @@ export class NestTransport {
         this.#restCycles++
         consecutiveFailures = 0
         this.#restForbidden = 0
-        this.#options.metrics?.apiRequest?.(Date.now() - cycleStartedAt, true)
+        // Idle long-polls routinely run ~SUBSCRIBE_TIMEOUT_MS; counting them as
+        // API latency makes a quiet house look like a multi-minute p95 outage.
+        this.#options.metrics?.apiRequest?.(Date.now() - cycleStartedAt, true, {
+          sampleLatency: !result.isIdle,
+        })
         this.#options.metrics?.restCycle?.(true, Date.now() - cycleStartedAt)
         this.#noteRestSuccess()
 
