@@ -24,14 +24,6 @@ export const PLATFORM_NAME = 'MyNest'
 /** Prefix used when generating stable HAP accessory UUIDs. */
 export const UUID_PREFIX = 'mynest-'
 
-/**
- * Bump when HomeKit presentation must be force-recreated (category / required
- * thermostat characteristics). Cached accessories with a lower epoch are
- * unregistered and registered fresh so Apple Home shows room tiles again —
- * `updatePlatformAccessories` alone does not refresh a stuck No Response tile.
- */
-export const HAP_TILE_EPOCH = 1
-
 /** Reported as the HomeKit accessory manufacturer. */
 export const MANUFACTURER = 'Nest'
 
