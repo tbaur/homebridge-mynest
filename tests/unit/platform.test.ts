@@ -472,7 +472,44 @@ describe('MyNestPlatform', () => {
     expect(removedIds).not.toContain(OBSERVE_ONLY_PROTECT_ID)
   })
 
-  it('removes stale accessories once Observe has reported (Observe-only homes)', async () => {
+  it('does not prune while the opening Observe burst is still landing', async () => {
+    const cachedUuid = uuid.generate(`${UUID_PREFIX}${THERMOSTAT_ID}`)
+    const cached = new Accessory('Hallway Thermostat', cachedUuid) as unknown as PlatformAccessory
+    cached.context = {
+      deviceId: THERMOSTAT_ID,
+      kind: 'thermostat',
+      displayName: 'Hallway Thermostat',
+    }
+
+    const platform = new MyNestPlatform(
+      log,
+      {
+        platform: PLATFORM_NAME,
+        accessToken: 'b'.repeat(120),
+      },
+      api.asApi(),
+    )
+    platform.configureAccessory(cached)
+    api.emit('didFinishLaunching')
+    await Promise.resolve()
+    await Promise.resolve()
+    flushSync()
+
+    // REST-only inventory + Observe session open with frames, but the DEVICE
+    // burst has not settled — pruning now would bounce every thermostat.
+    harness.options.onObserveSessionStart?.()
+    setTransportStatus({
+      hasSession: true,
+      observeFrames: 2,
+      restCycles: 1,
+      knownObjects: 1,
+    })
+    flushSync()
+
+    expect(api.unregistered).toHaveLength(0)
+  })
+
+  it('removes stale accessories once an Observe snapshot has settled', async () => {
     const staleUuid = uuid.generate(`${UUID_PREFIX}GONE`)
     const stale = new Accessory('Gone Protect', staleUuid) as unknown as PlatformAccessory
     stale.context = { deviceId: 'GONE', kind: 'protect', displayName: 'Gone Protect' }
@@ -490,8 +527,9 @@ describe('MyNestPlatform', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    // Simulate an Observe-only account: frames arrived, REST objects empty.
+    // Observe-only account: opening burst must settle before HomeKit prune.
     harness.options.onBuckets({})
+    harness.options.onObserveSessionStart?.()
     harness.options.onTraits(thermostatTraits())
     setTransportStatus({
       hasSession: true,
@@ -499,7 +537,7 @@ describe('MyNestPlatform', () => {
       restCycles: 0,
       knownObjects: 0,
     })
-    flushSync()
+    await settleObserveSnapshot()
 
     expect(api.unregistered).toContain(stale)
     expect(log.infos.join('\n')).toContain('Gone Protect')

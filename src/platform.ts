@@ -108,6 +108,12 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   #observeSnapshotIds: Set<string> | null = null
   #observeSnapshotSettleTimer: NodeJS.Timeout | null = null
   /**
+   * True after at least one non-truncated Observe device burst has settled.
+   * HomeKit prune must wait for this — early frames increment `observeFrames`
+   * before thermostats land, and pruning then bounces every Observe-only tile.
+   */
+  #hasSettledObserveSnapshot = false
+  /**
    * Observe `DEVICE_*` ids missing from the previous complete snapshot.
    * A device is removed only after a second consecutive complete snapshot omits it,
    * so a truncated reconnect cannot wipe half the house.
@@ -362,6 +368,10 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       return
     }
 
+    // A non-empty, non-truncated burst is enough to allow HomeKit prune — even
+    // when Nest named zero removals this round.
+    this.#hasSettledObserveSnapshot = true
+
     const knownDeviceIds = this.#observe.resourceIds.filter((id) => id.startsWith('DEVICE_'))
     const missing = knownDeviceIds.filter((id) => !snapshotIds.has(id))
 
@@ -379,19 +389,19 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       }
     }
 
-    if (toRemove.size === 0) {
-      return
+    if (toRemove.size > 0) {
+      const live = new Set(knownDeviceIds.filter((id) => !toRemove.has(id)))
+      const removed = this.#observe.retainDeviceResources(live)
+      if (removed.length > 0) {
+        this.#log.info(
+          `Observe dropped ${removed.length} device(s) — removing from HomeKit`,
+        )
+      }
     }
 
-    const live = new Set(knownDeviceIds.filter((id) => !toRemove.has(id)))
-    const removed = this.#observe.retainDeviceResources(live)
-    if (removed.length === 0) {
-      return
-    }
-
-    this.#log.info(
-      `Observe dropped ${removed.length} device(s) — removing from HomeKit`,
-    )
+    // Always sync after a settled burst so HomeKit prune (gated on
+    // `#hasSettledObserveSnapshot`) can drop cached ghosts even when Nest
+    // removed nothing from Observe state this round.
     this.#bucketsChanged = true
     this.#scheduleUpdate()
   }
@@ -562,6 +572,11 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     // unregister. A REST-only view cannot prove an Observe-only thermostat is
     // gone; keeping a ghost through an outage beats deleting a live room tile.
     if (status.observeFrames === 0) {
+      return
+    }
+
+    // Opening (or reconnect) burst still landing — union inventory is partial.
+    if (this.#observeSnapshotIds !== null || !this.#hasSettledObserveSnapshot) {
       return
     }
 
