@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.2](https://github.com/tbaur/homebridge-mynest/compare/v0.1.1...v0.1.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* stop false observeDown and idle-subscribe latency skew ([#5](https://github.com/tbaur/homebridge-mynest/issues/5)) ([37cae38](https://github.com/tbaur/homebridge-mynest/commit/37cae38f88cef455552cc00009badd731f640e9b))
+
 ## [0.1.1](https://github.com/tbaur/homebridge-mynest/compare/v0.1.0...v0.1.1) (2026-07-31)
 
 
