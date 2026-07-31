@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.4](https://github.com/tbaur/homebridge-mynest/compare/v0.1.3...v0.1.4) (2026-07-31)
+
+
+### Bug Fixes
+
+* stop cooling-threshold null spam and Observe boot prune ([#9](https://github.com/tbaur/homebridge-mynest/issues/9)) ([b940583](https://github.com/tbaur/homebridge-mynest/commit/b94058396908488afba62081fac037591ae973f3))
+
 ## [0.1.3](https://github.com/tbaur/homebridge-mynest/compare/v0.1.2...v0.1.3) (2026-07-31)
 
 
