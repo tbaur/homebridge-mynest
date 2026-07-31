@@ -44,6 +44,7 @@ export function createResolvedConfig(overrides: Partial<ResolvedConfig> = {}): R
     accessToken: 'test-token',
     fieldTest: false,
     allowThermostatControl: false,
+    exposeGlobalEcoSwitch: false,
     exposeProtectOccupancy: true,
     exposeProtectTemperature: true,
     ignoredDeviceIds: new Set<string>(),
@@ -70,7 +71,9 @@ export function createPlatformStub(config: Partial<ResolvedConfig> = {}): MyNest
     Service,
     Characteristic,
     resolvedConfig: createResolvedConfig(config),
-    applyThermostatWrite: jest.fn(async () => false),
+    applyThermostatWrite: jest.fn(async () => null),
+    applyEcoWrite: jest.fn(async () => false),
+    applyGlobalEcoWrite: jest.fn(async () => false),
   } as unknown as MyNestPlatform
 }
 

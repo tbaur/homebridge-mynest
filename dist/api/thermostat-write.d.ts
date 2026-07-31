@@ -48,6 +48,15 @@ export declare function buildThermostatSetpointWrite(resourceId: string, state: 
     targetTemperatureLowC: number;
     targetTemperatureHighC: number;
 }>): ThermostatSetpointWrite;
+/**
+ * Homebridge info line for a successful HomeKit-driven Nest write.
+ *
+ * Mode-aware so heat updates do not dump the unused cool bound Nest still
+ * carries in the trait.
+ */
+export declare function formatThermostatUpdateLog(write: ThermostatSetpointWrite): string;
+/** Encode Eco on/off for TraitBatchApi/BatchUpdateState (no setpoint change). */
+export declare function encodeEcoModeBatchUpdate(resourceId: string, ecoOn: boolean): Buffer;
 /** Encode a NestMessage suitable for TraitBatchApi/BatchUpdateState. */
 export declare function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrite): Buffer;
 //# sourceMappingURL=thermostat-write.d.ts.map

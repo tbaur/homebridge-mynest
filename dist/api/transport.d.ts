@@ -127,6 +127,8 @@ export declare class NestTransport {
      * `allowThermostatControl`.
      */
     updateThermostatSettings(write: ThermostatSetpointWrite): Promise<void>;
+    /** Push Eco on/off through BatchUpdateState for one thermostat. */
+    updateEcoMode(resourceId: string, ecoOn: boolean): Promise<void>;
     /** Stop both loops and release the session. */
     stop(): void;
 }

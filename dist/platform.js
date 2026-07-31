@@ -27,6 +27,7 @@ const registry_1 = require("./state/registry");
 const validators_1 = require("./utils/validators");
 const logger_1 = require("./utils/logger");
 const sanitizers_1 = require("./utils/sanitizers");
+const global_eco_1 = require("./accessories/global-eco");
 const protect_1 = require("./accessories/protect");
 const temperature_sensor_1 = require("./accessories/temperature-sensor");
 const thermostat_1 = require("./accessories/thermostat");
@@ -65,6 +66,8 @@ class MyNestPlatform {
     #cachedAccessories = new Map();
     /** Live accessory handlers, keyed by device id. */
     #handlers = new Map();
+    /** Optional house-wide Eco switch (not a Nest device). */
+    #globalEco = null;
     #observe = new observe_state_1.ObserveState();
     #buckets = {};
     #transport = null;
@@ -94,6 +97,8 @@ class MyNestPlatform {
     #observeRemovalCandidates = new Set();
     #diagnosticsTimer = null;
     #lastDiagnosticsHealth = null;
+    /** One-shot startup line after the first HomeKit inventory sync. */
+    #hasLoggedPlatformReady = false;
     constructor(log, config, api) {
         this.api = api;
         this.Service = api.hap.Service;
@@ -403,8 +408,13 @@ class MyNestPlatform {
         }
         this.#pruneStaleState(inventory);
         this.#removeStaleAccessories(inventory);
+        this.#syncGlobalEco(inventory);
+        if (!this.#hasLoggedPlatformReady) {
+            this.#hasLoggedPlatformReady = true;
+            this.#log.info('Platform ready');
+        }
     }
-    /** Drop Observe DEVICE_* maps and REST objects Nest no longer reports. */
+    /** Drop Observe DEVICE_* trait maps Nest no longer reports in inventory. */
     #pruneStaleState(inventory) {
         const liveDeviceIds = new Set((0, registry_1.listDevices)(inventory).map((device) => device.identity.id));
         const liveResourceIds = new Set([...liveDeviceIds].map((id) => (0, classify_1.toResourceId)(id)));
@@ -472,15 +482,15 @@ class MyNestPlatform {
     /**
      * Apply a HomeKit-originated thermostat change via Nest BatchUpdateState.
      *
-     * No-ops (with a warning) when control is disabled so characteristics can
-     * stay writable for HomeKit presentation without guessing at HVAC writes.
+     * No-ops when control is disabled so characteristics can stay writable for
+     * HomeKit presentation without guessing at HVAC writes. The accessory logs
+     * the user-facing success / ignore line.
      *
-     * @returns `true` when a Nest write was sent; `false` when control is off.
+     * @returns The write that was sent, or `null` when control is off.
      */
     async applyThermostatWrite(deviceId, state, patch) {
         if (!this.#config?.allowThermostatControl) {
-            this.#log.warn(`Ignoring thermostat write for ${deviceId} — enable Allow thermostat control in config.`);
-            return false;
+            return null;
         }
         const transport = this.#transport;
         if (!transport) {
@@ -488,6 +498,67 @@ class MyNestPlatform {
         }
         const write = (0, thermostat_write_1.buildThermostatSetpointWrite)((0, classify_1.toResourceId)(deviceId), state, patch);
         await transport.updateThermostatSettings(write);
+        return write;
+    }
+    /**
+     * Set Eco on one thermostat via Nest BatchUpdateState.
+     *
+     * @returns `true` when a Nest write was sent; `false` when control is off.
+     */
+    async applyEcoWrite(deviceId, ecoOn) {
+        if (!this.#config?.allowThermostatControl) {
+            return false;
+        }
+        const transport = this.#transport;
+        if (!transport) {
+            throw new errors_1.ConfigurationError('Nest transport is not running');
+        }
+        await transport.updateEcoMode((0, classify_1.toResourceId)(deviceId), ecoOn);
+        return true;
+    }
+    /**
+     * Set Eco on every published Nest thermostat.
+     *
+     * @returns `true` only when every targeted thermostat accepted the write.
+     *   `false` when control is off, there are no thermostats, or any write failed
+     *   (partial failures are logged; HomeKit must not flip the global switch).
+     */
+    async applyGlobalEcoWrite(ecoOn) {
+        if (!this.#config?.allowThermostatControl) {
+            return false;
+        }
+        const transport = this.#transport;
+        if (!transport) {
+            throw new errors_1.ConfigurationError('Nest transport is not running');
+        }
+        // Live handlers only — cached ghosts awaiting prune must not fail the batch.
+        const deviceIds = [...this.#cachedAccessories.values()]
+            .map((accessory) => accessory.context)
+            .filter((context) => (context.kind === 'thermostat'
+            && context.synthetic !== 'global_eco'
+            && this.#handlers.has(context.deviceId)))
+            .map((context) => context.deviceId);
+        if (deviceIds.length === 0) {
+            this.#log.warn('Nest Eco Mode: no thermostats to update');
+            return false;
+        }
+        const results = await Promise.allSettled(deviceIds.map(async (deviceId) => {
+            await transport.updateEcoMode((0, classify_1.toResourceId)(deviceId), ecoOn);
+        }));
+        let failed = 0;
+        for (const [index, result] of results.entries()) {
+            if (result.status === 'rejected') {
+                failed++;
+                this.#log.warn(`Nest Eco Mode: ${deviceIds[index]} failed: ${(0, sanitizers_1.sanitizeError)(result.reason)}`);
+            }
+        }
+        if (failed > 0) {
+            if (failed === results.length) {
+                throw new Error(`Eco update failed on all ${failed} thermostat(s)`);
+            }
+            this.#log.warn(`Nest Eco Mode: ${failed}/${results.length} thermostat(s) failed — HomeKit left unchanged`);
+            return false;
+        }
         return true;
     }
     /**
@@ -527,6 +598,9 @@ class MyNestPlatform {
         }
         for (const [uuid, accessory] of this.#cachedAccessories) {
             const context = accessory.context;
+            if (context?.synthetic === 'global_eco') {
+                continue;
+            }
             if (context?.deviceId && known.has(context.deviceId)) {
                 continue;
             }
@@ -534,6 +608,63 @@ class MyNestPlatform {
             this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
             this.#cachedAccessories.delete(uuid);
         }
+    }
+    /**
+     * Publish or refresh the optional house-wide Eco switch.
+     *
+     * On when every Nest thermostat is in Eco; Off otherwise. Turning it on/off
+     * writes Eco to each thermostat (requires `allowThermostatControl`).
+     */
+    #syncGlobalEco(inventory) {
+        if (!this.#config?.exposeGlobalEcoSwitch) {
+            this.#removeGlobalEco();
+            return;
+        }
+        const thermostats = (0, registry_1.listDevices)(inventory).filter((device) => (0, device_1.isDeviceOfKind)(device, 'thermostat'));
+        const allEco = thermostats.length > 0
+            && thermostats.every((device) => device.state.isEcoActive === true);
+        if (!this.#globalEco) {
+            this.#publishGlobalEco();
+        }
+        this.#globalEco?.updateAllEco(allEco);
+    }
+    #publishGlobalEco() {
+        const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${settings_1.GLOBAL_ECO_DEVICE_ID}`);
+        const category = 8 /* this.api.hap.Categories.SWITCH */;
+        const displayName = 'Nest Eco Mode';
+        const context = {
+            deviceId: settings_1.GLOBAL_ECO_DEVICE_ID,
+            kind: 'thermostat',
+            displayName,
+            synthetic: 'global_eco',
+        };
+        let accessory = this.#cachedAccessories.get(uuid);
+        if (!accessory) {
+            accessory = new this.api.platformAccessory(displayName, uuid, category);
+            accessory.category = category;
+            accessory.context = context;
+            this.#cachedAccessories.set(uuid, accessory);
+            this.api.registerPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
+            this.#log.info(`Added ${displayName} (controls Eco on all thermostats)`);
+        }
+        else {
+            accessory.context = context;
+            accessory.displayName = displayName;
+            accessory.category = category;
+            this.api.updatePlatformAccessories([accessory]);
+        }
+        const log = (0, logger_1.createScopedLogger)(this.#rawLog, displayName, this.#config?.debug === true);
+        this.#globalEco = new global_eco_1.GlobalEcoAccessory(this, accessory, log);
+    }
+    #removeGlobalEco() {
+        const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${settings_1.GLOBAL_ECO_DEVICE_ID}`);
+        const accessory = this.#cachedAccessories.get(uuid);
+        if (accessory) {
+            this.#log.info(`Removing ${accessory.displayName} — global Eco switch disabled in config`);
+            this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
+            this.#cachedAccessories.delete(uuid);
+        }
+        this.#globalEco = null;
     }
     #unregisterAllCached(reason) {
         if (this.#cachedAccessories.size === 0) {

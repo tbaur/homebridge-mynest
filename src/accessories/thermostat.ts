@@ -13,6 +13,7 @@
  */
 
 import type { CharacteristicValue, Perms, PlatformAccessory, Service } from 'homebridge'
+import { formatThermostatUpdateLog } from '../api/thermostat-write'
 import { MAX_SETPOINT_C, MIN_SETPOINT_C, SETPOINT_STEP_C } from '../settings'
 import type { HvacActivity, HvacMode, NestDevice, ThermostatState } from '../types/device'
 import type { Logger } from '../utils/logger'
@@ -30,6 +31,7 @@ function midpoint(low: number | undefined, high: number | undefined): number | u
 
 export class ThermostatAccessory extends NestAccessory<ThermostatState> {
   #service!: Service
+  #ecoService: Service | null = null
 
   constructor(
     platform: MyNestPlatform,
@@ -123,11 +125,13 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
 
     this.#applyCharacteristicProps()
     this.#bindHumidity()
+    this.#bindEcoSwitch()
   }
 
   protected onServicesMayChange(): void {
     this.#applyCharacteristicProps()
     this.#bindHumidity()
+    this.#bindEcoSwitch()
   }
 
   /**
@@ -181,12 +185,17 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     targetTemperatureHighC: number
   }>): Promise<void> {
     try {
-      const sent = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch)
-      if (!sent) {
+      const write = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch)
+      if (!write) {
+        this.log.warn(
+          `${this.identity.name}: ignoring HomeKit change — enable Allow thermostat control in config.`,
+        )
         this.#revertHomeKitValues()
+        return
       }
+      this.log.info(`${this.identity.name}: ${formatThermostatUpdateLog(write)}`)
     } catch (error) {
-      this.log.warn(`Thermostat write failed: ${sanitizeError(error)}`)
+      this.log.warn(`${this.identity.name}: thermostat update failed: ${sanitizeError(error)}`)
       this.#revertHomeKitValues()
     }
   }
@@ -214,6 +223,58 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
       this.platform.Characteristic.CurrentRelativeHumidity,
       () => this.state.currentHumidity,
     )
+  }
+
+  /**
+   * Nest Eco as a Switch — HomeKit's thermostat mode list has no Eco slot.
+   *
+   * Same pattern as classic homebridge-nest. Writes require
+   * `allowThermostatControl`; the switch stays writable either way so Home
+   * does not mark the accessory No Response.
+   */
+  #bindEcoSwitch(): void {
+    const { Characteristic, Service: HapService } = this.platform
+    if (!this.#ecoService) {
+      const byId = (
+        this.accessory as PlatformAccessory & {
+          getServiceById?: (type: typeof HapService.Switch, subType: string) => Service | undefined
+        }
+      ).getServiceById?.(HapService.Switch, 'eco')
+      this.#ecoService = byId
+        ?? this.accessory.getService(HapService.Switch)
+        ?? this.accessory.addService(HapService.Switch, 'Eco Mode', 'eco')
+      this.#ecoService.setCharacteristic(Characteristic.Name, 'Eco Mode')
+    }
+
+    this.binder.bind(
+      this.#ecoService,
+      Characteristic.On,
+      () => this.state.isEcoActive === true,
+      {
+        write: async (value) => {
+          await this.#writeEco(value === true || value === 1)
+        },
+      },
+    )
+  }
+
+  async #writeEco(ecoOn: boolean): Promise<void> {
+    try {
+      const sent = await this.platform.applyEcoWrite(this.deviceId, ecoOn)
+      if (!sent) {
+        this.log.warn(
+          `${this.identity.name}: ignoring HomeKit Eco change — enable Allow thermostat control in config.`,
+        )
+        this.#revertHomeKitValues()
+        return
+      }
+      this.log.info(
+        `${this.identity.name}: ${ecoOn ? 'Updating to Eco' : 'Clearing Eco'}`,
+      )
+    } catch (error) {
+      this.log.warn(`${this.identity.name}: Eco update failed: ${sanitizeError(error)}`)
+      this.#revertHomeKitValues()
+    }
   }
 
   /**

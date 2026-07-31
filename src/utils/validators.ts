@@ -163,6 +163,7 @@ export function validateConfig(raw: MyNestPlatformConfig): ConfigValidationResul
     accessToken: parseAccessToken(raw.accessToken),
     fieldTest: parseBoolean(raw.fieldTest, false),
     allowThermostatControl: parseBoolean(raw.allowThermostatControl, false),
+    exposeGlobalEcoSwitch: parseBoolean(raw.exposeGlobalEcoSwitch, false),
     exposeProtectOccupancy: parseBoolean(raw.exposeProtectOccupancy, true),
     exposeProtectTemperature: parseBoolean(raw.exposeProtectTemperature, false),
     ignoredDeviceIds: parseIgnoredIds(raw.ignoredDeviceIds, warnings),

@@ -16,7 +16,7 @@
  * will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
 exports.resolveEndpoints = resolveEndpoints;
 exports.appLaunchUrl = appLaunchUrl;
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -25,6 +25,12 @@ exports.PLUGIN_NAME = 'homebridge-mynest';
 exports.PLATFORM_NAME = 'MyNest';
 /** Prefix used when generating stable HAP accessory UUIDs. */
 exports.UUID_PREFIX = 'mynest-';
+/**
+ * Synthetic device id for the optional house-wide Eco Mode switch.
+ *
+ * Not a Nest resource — used only for Homebridge cache / HomeKit UUID stability.
+ */
+exports.GLOBAL_ECO_DEVICE_ID = 'GLOBAL_ECO';
 /** Reported as the HomeKit accessory manufacturer. */
 exports.MANUFACTURER = 'Nest';
 /**

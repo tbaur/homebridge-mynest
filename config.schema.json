@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": true,
   "headerDisplay": "Exposes Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in HomeKit using a Nest Account access token (not Google cookie auth).\n\nHow to get the token: [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).",
-  "footerDisplay": "Thermostat mode/setpoints write through Nest BatchUpdateState only when Allow thermostat control is enabled (off by default). Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
+  "footerDisplay": "Thermostat mode/setpoints/Eco write through Nest BatchUpdateState only when Allow thermostat control is enabled (off by default). Each thermostat gets an Eco Mode switch; optionally enable Expose global Eco switch for all-at-once. Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
   "schema": {
     "type": "object",
     "properties": {
@@ -28,7 +28,13 @@
         "title": "Allow thermostat control",
         "type": "boolean",
         "default": false,
-        "description": "Opt in to let HomeKit change thermostat mode and setpoints via Nest BatchUpdateState. Off by default so upgrades stay read-only until you enable control. Confirm with nest-probe probe 12 (--confirm) on your account first."
+        "description": "Opt in to let HomeKit change thermostat mode, setpoints, and Eco via Nest BatchUpdateState. Off by default so upgrades stay read-only until you enable control. Confirm setpoints with nest-probe probe 12 (--confirm) first; Eco Mode uses the same gateway but has no separate probe confirm yet."
+      },
+      "exposeGlobalEcoSwitch": {
+        "title": "Expose global Eco switch",
+        "type": "boolean",
+        "default": false,
+        "description": "Publish a Nest Eco Mode switch that turns Eco on or off for every thermostat at once. Writes still require Allow thermostat control."
       },
       "exposeProtectOccupancy": {
         "title": "Expose Protect occupancy",
@@ -92,6 +98,7 @@
       "title": "Devices",
       "items": [
         "allowThermostatControl",
+        "exposeGlobalEcoSwitch",
         "exposeProtectOccupancy",
         "exposeProtectTemperature",
         {

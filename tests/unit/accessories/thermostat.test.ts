@@ -240,9 +240,35 @@ describe('ThermostatAccessory', () => {
       .toContain('pw')
   })
 
+  it('publishes an Eco Mode switch reflecting Nest Eco state', () => {
+    const { accessory, read } = build({ ...heating, isEcoActive: true })
+    const eco = accessory.getService(Service.Switch as never)
+    expect(eco).toBeDefined()
+    expect(eco!.getCharacteristic(Characteristic.On).value).toBe(true)
+    expect(read(Characteristic.CurrentTemperature)).toBe(19.5)
+  })
+
+  it('routes Eco switch writes through the platform', async () => {
+    const { accessory, platform, log } = build(heating)
+    const spy = jest.spyOn(platform, 'applyEcoWrite').mockResolvedValue(true)
+    const eco = accessory.getService(Service.Switch as never)!
+
+    await eco.getCharacteristic(Characteristic.On).handleSetRequest(true)
+
+    expect(spy).toHaveBeenCalledWith('THERM01', true)
+    expect(log.infos.join('\n')).toMatch(/Hallway Thermostat: Updating to Eco/)
+  })
+
   it('routes target temperature writes through the platform', async () => {
-    const { service, platform } = build(heating)
-    const spy = jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(true)
+    const { service, platform, log } = build(heating)
+    const spy = jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue({
+      resourceId: 'DEVICE_THERM01',
+      mode: 'heat',
+      targetTemperatureHeatC: 22.5,
+      targetTemperatureCoolC: 26,
+      standbyMode: 'heat',
+      clearEco: false,
+    })
 
     await service.getCharacteristic(Characteristic.TargetTemperature)
       .handleSetRequest(22.5)
@@ -252,6 +278,7 @@ describe('ThermostatAccessory', () => {
       expect.objectContaining({ targetTemperatureC: 21 }),
       { targetTemperatureC: 22.5 },
     )
+    expect(log.infos.join('\n')).toMatch(/Hallway Thermostat: Updating Heat to 22\.5°C/)
   })
 
   it('does not reject onSet when a Nest write fails', async () => {
@@ -269,13 +296,14 @@ describe('ThermostatAccessory', () => {
   })
 
   it('reverts HomeKit when thermostat control is disabled', async () => {
-    const { service, platform, read } = build(heating)
-    jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(false)
+    const { service, platform, read, log } = build(heating)
+    jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(null)
 
     await service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24)
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(read(Characteristic.TargetTemperature)).toBe(21)
+    expect(log.warns.join('\n')).toMatch(/Hallway Thermostat: ignoring HomeKit change/)
   })
 
   it('records the device details HomeKit shows', () => {

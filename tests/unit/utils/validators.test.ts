@@ -39,6 +39,7 @@ describe('validateConfig', () => {
       fieldTest: false,
       // Opt-in: omitted key must stay false so upgrades do not start HVAC writes.
       allowThermostatControl: false,
+      exposeGlobalEcoSwitch: false,
       exposeProtectOccupancy: true,
       exposeProtectTemperature: false,
       diagnosticsInterval: 0,
@@ -63,6 +64,7 @@ describe('validateConfig', () => {
       name: 'Upstairs Nest',
       fieldTest: true,
       allowThermostatControl: true,
+      exposeGlobalEcoSwitch: true,
       exposeProtectOccupancy: false,
       exposeProtectTemperature: true,
       debug: true,
@@ -72,6 +74,7 @@ describe('validateConfig', () => {
       name: 'Upstairs Nest',
       fieldTest: true,
       allowThermostatControl: true,
+      exposeGlobalEcoSwitch: true,
       exposeProtectOccupancy: false,
       exposeProtectTemperature: true,
       debug: true,

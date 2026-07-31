@@ -16,6 +16,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ECO_MODE_STATE_TYPE_URL = exports.TARGET_TEMPERATURE_SETTINGS_TYPE_URL = void 0;
 exports.buildThermostatSetpointWrite = buildThermostatSetpointWrite;
+exports.formatThermostatUpdateLog = formatThermostatUpdateLog;
+exports.encodeEcoModeBatchUpdate = encodeEcoModeBatchUpdate;
 exports.encodeTargetTemperatureBatchUpdate = encodeTargetTemperatureBatchUpdate;
 const node_crypto_1 = require("node:crypto");
 const settings_1 = require("../settings");
@@ -71,11 +73,41 @@ function buildThermostatSetpointWrite(resourceId, state, patch) {
         clearEco: state.isEcoActive === true,
     };
 }
+/**
+ * Homebridge info line for a successful HomeKit-driven Nest write.
+ *
+ * Mode-aware so heat updates do not dump the unused cool bound Nest still
+ * carries in the trait.
+ */
+function formatThermostatUpdateLog(write) {
+    const heat = `${write.targetTemperatureHeatC.toFixed(1)}\u00B0C`;
+    const cool = `${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`;
+    switch (write.mode) {
+        case 'off':
+            return 'Updating to Off';
+        case 'heat':
+            return `Updating Heat to ${heat}`;
+        case 'cool':
+            return `Updating Cool to ${cool}`;
+        case 'range':
+            return `Updating Heat/Cool to ${write.targetTemperatureHeatC.toFixed(1)}\u2013${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`;
+        default: {
+            const exhaustive = write.mode;
+            return exhaustive;
+        }
+    }
+}
+/** Encode Eco on/off for TraitBatchApi/BatchUpdateState (no setpoint change). */
+function encodeEcoModeBatchUpdate(resourceId, ecoOn) {
+    const NestMessage = (0, protobuf_1.loadSchemas)().lookupType('nest.rpc.NestMessage');
+    return Buffer.from(NestMessage.encode(NestMessage.fromObject({
+        set: [buildEcoModeSetEntry(resourceId, ecoOn)],
+    })).finish());
+}
 /** Encode a NestMessage suitable for TraitBatchApi/BatchUpdateState. */
 function encodeTargetTemperatureBatchUpdate(write) {
     const root = (0, protobuf_1.loadSchemas)();
     const setpointTrait = root.lookupType('nest.trait.hvac.TargetTemperatureSettingsTrait');
-    const ecoTrait = root.lookupType('nest.trait.hvac.EcoModeStateTrait');
     const NestMessage = root.lookupType('nest.rpc.NestMessage');
     const isOff = write.mode === 'off';
     const hvacMode = (isOff ? write.standbyMode : write.mode).toUpperCase();
@@ -99,22 +131,7 @@ function encodeTargetTemperatureBatchUpdate(write) {
     const set = [];
     // Clear Eco first so a manual Home change is not overridden by Eco hold.
     if (write.clearEco) {
-        const ecoBytes = ecoTrait.encode(ecoTrait.fromObject({
-            ecoEnabled: 'OFF',
-            ecoModeChangeReason: 'ECO_MODE_CHANGE_REASON_MANUAL',
-            updateInfo,
-        })).finish();
-        set.push({
-            object: {
-                id: write.resourceId,
-                key: 'eco_mode_state',
-                uuid: (0, node_crypto_1.randomUUID)(),
-            },
-            property: {
-                type_url: exports.ECO_MODE_STATE_TYPE_URL,
-                value: ecoBytes,
-            },
-        });
+        set.push(buildEcoModeSetEntry(write.resourceId, false));
     }
     set.push({
         object: {
@@ -128,6 +145,31 @@ function encodeTargetTemperatureBatchUpdate(write) {
         },
     });
     return Buffer.from(NestMessage.encode(NestMessage.fromObject({ set })).finish());
+}
+/** One `NestMessage.set` entry that toggles Eco for a device. */
+function buildEcoModeSetEntry(resourceId, ecoOn) {
+    const ecoTrait = (0, protobuf_1.loadSchemas)().lookupType('nest.trait.hvac.EcoModeStateTrait');
+    const nowSec = Math.floor(Date.now() / 1000);
+    const ecoBytes = ecoTrait.encode(ecoTrait.fromObject({
+        ecoEnabled: ecoOn ? 'ON' : 'OFF',
+        ecoModeChangeReason: 'ECO_MODE_CHANGE_REASON_MANUAL',
+        updateInfo: {
+            updateSource: 'DEVICE',
+            updatedBy: { value: resourceId },
+            timestamp: { value: nowSec },
+        },
+    })).finish();
+    return {
+        object: {
+            id: resourceId,
+            key: 'eco_mode_state',
+            uuid: (0, node_crypto_1.randomUUID)(),
+        },
+        property: {
+            type_url: exports.ECO_MODE_STATE_TYPE_URL,
+            value: ecoBytes,
+        },
+    };
 }
 /**
  * Mode Nest retains in `settings.hvacMode` while `active=0`.

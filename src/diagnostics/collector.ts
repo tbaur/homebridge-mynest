@@ -416,6 +416,7 @@ function redactConfig(config: ResolvedConfig): Record<string, unknown> {
     structuredLogs: config.structuredLogs,
     fieldTest: config.fieldTest,
     allowThermostatControl: config.allowThermostatControl,
+    exposeGlobalEcoSwitch: config.exposeGlobalEcoSwitch,
     exposeProtectOccupancy: config.exposeProtectOccupancy,
     exposeProtectTemperature: config.exposeProtectTemperature,
     ignoredDeviceIds: config.ignoredDeviceIds.size,

@@ -105,11 +105,46 @@ export function buildThermostatSetpointWrite(
   }
 }
 
+/**
+ * Homebridge info line for a successful HomeKit-driven Nest write.
+ *
+ * Mode-aware so heat updates do not dump the unused cool bound Nest still
+ * carries in the trait.
+ */
+export function formatThermostatUpdateLog(write: ThermostatSetpointWrite): string {
+  const heat = `${write.targetTemperatureHeatC.toFixed(1)}\u00B0C`
+  const cool = `${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`
+
+  switch (write.mode) {
+    case 'off':
+      return 'Updating to Off'
+    case 'heat':
+      return `Updating Heat to ${heat}`
+    case 'cool':
+      return `Updating Cool to ${cool}`
+    case 'range':
+      return `Updating Heat/Cool to ${write.targetTemperatureHeatC.toFixed(1)}\u2013${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`
+    default: {
+      const exhaustive: never = write.mode
+      return exhaustive
+    }
+  }
+}
+
+/** Encode Eco on/off for TraitBatchApi/BatchUpdateState (no setpoint change). */
+export function encodeEcoModeBatchUpdate(resourceId: string, ecoOn: boolean): Buffer {
+  const NestMessage = loadSchemas().lookupType('nest.rpc.NestMessage')
+  return Buffer.from(
+    NestMessage.encode(NestMessage.fromObject({
+      set: [buildEcoModeSetEntry(resourceId, ecoOn)],
+    })).finish(),
+  )
+}
+
 /** Encode a NestMessage suitable for TraitBatchApi/BatchUpdateState. */
 export function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrite): Buffer {
   const root = loadSchemas()
   const setpointTrait = root.lookupType('nest.trait.hvac.TargetTemperatureSettingsTrait')
-  const ecoTrait = root.lookupType('nest.trait.hvac.EcoModeStateTrait')
   const NestMessage = root.lookupType('nest.rpc.NestMessage')
 
   const isOff = write.mode === 'off'
@@ -137,22 +172,7 @@ export function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrit
 
   // Clear Eco first so a manual Home change is not overridden by Eco hold.
   if (write.clearEco) {
-    const ecoBytes = ecoTrait.encode(ecoTrait.fromObject({
-      ecoEnabled: 'OFF',
-      ecoModeChangeReason: 'ECO_MODE_CHANGE_REASON_MANUAL',
-      updateInfo,
-    })).finish()
-    set.push({
-      object: {
-        id: write.resourceId,
-        key: 'eco_mode_state',
-        uuid: randomUUID(),
-      },
-      property: {
-        type_url: ECO_MODE_STATE_TYPE_URL,
-        value: ecoBytes,
-      },
-    })
+    set.push(buildEcoModeSetEntry(write.resourceId, false))
   }
 
   set.push({
@@ -170,6 +190,36 @@ export function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrit
   return Buffer.from(
     NestMessage.encode(NestMessage.fromObject({ set })).finish(),
   )
+}
+
+/** One `NestMessage.set` entry that toggles Eco for a device. */
+function buildEcoModeSetEntry(resourceId: string, ecoOn: boolean): {
+  object: object
+  property: object
+} {
+  const ecoTrait = loadSchemas().lookupType('nest.trait.hvac.EcoModeStateTrait')
+  const nowSec = Math.floor(Date.now() / 1000)
+  const ecoBytes = ecoTrait.encode(ecoTrait.fromObject({
+    ecoEnabled: ecoOn ? 'ON' : 'OFF',
+    ecoModeChangeReason: 'ECO_MODE_CHANGE_REASON_MANUAL',
+    updateInfo: {
+      updateSource: 'DEVICE',
+      updatedBy: { value: resourceId },
+      timestamp: { value: nowSec },
+    },
+  })).finish()
+
+  return {
+    object: {
+      id: resourceId,
+      key: 'eco_mode_state',
+      uuid: randomUUID(),
+    },
+    property: {
+      type_url: ECO_MODE_STATE_TYPE_URL,
+      value: ecoBytes,
+    },
+  }
 }
 
 /**

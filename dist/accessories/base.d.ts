@@ -23,6 +23,11 @@ export interface AccessoryContext {
     deviceId: string;
     kind: DeviceKind;
     displayName: string;
+    /**
+     * Non-Nest accessories (e.g. house-wide Eco switch). Skipped by Nest inventory
+     * prune so they are not unregistered as "gone" devices.
+     */
+    synthetic?: 'global_eco';
 }
 /** One HomeKit accessory backed by one Nest device. */
 export declare abstract class NestAccessory<TState> {

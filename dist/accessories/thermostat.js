@@ -14,6 +14,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ThermostatAccessory = void 0;
+const thermostat_write_1 = require("../api/thermostat-write");
 const settings_1 = require("../settings");
 const sanitizers_1 = require("../utils/sanitizers");
 const base_1 = require("./base");
@@ -26,6 +27,7 @@ function midpoint(low, high) {
 }
 class ThermostatAccessory extends base_1.NestAccessory {
     #service;
+    #ecoService = null;
     constructor(platform, accessory, device, log) {
         super(platform, accessory, device, log);
         this.bindCharacteristics();
@@ -77,10 +79,12 @@ class ThermostatAccessory extends base_1.NestAccessory {
             : Characteristic.TemperatureDisplayUnits.CELSIUS, Characteristic.TemperatureDisplayUnits.CELSIUS);
         this.#applyCharacteristicProps();
         this.#bindHumidity();
+        this.#bindEcoSwitch();
     }
     onServicesMayChange() {
         this.#applyCharacteristicProps();
         this.#bindHumidity();
+        this.#bindEcoSwitch();
     }
     /**
      * Refresh mode/setpoint props when Nest capabilities arrive after first publish.
@@ -123,13 +127,16 @@ class ThermostatAccessory extends base_1.NestAccessory {
      */
     async #write(patch) {
         try {
-            const sent = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch);
-            if (!sent) {
+            const write = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch);
+            if (!write) {
+                this.log.warn(`${this.identity.name}: ignoring HomeKit change — enable Allow thermostat control in config.`);
                 this.#revertHomeKitValues();
+                return;
             }
+            this.log.info(`${this.identity.name}: ${(0, thermostat_write_1.formatThermostatUpdateLog)(write)}`);
         }
         catch (error) {
-            this.log.warn(`Thermostat write failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
+            this.log.warn(`${this.identity.name}: thermostat update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
             this.#revertHomeKitValues();
         }
     }
@@ -150,6 +157,43 @@ class ThermostatAccessory extends base_1.NestAccessory {
             return;
         }
         this.binder.bind(this.#service, this.platform.Characteristic.CurrentRelativeHumidity, () => this.state.currentHumidity);
+    }
+    /**
+     * Nest Eco as a Switch — HomeKit's thermostat mode list has no Eco slot.
+     *
+     * Same pattern as classic homebridge-nest. Writes require
+     * `allowThermostatControl`; the switch stays writable either way so Home
+     * does not mark the accessory No Response.
+     */
+    #bindEcoSwitch() {
+        const { Characteristic, Service: HapService } = this.platform;
+        if (!this.#ecoService) {
+            const byId = this.accessory.getServiceById?.(HapService.Switch, 'eco');
+            this.#ecoService = byId
+                ?? this.accessory.getService(HapService.Switch)
+                ?? this.accessory.addService(HapService.Switch, 'Eco Mode', 'eco');
+            this.#ecoService.setCharacteristic(Characteristic.Name, 'Eco Mode');
+        }
+        this.binder.bind(this.#ecoService, Characteristic.On, () => this.state.isEcoActive === true, {
+            write: async (value) => {
+                await this.#writeEco(value === true || value === 1);
+            },
+        });
+    }
+    async #writeEco(ecoOn) {
+        try {
+            const sent = await this.platform.applyEcoWrite(this.deviceId, ecoOn);
+            if (!sent) {
+                this.log.warn(`${this.identity.name}: ignoring HomeKit Eco change — enable Allow thermostat control in config.`);
+                this.#revertHomeKitValues();
+                return;
+            }
+            this.log.info(`${this.identity.name}: ${ecoOn ? 'Updating to Eco' : 'Clearing Eco'}`);
+        }
+        catch (error) {
+            this.log.warn(`${this.identity.name}: Eco update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
+            this.#revertHomeKitValues();
+        }
     }
     /**
      * Bind a required characteristic that must never answer `onGet` with null.

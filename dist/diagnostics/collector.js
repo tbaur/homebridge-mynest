@@ -305,6 +305,7 @@ function redactConfig(config) {
         structuredLogs: config.structuredLogs,
         fieldTest: config.fieldTest,
         allowThermostatControl: config.allowThermostatControl,
+        exposeGlobalEcoSwitch: config.exposeGlobalEcoSwitch,
         exposeProtectOccupancy: config.exposeProtectOccupancy,
         exposeProtectTemperature: config.exposeProtectTemperature,
         ignoredDeviceIds: config.ignoredDeviceIds.size,

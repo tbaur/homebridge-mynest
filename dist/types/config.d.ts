@@ -28,6 +28,11 @@ export interface MyNestPlatformConfig {
      * writable for Home presentation either way.
      */
     allowThermostatControl?: unknown;
+    /**
+     * Publish a house-wide Switch that turns Eco on/off for every thermostat.
+     * Requires `allowThermostatControl` for writes. Off by default.
+     */
+    exposeGlobalEcoSwitch?: unknown;
     /** Publish an occupancy sensor for each Nest Protect that reports one. */
     exposeProtectOccupancy?: unknown;
     /** Publish the temperature and humidity a Nest Protect measures. */
@@ -54,6 +59,7 @@ export interface ResolvedConfig {
     accessToken: string;
     fieldTest: boolean;
     allowThermostatControl: boolean;
+    exposeGlobalEcoSwitch: boolean;
     exposeProtectOccupancy: boolean;
     exposeProtectTemperature: boolean;
     /** Matched against both the Observe resource id and the REST serial number. */
