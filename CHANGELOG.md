@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.7](https://github.com/tbaur/homebridge-mynest/compare/v0.1.6...v0.1.7) (2026-07-31)
+
+
+### Features
+
+* add opt-in Nest BatchUpdateState thermostat control ([40f9f00](https://github.com/tbaur/homebridge-mynest/commit/40f9f008e8c7ff161e10b6c64aabd8d0e5f6c9f4))
+
 ## [0.1.6](https://github.com/tbaur/homebridge-mynest/compare/v0.1.5...v0.1.6) (2026-07-31)
 
 
