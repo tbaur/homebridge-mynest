@@ -32,6 +32,7 @@ interface TransportHarness {
   start: jest.Mock
   stop: jest.Mock
   updateThermostatSettings: jest.Mock
+  updateEcoMode: jest.Mock
 }
 
 let harness: TransportHarness
@@ -108,6 +109,7 @@ jest.mock('../../src/api/transport', () => {
         }),
         stop: jest.fn(),
         updateThermostatSettings: jest.fn(async () => undefined),
+        updateEcoMode: jest.fn(async () => undefined),
       }
       Object.defineProperty(this, 'status', {
         get: () => harness.status,
@@ -124,6 +126,10 @@ jest.mock('../../src/api/transport', () => {
 
     updateThermostatSettings(write: unknown): Promise<void> {
       return harness.updateThermostatSettings(write)
+    }
+
+    updateEcoMode(resourceId: string, ecoOn: boolean): Promise<void> {
+      return harness.updateEcoMode(resourceId, ecoOn)
     }
   }
 
@@ -151,7 +157,11 @@ const restBuckets: BucketMap = {
 }
 
 function thermostatTraits(): readonly TraitUpdate[] {
-  return decodeFrame(buildFrame(heatingThermostatTraits(`DEVICE_${THERMOSTAT_ID}`))).traits
+  return thermostatTraitsFor(THERMOSTAT_ID)
+}
+
+function thermostatTraitsFor(id: string): readonly TraitUpdate[] {
+  return decodeFrame(buildFrame(heatingThermostatTraits(`DEVICE_${id}`))).traits
 }
 
 function protectTraitsFor(id: string): readonly TraitUpdate[] {
@@ -208,33 +218,103 @@ describe('MyNestPlatform', () => {
 
   it('does not call Nest when thermostat control is off', async () => {
     const platform = await launch({ allowThermostatControl: false })
-    const sent = await platform.applyThermostatWrite(
+    const write = await platform.applyThermostatWrite(
       THERMOSTAT_ID,
       { mode: 'heat', targetTemperatureC: 21, targetTemperatureLowC: 21, targetTemperatureHighC: 26 },
       { targetTemperatureC: 22 },
     )
 
-    expect(sent).toBe(false)
+    expect(write).toBeNull()
     expect(harness.updateThermostatSettings).not.toHaveBeenCalled()
-    expect(log.warns.join('\n')).toMatch(/Ignoring thermostat write/)
   })
 
   it('sends BatchUpdateState when thermostat control is on', async () => {
     const platform = await launch({ allowThermostatControl: true })
-    const sent = await platform.applyThermostatWrite(
+    const write = await platform.applyThermostatWrite(
       THERMOSTAT_ID,
       { mode: 'heat', targetTemperatureC: 21, targetTemperatureLowC: 21, targetTemperatureHighC: 26 },
       { targetTemperatureC: 22 },
     )
 
+    expect(write).toEqual(expect.objectContaining({
+      resourceId: `DEVICE_${THERMOSTAT_ID}`,
+      mode: 'heat',
+      targetTemperatureHeatC: 22,
+    }))
+    expect(harness.updateThermostatSettings).toHaveBeenCalledWith(write)
+  })
+
+  it('publishes a global Eco switch when enabled', async () => {
+    await launch({ exposeGlobalEcoSwitch: true })
+    harness.options.onTraits(thermostatTraits())
+    setTransportStatus({
+      hasSession: true,
+      observeFrames: 1,
+      restCycles: 1,
+      knownObjects: 1,
+    })
+    flushSync()
+
+    expect(api.registered.some((accessory) => accessory.displayName === 'Nest Eco Mode')).toBe(true)
+    expect(log.infos.join('\n')).toMatch(/Nest Eco Mode/)
+  })
+
+  it('writes Eco to every thermostat from the global switch', async () => {
+    const platform = await launch({
+      allowThermostatControl: true,
+      exposeGlobalEcoSwitch: true,
+    })
+    harness.options.onTraits(thermostatTraits())
+    setTransportStatus({
+      hasSession: true,
+      observeFrames: 1,
+      restCycles: 1,
+      knownObjects: 1,
+    })
+    flushSync()
+
+    const sent = await platform.applyGlobalEcoWrite(true)
     expect(sent).toBe(true)
-    expect(harness.updateThermostatSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        resourceId: `DEVICE_${THERMOSTAT_ID}`,
-        mode: 'heat',
-        targetTemperatureHeatC: 22,
-      }),
-    )
+    expect(harness.updateEcoMode).toHaveBeenCalledWith(`DEVICE_${THERMOSTAT_ID}`, true)
+  })
+
+  it('refuses a global Eco write when there are no thermostats', async () => {
+    const platform = await launch({
+      allowThermostatControl: true,
+      exposeGlobalEcoSwitch: true,
+    })
+    flushSync()
+
+    const sent = await platform.applyGlobalEcoWrite(true)
+    expect(sent).toBe(false)
+    expect(harness.updateEcoMode).not.toHaveBeenCalled()
+    expect(log.warns.join('\n')).toMatch(/no thermostats/)
+  })
+
+  it('refuses a global Eco write when any thermostat fails', async () => {
+    const platform = await launch({
+      allowThermostatControl: true,
+      exposeGlobalEcoSwitch: true,
+    })
+    harness.options.onTraits([
+      ...thermostatTraits(),
+      ...thermostatTraitsFor('THERM0002'),
+    ])
+    setTransportStatus({
+      hasSession: true,
+      observeFrames: 1,
+      restCycles: 1,
+      knownObjects: 1,
+    })
+    flushSync()
+
+    harness.updateEcoMode
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Nest 503'))
+
+    const sent = await platform.applyGlobalEcoWrite(true)
+    expect(sent).toBe(false)
+    expect(log.warns.join('\n')).toMatch(/failed — HomeKit left unchanged/)
   })
 
   it('keeps Protect smoke/CO when the REST alarm feed becomes unavailable', async () => {
@@ -263,6 +343,7 @@ describe('MyNestPlatform', () => {
     expect(api.registered.some((accessory) => accessory.displayName.includes('Hallway')
       || (accessory.context as { deviceId?: string }).deviceId === PROTECT_ID)).toBe(true)
     expect(log.infos.join('\n')).toContain('Connected to Nest')
+    expect(log.infos.join('\n')).toContain('Platform ready')
   })
 
   it('publishes Observe-only thermostats and Protects from the union', async () => {

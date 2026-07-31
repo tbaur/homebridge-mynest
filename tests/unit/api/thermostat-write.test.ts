@@ -11,7 +11,9 @@ import {
   ECO_MODE_STATE_TYPE_URL,
   TARGET_TEMPERATURE_SETTINGS_TYPE_URL,
   buildThermostatSetpointWrite,
+  encodeEcoModeBatchUpdate,
   encodeTargetTemperatureBatchUpdate,
+  formatThermostatUpdateLog,
 } from '../../../src/api/thermostat-write'
 import { loadSchemas } from '../../../src/api/protobuf'
 import { mergeThermostatState } from '../../../src/state/thermostat-state'
@@ -230,5 +232,73 @@ describe('encodeTargetTemperatureBatchUpdate', () => {
     expect(ecoObj.ecoEnabled).toBe('OFF')
 
     expect(decoded.set?.[1]?.object?.key).toBe('target_temperature_settings')
+  })
+})
+
+describe('encodeEcoModeBatchUpdate', () => {
+  it('encodes Eco ON and OFF without a setpoint trait', () => {
+    const root = loadSchemas()
+    const NestMessage = root.lookupType('nest.rpc.NestMessage')
+    const ecoTrait = root.lookupType('nest.trait.hvac.EcoModeStateTrait')
+
+    for (const [ecoOn, expected] of [[true, 'ON'], [false, 'OFF']] as const) {
+      const decoded = NestMessage.toObject(
+        NestMessage.decode(encodeEcoModeBatchUpdate('DEVICE_ABC', ecoOn)),
+        { enums: String, longs: Number, bytes: Buffer },
+      ) as {
+        set?: Array<{
+          object?: { key?: string }
+          property?: { type_url?: string, typeUrl?: string, value?: Buffer }
+        }>
+      }
+
+      expect(decoded.set).toHaveLength(1)
+      expect(decoded.set?.[0]?.object?.key).toBe('eco_mode_state')
+      const ecoObj = ecoTrait.toObject(
+        ecoTrait.decode(decoded.set![0]!.property!.value!),
+        { enums: String },
+      ) as { ecoEnabled?: string }
+      expect(ecoObj.ecoEnabled).toBe(expected)
+    }
+  })
+})
+
+describe('formatThermostatUpdateLog', () => {
+  it('formats mode-aware HomeKit update lines', () => {
+    expect(formatThermostatUpdateLog({
+      resourceId: 'DEVICE_ABC',
+      mode: 'heat',
+      targetTemperatureHeatC: 16,
+      targetTemperatureCoolC: 27.1,
+      standbyMode: 'heat',
+      clearEco: false,
+    })).toBe('Updating Heat to 16.0°C')
+
+    expect(formatThermostatUpdateLog({
+      resourceId: 'DEVICE_ABC',
+      mode: 'cool',
+      targetTemperatureHeatC: 16,
+      targetTemperatureCoolC: 24,
+      standbyMode: 'cool',
+      clearEco: false,
+    })).toBe('Updating Cool to 24.0°C')
+
+    expect(formatThermostatUpdateLog({
+      resourceId: 'DEVICE_ABC',
+      mode: 'range',
+      targetTemperatureHeatC: 16,
+      targetTemperatureCoolC: 27.1,
+      standbyMode: 'range',
+      clearEco: false,
+    })).toBe('Updating Heat/Cool to 16.0–27.1°C')
+
+    expect(formatThermostatUpdateLog({
+      resourceId: 'DEVICE_ABC',
+      mode: 'off',
+      targetTemperatureHeatC: 16,
+      targetTemperatureCoolC: 27.1,
+      standbyMode: 'heat',
+      clearEco: false,
+    })).toBe('Updating to Off')
   })
 })

@@ -68,7 +68,9 @@ An Observe-only Protect gets no smoke/CO HomeKit services until REST reports ala
 
 ## Thermostat writes
 
-HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_control` / `eco`). Writes use the same protobuf gateway as the Nest web app:
+HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_control` / `eco_mode_state`). Writes use the same protobuf gateway as the Nest web app:
+
+### Mode / setpoints
 
 1. Encode `nest.trait.hvac.TargetTemperatureSettingsTrait` (mode via `settings.hvacMode` + `active`; setpoints as `targetTemperatureHeat` / `targetTemperatureCool`).
 2. Wrap in `nest.rpc.NestMessage` `{ set: [{ object: { id: DEVICE_…, key: target_temperature_settings, uuid }, property: Any }] }`.
@@ -76,7 +78,17 @@ HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_co
 
 `off` is `active=0` with a standby `HEAT`/`COOL` left in `hvacMode` — Nest does not store an OFF enum there. REST `/v5/put` cannot reach Observe-only thermostats.
 
-Probe kit: `xtmp/nest-probe` probe 12 dry-runs the encode; `--confirm` POSTs a live bump. Plugin flag: `allowThermostatControl` (default **off** — opt in after a live confirm on your account). Manual HomeKit writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
+Probe kit: `xtmp/nest-probe` probe 12 dry-runs the setpoint encode; `--confirm` POSTs a live bump. Plugin flag: `allowThermostatControl` (default **off** — opt in after a live confirm on your account). Manual HomeKit setpoint/mode writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
+
+### Eco Mode (on / off)
+
+HomeKit has no Eco thermostat mode, so the plugin exposes Eco as a Switch (per thermostat, plus optional house-wide `exposeGlobalEcoSwitch`). Writes are a separate BatchUpdateState body:
+
+1. Encode `nest.trait.hvac.EcoModeStateTrait` with `ecoEnabled` `ON` or `OFF` and `ecoModeChangeReason` `ECO_MODE_CHANGE_REASON_MANUAL`.
+2. Wrap in `nest.rpc.NestMessage` `{ set: [{ object: { id: DEVICE_…, key: eco_mode_state, uuid }, property: Any }] }` (`encodeEcoModeBatchUpdate`).
+3. Same `TraitBatchApi/BatchUpdateState` endpoint and auth as setpoint writes.
+
+There is no nest-probe confirm path for Eco-only writes yet; enable `allowThermostatControl` only after you are comfortable with live Nest writes on your account.
 
 ## Homebridge 2 update path
 

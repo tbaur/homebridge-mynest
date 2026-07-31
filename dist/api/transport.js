@@ -218,11 +218,17 @@ class NestTransport {
      * `allowThermostatControl`.
      */
     async updateThermostatSettings(write) {
+        await this.#postBatchUpdate((0, thermostat_write_1.encodeTargetTemperatureBatchUpdate)(write), 'cannot write thermostat settings');
+    }
+    /** Push Eco on/off through BatchUpdateState for one thermostat. */
+    async updateEcoMode(resourceId, ecoOn) {
+        await this.#postBatchUpdate((0, thermostat_write_1.encodeEcoModeBatchUpdate)(resourceId, ecoOn), 'cannot write thermostat Eco mode');
+    }
+    async #postBatchUpdate(body, stoppedMessage) {
         if (this.#isStopped) {
-            throw new errors_1.ConfigurationError('Nest transport is stopped; cannot write thermostat settings');
+            throw new errors_1.ConfigurationError(`Nest transport is stopped; ${stoppedMessage}`);
         }
         const session = await this.#ensureSession();
-        const body = (0, thermostat_write_1.encodeTargetTemperatureBatchUpdate)(write);
         const started = Date.now();
         try {
             await (0, batch_update_1.postBatchUpdateState)({
@@ -233,13 +239,11 @@ class NestTransport {
                 fetchImpl: this.#options.fetchImpl,
             });
             this.#options.metrics?.apiRequest?.(Date.now() - started, true, { networked: true });
-            this.#options.log.info(`Thermostat write ${write.resourceId}: mode=${write.mode} `
-                + `heat=${write.targetTemperatureHeatC.toFixed(1)} `
-                + `cool=${write.targetTemperatureCoolC.toFixed(1)}`);
+            // Success is logged by the accessory with the HomeKit display name.
         }
         catch (error) {
             this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true });
-            // Accessory `#write` logs once and reverts HomeKit — do not warn here too.
+            // Accessory handlers log once and revert HomeKit — do not warn here too.
             throw error;
         }
     }

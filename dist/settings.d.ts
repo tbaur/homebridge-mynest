@@ -20,6 +20,12 @@ export declare const PLUGIN_NAME = "homebridge-mynest";
 export declare const PLATFORM_NAME = "MyNest";
 /** Prefix used when generating stable HAP accessory UUIDs. */
 export declare const UUID_PREFIX = "mynest-";
+/**
+ * Synthetic device id for the optional house-wide Eco Mode switch.
+ *
+ * Not a Nest resource — used only for Homebridge cache / HomeKit UUID stability.
+ */
+export declare const GLOBAL_ECO_DEVICE_ID = "GLOBAL_ECO";
 /** Reported as the HomeKit accessory manufacturer. */
 export declare const MANUFACTURER = "Nest";
 /**

@@ -17,6 +17,7 @@ const baseConfig = (): ResolvedConfig => ({
   accessToken: 'b'.repeat(120),
   fieldTest: false,
   allowThermostatControl: false,
+  exposeGlobalEcoSwitch: false,
   exposeProtectOccupancy: true,
   exposeProtectTemperature: false,
   ignoredDeviceIds: new Set(['ABC']),

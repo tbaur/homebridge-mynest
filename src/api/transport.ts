@@ -42,6 +42,7 @@ import { runObserveSession, type Http2Connect } from './observe'
 import type { FetchLike } from './http'
 import { postBatchUpdateState } from './batch-update'
 import {
+  encodeEcoModeBatchUpdate,
   encodeTargetTemperatureBatchUpdate,
   type ThermostatSetpointWrite,
 } from './thermostat-write'
@@ -348,12 +349,26 @@ export class NestTransport {
    * `allowThermostatControl`.
    */
   async updateThermostatSettings(write: ThermostatSetpointWrite): Promise<void> {
+    await this.#postBatchUpdate(
+      encodeTargetTemperatureBatchUpdate(write),
+      'cannot write thermostat settings',
+    )
+  }
+
+  /** Push Eco on/off through BatchUpdateState for one thermostat. */
+  async updateEcoMode(resourceId: string, ecoOn: boolean): Promise<void> {
+    await this.#postBatchUpdate(
+      encodeEcoModeBatchUpdate(resourceId, ecoOn),
+      'cannot write thermostat Eco mode',
+    )
+  }
+
+  async #postBatchUpdate(body: Buffer, stoppedMessage: string): Promise<void> {
     if (this.#isStopped) {
-      throw new ConfigurationError('Nest transport is stopped; cannot write thermostat settings')
+      throw new ConfigurationError(`Nest transport is stopped; ${stoppedMessage}`)
     }
 
     const session = await this.#ensureSession()
-    const body = encodeTargetTemperatureBatchUpdate(write)
     const started = Date.now()
 
     try {
@@ -365,14 +380,10 @@ export class NestTransport {
         fetchImpl: this.#options.fetchImpl,
       })
       this.#options.metrics?.apiRequest?.(Date.now() - started, true, { networked: true })
-      this.#options.log.info(
-        `Thermostat write ${write.resourceId}: mode=${write.mode} `
-        + `heat=${write.targetTemperatureHeatC.toFixed(1)} `
-        + `cool=${write.targetTemperatureCoolC.toFixed(1)}`,
-      )
+      // Success is logged by the accessory with the HomeKit display name.
     } catch (error) {
       this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true })
-      // Accessory `#write` logs once and reverts HomeKit — do not warn here too.
+      // Accessory handlers log once and revert HomeKit — do not warn here too.
       throw error
     }
   }

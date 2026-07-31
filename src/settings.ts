@@ -24,6 +24,13 @@ export const PLATFORM_NAME = 'MyNest'
 /** Prefix used when generating stable HAP accessory UUIDs. */
 export const UUID_PREFIX = 'mynest-'
 
+/**
+ * Synthetic device id for the optional house-wide Eco Mode switch.
+ *
+ * Not a Nest resource — used only for Homebridge cache / HomeKit UUID stability.
+ */
+export const GLOBAL_ECO_DEVICE_ID = 'GLOBAL_ECO'
+
 /** Reported as the HomeKit accessory manufacturer. */
 export const MANUFACTURER = 'Nest'
 

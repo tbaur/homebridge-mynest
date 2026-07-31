@@ -14,6 +14,7 @@
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 import type { ResolvedConfig } from './types/config';
 import { type HvacMode, type ThermostatState } from './types/device';
+import { type ThermostatSetpointWrite } from './api/thermostat-write';
 export declare class MyNestPlatform implements DynamicPlatformPlugin {
     #private;
     readonly Service: typeof Service;
@@ -26,16 +27,31 @@ export declare class MyNestPlatform implements DynamicPlatformPlugin {
     /**
      * Apply a HomeKit-originated thermostat change via Nest BatchUpdateState.
      *
-     * No-ops (with a warning) when control is disabled so characteristics can
-     * stay writable for HomeKit presentation without guessing at HVAC writes.
+     * No-ops when control is disabled so characteristics can stay writable for
+     * HomeKit presentation without guessing at HVAC writes. The accessory logs
+     * the user-facing success / ignore line.
      *
-     * @returns `true` when a Nest write was sent; `false` when control is off.
+     * @returns The write that was sent, or `null` when control is off.
      */
     applyThermostatWrite(deviceId: string, state: ThermostatState, patch: Partial<{
         mode: HvacMode;
         targetTemperatureC: number;
         targetTemperatureLowC: number;
         targetTemperatureHighC: number;
-    }>): Promise<boolean>;
+    }>): Promise<ThermostatSetpointWrite | null>;
+    /**
+     * Set Eco on one thermostat via Nest BatchUpdateState.
+     *
+     * @returns `true` when a Nest write was sent; `false` when control is off.
+     */
+    applyEcoWrite(deviceId: string, ecoOn: boolean): Promise<boolean>;
+    /**
+     * Set Eco on every published Nest thermostat.
+     *
+     * @returns `true` only when every targeted thermostat accepted the write.
+     *   `false` when control is off, there are no thermostats, or any write failed
+     *   (partial failures are logged; HomeKit must not flip the global switch).
+     */
+    applyGlobalEcoWrite(ecoOn: boolean): Promise<boolean>;
 }
 //# sourceMappingURL=platform.d.ts.map

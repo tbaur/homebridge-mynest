@@ -146,7 +146,7 @@ describe('NestTransport', () => {
 
     expect(batchCalls).toHaveLength(1)
     expect(batchCalls[0]).toContain('/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState')
-    expect(log.infos.join('\n')).toMatch(/Thermostat write DEVICE_ABC/)
+    expect(log.infos.join('\n')).not.toMatch(/Updating Heat/)
 
     transport.stop()
   })
