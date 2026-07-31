@@ -94,7 +94,14 @@
         "allowThermostatControl",
         "exposeProtectOccupancy",
         "exposeProtectTemperature",
-        "ignoredDeviceIds"
+        {
+          "key": "ignoredDeviceIds",
+          "type": "array",
+          "buttonText": "Add Device ID to Ignore",
+          "items": {
+            "type": "string"
+          }
+        }
       ]
     },
     {
