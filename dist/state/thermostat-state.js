@@ -192,6 +192,7 @@ function mergeThermostatState(observe, rest) {
         currentTemperatureC: observe?.currentTemperatureC ?? rest?.currentTemperatureC,
         currentHumidity: observe?.currentHumidity ?? rest?.currentHumidity,
         mode: observe?.mode ?? rest?.mode,
+        lastHvacMode: observe?.lastHvacMode ?? rest?.lastHvacMode,
         activity: observe?.activity ?? rest?.activity,
         targetTemperatureC: observe?.targetTemperatureC ?? rest?.targetTemperatureC,
         targetTemperatureLowC: observe?.targetTemperatureLowC ?? rest?.targetTemperatureLowC,

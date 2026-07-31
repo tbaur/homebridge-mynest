@@ -271,4 +271,13 @@ describe('mergeThermostatState', () => {
   it('does not let a false capability be replaced by an absent one', () => {
     expect(mergeThermostatState({ canCool: false }, { canCool: true }).canCool).toBe(false)
   })
+
+  it('preserves lastHvacMode so off writes keep Nest standby', () => {
+    // Without this, dual systems already off with COOL standby encode HEAT.
+    const merged = mergeThermostatState(
+      { mode: 'off', lastHvacMode: 'cool', canHeat: true, canCool: true },
+      undefined,
+    )
+    expect(merged.lastHvacMode).toBe('cool')
+  })
 })

@@ -14,6 +14,7 @@ import {
   encodeTargetTemperatureBatchUpdate,
 } from '../../../src/api/thermostat-write'
 import { loadSchemas } from '../../../src/api/protobuf'
+import { mergeThermostatState } from '../../../src/state/thermostat-state'
 import type { ThermostatState } from '../../../src/types/device'
 
 const baseState: ThermostatState = {
@@ -72,6 +73,23 @@ describe('buildThermostatSetpointWrite', () => {
       },
       { targetTemperatureC: 23 },
     )
+    expect(write.standbyMode).toBe('cool')
+  })
+
+  it('keeps COOL standby after merge when already off', () => {
+    const merged = mergeThermostatState(
+      {
+        ...baseState,
+        mode: 'off',
+        lastHvacMode: 'cool',
+        canHeat: true,
+        canCool: true,
+      },
+      undefined,
+    )
+    const write = buildThermostatSetpointWrite('DEVICE_ABC', merged, {
+      targetTemperatureC: 23,
+    })
     expect(write.standbyMode).toBe('cool')
   })
 
