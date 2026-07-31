@@ -418,15 +418,25 @@ class MyNestPlatform {
             deviceId: device.identity.id,
             kind: device.identity.kind,
             displayName: device.identity.name,
+            tileEpoch: settings_1.HAP_TILE_EPOCH,
         };
-        const cached = this.#cachedAccessories.get(uuid);
+        let cached = this.#cachedAccessories.get(uuid);
+        // Apple Home often keeps a stuck "No Response" / no-tile presentation after
+        // category or required-characteristic fixes. Updating in place is not enough
+        // — unregister and register so Home treats it as a new tile (room must be
+        // reassigned once).
+        if (cached && this.#needsHomeTileRepublish(cached, category)) {
+            this.#log.info(`Republishing ${device.identity.kind} "${device.identity.name}" so Apple Home can show a room tile`);
+            this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [cached]);
+            this.#cachedAccessories.delete(uuid);
+            this.#handlers.delete(device.identity.id);
+            cached = undefined;
+        }
         let accessory;
         if (cached) {
             accessory = cached;
             accessory.context = context;
             accessory.displayName = device.identity.name;
-            // Homebridge 2.x may omit uncategorized accessories from room tiles even
-            // though they still appear under Settings → Bridge → Accessories.
             accessory.category = category;
             this.api.updatePlatformAccessories([accessory]);
         }
@@ -447,6 +457,23 @@ class MyNestPlatform {
         }
         const log = (0, logger_1.createScopedLogger)(this.#rawLog, device.identity.name, this.#config?.debug === true);
         this.#handlers.set(device.identity.id, this.#createHandler(accessory, device, log));
+    }
+    /**
+     * Whether a cached accessory must be torn down and re-added for Home tiles.
+     *
+     * Thermostats published before HAP category / required onGet fixes stick as
+     * Settings-only "No Response" entries. Bumping {@link HAP_TILE_EPOCH} forces
+     * one republish per upgrade.
+     */
+    #needsHomeTileRepublish(accessory, category) {
+        const ctx = accessory.context;
+        if (ctx.kind !== 'thermostat') {
+            return false;
+        }
+        if (ctx.tileEpoch !== settings_1.HAP_TILE_EPOCH) {
+            return true;
+        }
+        return accessory.category !== category;
     }
     /** HAP accessory category so Home shows room tiles (required on Homebridge 2). */
     #categoryFor(kind) {

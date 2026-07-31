@@ -139,6 +139,12 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
   #applyCharacteristicProps(): void {
     const { Characteristic } = this.platform
 
+    this.#service.getCharacteristic(Characteristic.CurrentTemperature).setProps({
+      minValue: 0,
+      maxValue: 100,
+      minStep: SETPOINT_STEP_C,
+    })
+
     this.#service.getCharacteristic(Characteristic.TargetHeatingCoolingState).setProps({
       validValues: this.#supportedTargetStates(),
     })
