@@ -29,7 +29,12 @@ import {
   resolveEndpoints,
 } from './settings'
 import type { MyNestPlatformConfig, ResolvedConfig } from './types/config'
-import { isDeviceOfKind, type DeviceInventory, type NestDevice } from './types/device'
+import {
+  isDeviceOfKind,
+  type DeviceInventory,
+  type DeviceKind,
+  type NestDevice,
+} from './types/device'
 import type { BucketMap } from './types/nest'
 import { ConfigurationError } from './errors'
 import { NestTransport } from './api/transport'
@@ -501,6 +506,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   /** Create or adopt the HomeKit accessory for a device seen for the first time. */
   #publish(device: NestDevice): void {
     const uuid = this.api.hap.uuid.generate(`${UUID_PREFIX}${device.identity.id}`)
+    const category = this.#categoryFor(device.identity.kind)
     const context: AccessoryContext = {
       deviceId: device.identity.id,
       kind: device.identity.kind,
@@ -514,9 +520,15 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       accessory = cached
       accessory.context = context
       accessory.displayName = device.identity.name
+      // Homebridge 2.x may omit uncategorized accessories from room tiles even
+      // though they still appear under Settings → Bridge → Accessories.
+      accessory.category = category
       this.api.updatePlatformAccessories([accessory])
     } else {
-      accessory = new this.api.platformAccessory(device.identity.name, uuid)
+      // Pass category to Homebridge's PlatformAccessory; also assign it because
+      // some doubles (and older HAP paths) ignore the constructor argument.
+      accessory = new this.api.platformAccessory(device.identity.name, uuid, category)
+      accessory.category = category
       accessory.context = context
       this.#cachedAccessories.set(uuid, accessory)
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory])
@@ -531,6 +543,22 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     const log = createScopedLogger(this.#rawLog, device.identity.name, this.#config?.debug === true)
     this.#handlers.set(device.identity.id, this.#createHandler(accessory, device, log))
+  }
+
+  /** HAP accessory category so Home shows room tiles (required on Homebridge 2). */
+  #categoryFor(kind: DeviceKind): number {
+    const { Categories } = this.api.hap
+    switch (kind) {
+      case 'thermostat':
+        return Categories.THERMOSTAT
+      case 'protect':
+      case 'temperature_sensor':
+        return Categories.SENSOR
+      default: {
+        const exhaustive: never = kind
+        return exhaustive
+      }
+    }
   }
 
   #createHandler(

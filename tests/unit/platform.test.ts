@@ -8,6 +8,10 @@
  */
 
 import { Accessory, uuid } from '@homebridge/hap-nodejs'
+
+const Categories = (jest.requireActual('@homebridge/hap-nodejs') as {
+  Categories: Record<string, number>
+}).Categories
 import type { PlatformAccessory } from 'homebridge'
 import { CircuitState } from '../../src/api/circuit-breaker'
 import type { NestTransportOptions, TransportStatus } from '../../src/api/transport'
@@ -250,6 +254,53 @@ describe('MyNestPlatform', () => {
       PROTECT_ID,
       OBSERVE_ONLY_PROTECT_ID,
     ]))
+
+    // Homebridge 2 room tiles need a real HAP category at register time.
+    const byId = new Map(
+      api.registered.map((accessory) => [
+        (accessory.context as { deviceId?: string }).deviceId,
+        accessory.category,
+      ]),
+    )
+    expect(byId.get(THERMOSTAT_ID)).toBe(Categories.THERMOSTAT)
+    expect(byId.get(PROTECT_ID)).toBe(Categories.SENSOR)
+    expect(byId.get(OBSERVE_ONLY_PROTECT_ID)).toBe(Categories.SENSOR)
+  })
+
+  it('repairs a cached accessory missing its HomeKit category', async () => {
+    const cachedUuid = uuid.generate(`${UUID_PREFIX}${THERMOSTAT_ID}`)
+    const cached = new Accessory('Hallway Thermostat', cachedUuid) as unknown as PlatformAccessory
+    cached.context = {
+      deviceId: THERMOSTAT_ID,
+      kind: 'thermostat',
+      displayName: 'Hallway Thermostat',
+    }
+    cached.category = Categories.OTHER
+
+    const platform = new MyNestPlatform(
+      log,
+      {
+        platform: PLATFORM_NAME,
+        accessToken: 'b'.repeat(120),
+      },
+      api.asApi(),
+    )
+    platform.configureAccessory(cached)
+    api.emit('didFinishLaunching')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    harness.options.onTraits(thermostatTraits())
+    setTransportStatus({
+      hasSession: true,
+      observeFrames: 1,
+      restCycles: 1,
+      knownObjects: 1,
+    })
+    flushSync()
+
+    expect(cached.category).toBe(Categories.THERMOSTAT)
+    expect(api.updated).toContain(cached)
   })
 
   it('adopts a cached accessory instead of registering a duplicate', async () => {
