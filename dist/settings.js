@@ -8,11 +8,11 @@
  * @fileoverview Plugin-wide constants and Nest endpoints.
  *
  * Nest publishes no consumer API for these paths and no documentation. Every
- * value here was confirmed empirically against a live account with a
- * read-only probe kit, and each one that looks arbitrary carries a comment
- * explaining why it is what it is. Treat this file as the record of what the
- * service actually does, because nothing external will tell you when it
- * changes.
+ * value here was confirmed empirically against a live account with the
+ * nest-probe kit (reads by default; thermostat BatchUpdateState via probe 12
+ * `--confirm`), and each one that looks arbitrary carries a comment explaining
+ * why it is what it is. Treat this file as the record of what the service
+ * actually does, because nothing external will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;

@@ -151,7 +151,7 @@ describe('NestTransport', () => {
     transport.stop()
   })
 
-  it('logs and rethrows when BatchUpdateState fails', async () => {
+  it('rethrows when BatchUpdateState fails (accessory logs once)', async () => {
     const base = createNestFetch()
     const fetch = (async (url: unknown, init?: RequestInit) => {
       const target = String(url)
@@ -173,7 +173,7 @@ describe('NestTransport', () => {
       clearEco: false,
     })).rejects.toThrow(/503/)
 
-    expect(log.warns.join('\n')).toMatch(/BatchUpdateState failed/)
+    expect(log.warns.join('\n')).not.toMatch(/BatchUpdateState failed/)
     transport.stop()
   })
 

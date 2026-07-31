@@ -372,9 +372,7 @@ export class NestTransport {
       )
     } catch (error) {
       this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true })
-      this.#options.log.warn(
-        `Thermostat BatchUpdateState failed for ${write.resourceId}: ${sanitizeError(error)}`,
-      )
+      // Accessory `#write` logs once and reverts HomeKit — do not warn here too.
       throw error
     }
   }

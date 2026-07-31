@@ -86,7 +86,25 @@ describe('readThermostatFromObserve', () => {
       },
     ])
 
-    expect(readThermostatFromObserve(off, RESOURCE_ID).mode).toBe('off')
+    const state = readThermostatFromObserve(off, RESOURCE_ID)
+    expect(state.mode).toBe('off')
+    expect(state.lastHvacMode).toBe('heat')
+  })
+
+  it('retains COOL as lastHvacMode while the thermostat is off', () => {
+    const off = observeWith([
+      ...baseTraits().filter((trait) => trait.key !== 'target_temperature_settings'),
+      {
+        resourceId: RESOURCE_ID,
+        key: 'target_temperature_settings',
+        typeName: 'nest.trait.hvac.TargetTemperatureSettingsTrait',
+        value: { settings: { hvacMode: 'COOL', targetTemperatureCool: { value: 24 } } },
+      },
+    ])
+
+    const state = readThermostatFromObserve(off, RESOURCE_ID)
+    expect(state.mode).toBe('off')
+    expect(state.lastHvacMode).toBe('cool')
   })
 
   it('reports idle when no relay is calling', () => {

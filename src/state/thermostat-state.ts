@@ -72,6 +72,26 @@ function readOwnTemperature(state: ObserveState, resourceId: string): number | u
  * thermostat switched off still reports `HEAT`. Reading `hvacMode` alone
  * therefore shows every off thermostat as heating.
  */
+/** Nest's retained `settings.hvacMode` (never OFF — that is `active=0`). */
+function readLastHvacMode(
+  settings: Record<string, unknown> | undefined,
+): Exclude<HvacMode, 'off'> | undefined {
+  if (!settings) {
+    return undefined
+  }
+
+  switch (readEnum(settings, 'settings', 'hvacMode')) {
+    case 'HEAT':
+      return 'heat'
+    case 'COOL':
+      return 'cool'
+    case 'RANGE':
+      return 'range'
+    default:
+      return undefined
+  }
+}
+
 function readMode(settings: Record<string, unknown> | undefined): HvacMode | undefined {
   if (!settings) {
     return undefined
@@ -86,16 +106,7 @@ function readMode(settings: Record<string, unknown> | undefined): HvacMode | und
     return 'off'
   }
 
-  switch (readEnum(settings, 'settings', 'hvacMode')) {
-    case 'HEAT':
-      return 'heat'
-    case 'COOL':
-      return 'cool'
-    case 'RANGE':
-      return 'range'
-    default:
-      return undefined
-  }
+  return readLastHvacMode(settings)
 }
 
 /** What the equipment is doing, from the relay states Nest reports. */
@@ -129,10 +140,13 @@ export function readThermostatFromObserve(
   const heatSetpoint = readIndirectFloat(setpoints, 'settings', 'targetTemperatureHeat')
   const coolSetpoint = readIndirectFloat(setpoints, 'settings', 'targetTemperatureCool')
 
+  const lastHvacMode = readLastHvacMode(setpoints)
+
   return {
     currentTemperatureC: options.comfortTemperatureC ?? readOwnTemperature(state, resourceId),
     currentHumidity: readHumidity(state.trait(resourceId, 'humidity')),
     mode,
+    lastHvacMode,
     activity: readActivity(state.trait(resourceId, 'hvac_control')),
     // In `range` mode Nest carries both bounds and no single setpoint, so the
     // single value is only meaningful for the mode that is actually in use.

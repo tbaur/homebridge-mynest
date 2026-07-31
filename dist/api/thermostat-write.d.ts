@@ -27,9 +27,9 @@ export interface ThermostatSetpointWrite {
     readonly targetTemperatureCoolC: number;
     /**
      * Mode Nest keeps in `settings.hvacMode` while the unit is off.
-     * Nest never stores OFF there — only `active=0`.
+     * Nest never stores OFF there — only `active=0`. May be `range`.
      */
-    readonly standbyMode: 'heat' | 'cool';
+    readonly standbyMode: Exclude<HvacMode, 'off'>;
     /**
      * When true, also clear Nest Eco (`eco_mode_state` → OFF) in the same
      * BatchUpdateState. Manual HomeKit changes should leave Eco like the Nest app.

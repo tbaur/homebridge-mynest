@@ -32,7 +32,7 @@ exports.ECO_MODE_STATE_TYPE_URL = 'type.nestlabs.com/nest.trait.hvac.EcoModeStat
  */
 function buildThermostatSetpointWrite(resourceId, state, patch) {
     const mode = patch.mode ?? state.mode ?? 'heat';
-    const standbyMode = state.canCool && !state.canHeat ? 'cool' : 'heat';
+    const standbyMode = resolveStandbyMode(state, patch.mode);
     let heat = state.targetTemperatureLowC
         ?? state.targetTemperatureC
         ?? 20;
@@ -78,8 +78,7 @@ function encodeTargetTemperatureBatchUpdate(write) {
     const ecoTrait = root.lookupType('nest.trait.hvac.EcoModeStateTrait');
     const NestMessage = root.lookupType('nest.rpc.NestMessage');
     const isOff = write.mode === 'off';
-    const hvacMode = (isOff ? write.standbyMode : write.mode === 'range' ? 'range' : write.mode)
-        .toUpperCase();
+    const hvacMode = (isOff ? write.standbyMode : write.mode).toUpperCase();
     const nowSec = Math.floor(Date.now() / 1000);
     const updateInfo = {
         updateSource: 'DEVICE',
@@ -129,6 +128,24 @@ function encodeTargetTemperatureBatchUpdate(write) {
         },
     });
     return Buffer.from(NestMessage.encode(NestMessage.fromObject({ set })).finish());
+}
+/**
+ * Mode Nest retains in `settings.hvacMode` while `active=0`.
+ *
+ * Prefer the mode we are leaving, then Nest's last reported hvacMode, then
+ * equipment capability. Never invent HEAT on a cool-standby dual system.
+ */
+function resolveStandbyMode(state, patchMode) {
+    if (patchMode === 'off' && state.mode && state.mode !== 'off') {
+        return state.mode;
+    }
+    if (state.lastHvacMode) {
+        return state.lastHvacMode;
+    }
+    if (state.mode && state.mode !== 'off') {
+        return state.mode;
+    }
+    return state.canCool && !state.canHeat ? 'cool' : 'heat';
 }
 function clampSetpoint(celsius) {
     return Math.min(settings_1.MAX_SETPOINT_C, Math.max(settings_1.MIN_SETPOINT_C, celsius));

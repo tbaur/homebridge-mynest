@@ -7,11 +7,11 @@
  * @fileoverview Plugin-wide constants and Nest endpoints.
  *
  * Nest publishes no consumer API for these paths and no documentation. Every
- * value here was confirmed empirically against a live account with a
- * read-only probe kit, and each one that looks arbitrary carries a comment
- * explaining why it is what it is. Treat this file as the record of what the
- * service actually does, because nothing external will tell you when it
- * changes.
+ * value here was confirmed empirically against a live account with the
+ * nest-probe kit (reads by default; thermostat BatchUpdateState via probe 12
+ * `--confirm`), and each one that looks arbitrary carries a comment explaining
+ * why it is what it is. Treat this file as the record of what the service
+ * actually does, because nothing external will tell you when it changes.
  */
 /** Name used to register the plugin with Homebridge (must match package.json name). */
 export declare const PLUGIN_NAME = "homebridge-mynest";

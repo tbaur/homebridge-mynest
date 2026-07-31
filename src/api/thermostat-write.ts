@@ -36,9 +36,9 @@ export interface ThermostatSetpointWrite {
   readonly targetTemperatureCoolC: number
   /**
    * Mode Nest keeps in `settings.hvacMode` while the unit is off.
-   * Nest never stores OFF there — only `active=0`.
+   * Nest never stores OFF there — only `active=0`. May be `range`.
    */
-  readonly standbyMode: 'heat' | 'cool'
+  readonly standbyMode: Exclude<HvacMode, 'off'>
   /**
    * When true, also clear Nest Eco (`eco_mode_state` → OFF) in the same
    * BatchUpdateState. Manual HomeKit changes should leave Eco like the Nest app.
@@ -63,7 +63,7 @@ export function buildThermostatSetpointWrite(
   }>,
 ): ThermostatSetpointWrite {
   const mode = patch.mode ?? state.mode ?? 'heat'
-  const standbyMode: 'heat' | 'cool' = state.canCool && !state.canHeat ? 'cool' : 'heat'
+  const standbyMode = resolveStandbyMode(state, patch.mode)
 
   let heat = state.targetTemperatureLowC
     ?? state.targetTemperatureC
@@ -113,8 +113,7 @@ export function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrit
   const NestMessage = root.lookupType('nest.rpc.NestMessage')
 
   const isOff = write.mode === 'off'
-  const hvacMode = (isOff ? write.standbyMode : write.mode === 'range' ? 'range' : write.mode)
-    .toUpperCase()
+  const hvacMode = (isOff ? write.standbyMode : write.mode).toUpperCase()
   const nowSec = Math.floor(Date.now() / 1000)
   const updateInfo = {
     updateSource: 'DEVICE',
@@ -171,6 +170,28 @@ export function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrit
   return Buffer.from(
     NestMessage.encode(NestMessage.fromObject({ set })).finish(),
   )
+}
+
+/**
+ * Mode Nest retains in `settings.hvacMode` while `active=0`.
+ *
+ * Prefer the mode we are leaving, then Nest's last reported hvacMode, then
+ * equipment capability. Never invent HEAT on a cool-standby dual system.
+ */
+function resolveStandbyMode(
+  state: ThermostatState,
+  patchMode: HvacMode | undefined,
+): Exclude<HvacMode, 'off'> {
+  if (patchMode === 'off' && state.mode && state.mode !== 'off') {
+    return state.mode
+  }
+  if (state.lastHvacMode) {
+    return state.lastHvacMode
+  }
+  if (state.mode && state.mode !== 'off') {
+    return state.mode
+  }
+  return state.canCool && !state.canHeat ? 'cool' : 'heat'
 }
 
 function clampSetpoint(celsius: number): number {

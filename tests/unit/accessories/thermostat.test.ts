@@ -268,6 +268,16 @@ describe('ThermostatAccessory', () => {
     expect(read(Characteristic.TargetTemperature)).toBe(21)
   })
 
+  it('reverts HomeKit when thermostat control is disabled', async () => {
+    const { service, platform, read } = build(heating)
+    jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(false)
+
+    await service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(read(Characteristic.TargetTemperature)).toBe(21)
+  })
+
   it('records the device details HomeKit shows', () => {
     const { accessory } = build(heating)
     const information = accessory.getService(Service.AccessoryInformation as never)!

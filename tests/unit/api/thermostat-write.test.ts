@@ -43,6 +43,38 @@ describe('buildThermostatSetpointWrite', () => {
     expect(write.standbyMode).toBe('heat')
   })
 
+  it('keeps COOL standby when turning off a cool-mode dual system', () => {
+    const write = buildThermostatSetpointWrite(
+      'DEVICE_ABC',
+      {
+        ...baseState,
+        mode: 'cool',
+        canHeat: true,
+        canCool: true,
+        lastHvacMode: 'cool',
+        targetTemperatureC: 24,
+      },
+      { mode: 'off' },
+    )
+    expect(write.mode).toBe('off')
+    expect(write.standbyMode).toBe('cool')
+  })
+
+  it('keeps Nest lastHvacMode when already off', () => {
+    const write = buildThermostatSetpointWrite(
+      'DEVICE_ABC',
+      {
+        ...baseState,
+        mode: 'off',
+        lastHvacMode: 'cool',
+        canHeat: true,
+        canCool: true,
+      },
+      { targetTemperatureC: 23 },
+    )
+    expect(write.standbyMode).toBe('cool')
+  })
+
   it('clears Eco when Nest reports eco active', () => {
     const write = buildThermostatSetpointWrite(
       'DEVICE_ABC',
@@ -116,6 +148,35 @@ describe('encodeTargetTemperatureBatchUpdate', () => {
 
     expect(traitObj.active?.value).toBe(0)
     expect(traitObj.settings?.hvacMode).toBe('HEAT')
+  })
+
+  it('encodes cool→off as active 0 with hvacMode COOL', () => {
+    const write = buildThermostatSetpointWrite(
+      'DEVICE_ABC',
+      {
+        ...baseState,
+        mode: 'cool',
+        canHeat: true,
+        canCool: true,
+        lastHvacMode: 'cool',
+      },
+      { mode: 'off' },
+    )
+    const bytes = encodeTargetTemperatureBatchUpdate(write)
+    const root = loadSchemas()
+    const NestMessage = root.lookupType('nest.rpc.NestMessage')
+    const decoded = NestMessage.toObject(NestMessage.decode(bytes), {
+      bytes: Buffer,
+      enums: String,
+    }) as { set?: Array<{ property?: { value?: Buffer } }> }
+    const trait = root.lookupType('nest.trait.hvac.TargetTemperatureSettingsTrait')
+    const traitObj = trait.toObject(trait.decode(decoded.set![0].property!.value!), {
+      enums: String,
+      longs: Number,
+    }) as { settings?: { hvacMode?: string }, active?: { value?: number } }
+
+    expect(traitObj.active?.value).toBe(0)
+    expect(traitObj.settings?.hvacMode).toBe('COOL')
   })
 
   it('prepends eco_mode_state OFF when clearEco is set', () => {

@@ -31,6 +31,7 @@ interface TransportHarness {
   status: TransportStatus
   start: jest.Mock
   stop: jest.Mock
+  updateThermostatSettings: jest.Mock
 }
 
 let harness: TransportHarness
@@ -106,6 +107,7 @@ jest.mock('../../src/api/transport', () => {
           options.onBuckets(restBuckets)
         }),
         stop: jest.fn(),
+        updateThermostatSettings: jest.fn(async () => undefined),
       }
       Object.defineProperty(this, 'status', {
         get: () => harness.status,
@@ -118,6 +120,10 @@ jest.mock('../../src/api/transport', () => {
 
     stop(): void {
       harness.stop()
+    }
+
+    updateThermostatSettings(write: unknown): Promise<void> {
+      return harness.updateThermostatSettings(write)
     }
   }
 
@@ -198,6 +204,37 @@ describe('MyNestPlatform', () => {
   it('logs that thermostat control is enabled when the flag is on', async () => {
     await launch({ allowThermostatControl: true })
     expect(log.infos.join('\n')).toMatch(/Thermostat control enabled/)
+  })
+
+  it('does not call Nest when thermostat control is off', async () => {
+    const platform = await launch({ allowThermostatControl: false })
+    const sent = await platform.applyThermostatWrite(
+      THERMOSTAT_ID,
+      { mode: 'heat', targetTemperatureC: 21, targetTemperatureLowC: 21, targetTemperatureHighC: 26 },
+      { targetTemperatureC: 22 },
+    )
+
+    expect(sent).toBe(false)
+    expect(harness.updateThermostatSettings).not.toHaveBeenCalled()
+    expect(log.warns.join('\n')).toMatch(/Ignoring thermostat write/)
+  })
+
+  it('sends BatchUpdateState when thermostat control is on', async () => {
+    const platform = await launch({ allowThermostatControl: true })
+    const sent = await platform.applyThermostatWrite(
+      THERMOSTAT_ID,
+      { mode: 'heat', targetTemperatureC: 21, targetTemperatureLowC: 21, targetTemperatureHighC: 26 },
+      { targetTemperatureC: 22 },
+    )
+
+    expect(sent).toBe(true)
+    expect(harness.updateThermostatSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceId: `DEVICE_${THERMOSTAT_ID}`,
+        mode: 'heat',
+        targetTemperatureHeatC: 22,
+      }),
+    )
   })
 
   it('keeps Protect smoke/CO when the REST alarm feed becomes unavailable', async () => {
