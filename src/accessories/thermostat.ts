@@ -148,17 +148,30 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
    *
    * HAP validates the characteristic's current value against new props, and a
    * setpoint that has not been reported yet still holds HAP's own default of
-   * 0 °C — below Nest's floor. Left alone that logs a characteristic warning
-   * for every thermostat in the house at every startup, so the placeholder is
-   * moved into range first. It is not a reading and is replaced by the first
-   * real update; the reader still returns `undefined` until then, which is what
-   * stops a fabricated value being pushed as though Nest had reported it.
+   * 0 °C — below Nest's floor. Worse: HomeKit polls `onGet`, and returning
+   * `null` for Apple temperature characteristics logs a warning on every poll
+   * (Cooling Threshold on heat-only units was the noisy case). So the reader
+   * always returns an in-range number: Nest's value when known, otherwise the
+   * last HAP value or Nest's floor as a non-null placeholder until the first
+   * real update.
    */
   #bindSetpoint(
     type: Parameters<typeof this.binder.bind>[1],
     read: () => number | undefined,
   ): void {
-    const characteristic = this.binder.bind(this.#service, type, read)
+    const characteristic = this.binder.bind(this.#service, type, () => {
+      const value = read()
+      if (value !== undefined) {
+        return value
+      }
+      const current = this.#service.getCharacteristic(type).value
+      return typeof current === 'number'
+        && Number.isFinite(current)
+        && current >= MIN_SETPOINT_C
+        && current <= MAX_SETPOINT_C
+        ? current
+        : MIN_SETPOINT_C
+    })
 
     if (typeof characteristic.value === 'number' && characteristic.value < MIN_SETPOINT_C) {
       characteristic.updateValue(MIN_SETPOINT_C)

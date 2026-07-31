@@ -120,6 +120,18 @@ describe('ThermostatAccessory', () => {
     expect(read(Characteristic.TargetTemperature)).toBe(21)
   })
 
+  it('never returns null from cooling-threshold onGet on a heat-only unit', async () => {
+    // HomeKit polls onGet; null for Apple temperature characteristics spam the
+    // log ("characteristic was supplied illegal value: null").
+    const { service } = build(heating)
+    const value = await service
+      .getCharacteristic(Characteristic.CoolingThresholdTemperature)
+      .handleGetRequest()
+
+    expect(value).toEqual(expect.any(Number))
+    expect(value).not.toBeNull()
+  })
+
   it('constrains setpoints to the range Nest accepts', () => {
     const { service } = build(heating)
     const { minValue, maxValue, minStep } = service
