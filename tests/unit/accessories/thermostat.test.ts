@@ -132,6 +132,25 @@ describe('ThermostatAccessory', () => {
     expect(value).not.toBeNull()
   })
 
+  it('never returns null from required thermostat onGets before Nest reports', async () => {
+    // Null onGet answers for required Thermostat characteristics make Home show
+    // "No Response" and hide room tiles even when Favorites / Home View are on.
+    const { service } = build({})
+    const required = [
+      Characteristic.CurrentTemperature,
+      Characteristic.CurrentHeatingCoolingState,
+      Characteristic.TargetHeatingCoolingState,
+      Characteristic.TargetTemperature,
+      Characteristic.TemperatureDisplayUnits,
+    ] as const
+
+    for (const type of required) {
+      const value = await service.getCharacteristic(type).handleGetRequest()
+      expect(value).not.toBeNull()
+      expect(value).not.toBeUndefined()
+    }
+  })
+
   it('constrains setpoints to the range Nest accepts', () => {
     const { service } = build(heating)
     const { minValue, maxValue, minStep } = service

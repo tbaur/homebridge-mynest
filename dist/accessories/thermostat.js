@@ -37,19 +37,21 @@ class ThermostatAccessory extends base_1.NestAccessory {
         const { Characteristic, Service: HapService } = this.platform;
         this.#service = this.resolveService(HapService.Thermostat);
         this.#service.setCharacteristic(Characteristic.Name, this.identity.name);
-        this.binder.bind(this.#service, Characteristic.CurrentTemperature, () => this.state.currentTemperatureC);
-        this.binder.bind(this.#service, Characteristic.CurrentHeatingCoolingState, () => this.#currentHeatingCoolingState());
+        // Required Thermostat characteristics must never return null from onGet —
+        // HomeKit marks the accessory "No Response" and hides room tiles.
+        this.#bindRequired(Characteristic.CurrentTemperature, () => this.state.currentTemperatureC, 20);
+        this.#bindRequired(Characteristic.CurrentHeatingCoolingState, () => this.#currentHeatingCoolingState(), Characteristic.CurrentHeatingCoolingState.OFF);
         // Offering a mode the equipment cannot deliver produces a control that
         // fails when used, so the list is narrowed to what Nest says it can do.
-        this.binder.bind(this.#service, Characteristic.TargetHeatingCoolingState, () => this.#targetHeatingCoolingState());
+        this.#bindRequired(Characteristic.TargetHeatingCoolingState, () => this.#targetHeatingCoolingState(), Characteristic.TargetHeatingCoolingState.HEAT);
         this.#bindSetpoint(Characteristic.TargetTemperature, () => this.#targetTemperature());
         this.#bindSetpoint(Characteristic.HeatingThresholdTemperature, () => this.state.targetTemperatureLowC);
         this.#bindSetpoint(Characteristic.CoolingThresholdTemperature, () => this.state.targetTemperatureHighC);
         // Nest owns what the device's own screen shows; HomeKit is always given
         // Celsius regardless.
-        this.binder.bind(this.#service, Characteristic.TemperatureDisplayUnits, () => this.state.displayUnit === 'F'
+        this.#bindRequired(Characteristic.TemperatureDisplayUnits, () => this.state.displayUnit === 'F'
             ? Characteristic.TemperatureDisplayUnits.FAHRENHEIT
-            : Characteristic.TemperatureDisplayUnits.CELSIUS);
+            : Characteristic.TemperatureDisplayUnits.CELSIUS, Characteristic.TemperatureDisplayUnits.CELSIUS);
         this.#applyCharacteristicProps();
         this.#bindHumidity();
     }
@@ -91,6 +93,26 @@ class ThermostatAccessory extends base_1.NestAccessory {
             return;
         }
         this.binder.bind(this.#service, this.platform.Characteristic.CurrentRelativeHumidity, () => this.state.currentHumidity);
+    }
+    /**
+     * Bind a required characteristic that must never answer `onGet` with null.
+     *
+     * Prefer Nest's value, then the last HAP value, then a typed fallback. Refresh
+     * still skips undefined Nest readings so we do not push placeholders as if
+     * they were live — only `onGet` needs a non-null answer for HomeKit.
+     */
+    #bindRequired(type, read, fallback) {
+        const characteristic = this.binder.bind(this.#service, type, () => {
+            const value = read();
+            if (value !== undefined && value !== null) {
+                return value;
+            }
+            const current = this.#service.getCharacteristic(type).value;
+            return current !== undefined && current !== null ? current : fallback;
+        });
+        if (characteristic.value === null || characteristic.value === undefined) {
+            characteristic.updateValue(fallback);
+        }
     }
     /**
      * Publish one setpoint characteristic within the range Nest accepts.

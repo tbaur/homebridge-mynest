@@ -49,24 +49,25 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     this.#service = this.resolveService(HapService.Thermostat)
     this.#service.setCharacteristic(Characteristic.Name, this.identity.name)
 
-    this.binder.bind(
-      this.#service,
+    // Required Thermostat characteristics must never return null from onGet —
+    // HomeKit marks the accessory "No Response" and hides room tiles.
+    this.#bindRequired(
       Characteristic.CurrentTemperature,
       () => this.state.currentTemperatureC,
+      20,
     )
-
-    this.binder.bind(
-      this.#service,
+    this.#bindRequired(
       Characteristic.CurrentHeatingCoolingState,
       () => this.#currentHeatingCoolingState(),
+      Characteristic.CurrentHeatingCoolingState.OFF,
     )
 
     // Offering a mode the equipment cannot deliver produces a control that
     // fails when used, so the list is narrowed to what Nest says it can do.
-    this.binder.bind(
-      this.#service,
+    this.#bindRequired(
       Characteristic.TargetHeatingCoolingState,
       () => this.#targetHeatingCoolingState(),
+      Characteristic.TargetHeatingCoolingState.HEAT,
     )
 
     this.#bindSetpoint(Characteristic.TargetTemperature, () => this.#targetTemperature())
@@ -81,12 +82,12 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
 
     // Nest owns what the device's own screen shows; HomeKit is always given
     // Celsius regardless.
-    this.binder.bind(
-      this.#service,
+    this.#bindRequired(
       Characteristic.TemperatureDisplayUnits,
       () => this.state.displayUnit === 'F'
         ? Characteristic.TemperatureDisplayUnits.FAHRENHEIT
         : Characteristic.TemperatureDisplayUnits.CELSIUS,
+      Characteristic.TemperatureDisplayUnits.CELSIUS,
     )
 
     this.#applyCharacteristicProps()
@@ -141,6 +142,32 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
       this.platform.Characteristic.CurrentRelativeHumidity,
       () => this.state.currentHumidity,
     )
+  }
+
+  /**
+   * Bind a required characteristic that must never answer `onGet` with null.
+   *
+   * Prefer Nest's value, then the last HAP value, then a typed fallback. Refresh
+   * still skips undefined Nest readings so we do not push placeholders as if
+   * they were live — only `onGet` needs a non-null answer for HomeKit.
+   */
+  #bindRequired(
+    type: Parameters<typeof this.binder.bind>[1],
+    read: () => CharacteristicValue | undefined,
+    fallback: CharacteristicValue,
+  ): void {
+    const characteristic = this.binder.bind(this.#service, type, () => {
+      const value = read()
+      if (value !== undefined && value !== null) {
+        return value
+      }
+      const current = this.#service.getCharacteristic(type).value
+      return current !== undefined && current !== null ? current : fallback
+    })
+
+    if (characteristic.value === null || characteristic.value === undefined) {
+      characteristic.updateValue(fallback)
+    }
   }
 
   /**
