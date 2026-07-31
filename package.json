@@ -2,7 +2,7 @@
   "name": "homebridge-mynest",
   "displayName": "Homebridge My Nest",
   "version": "0.1.10",
-  "description": "A Homebridge plugin for Nest thermostats, Nest Protect, and Nest temperature sensors using a Nest Account access token",
+  "description": "Homebridge plugin for Nest thermostats (with Eco Mode), Nest Protect, and Nest temperature sensors using a Nest Account access token",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "keywords": [
@@ -10,6 +10,7 @@
     "nest",
     "nest-thermostat",
     "nest-protect",
+    "nest-eco",
     "thermostat",
     "smoke-detector",
     "temperature-sensor",

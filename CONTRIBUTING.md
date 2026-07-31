@@ -18,7 +18,7 @@ Use Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, …).
 ## Rules of the road
 
 - **Do not copy** code from `chrisjshull/homebridge-nest` or other Nest plugins. Reimplement from probes and Nest behaviour.
-- **No Google auth** in v1. Nest Account `access_token` only.
+- **No Google auth.** Nest Account `access_token` only.
 - **No secrets in the repo.** Use `.env` (gitignored) for live scripts; never commit tokens or probe captures that contain account data.
 - **Life-safety honesty.** Do not invent Protect all-clear or motion from unverified Observe fields.
 - **Homebridge 2 update path.** Use `CharacteristicBinder` / `updateValue(reader())` — never `getValue()` for pushes, never `updateValue(characteristic.value)`.
@@ -31,7 +31,7 @@ cp .env.example .env
 npm run verify
 ```
 
-`verify` is read-only. Thermostat writes go through Nest BatchUpdateState; confirm with `xtmp/nest-probe` probe 12 (`--confirm`) before trusting a new Nest schema change.
+`verify` is read-only. Thermostat setpoint writes go through Nest BatchUpdateState; confirm with `xtmp/nest-probe` probe 12 (`--confirm`) before trusting a new Nest schema change. Eco Mode uses the same gateway (`encodeEcoModeBatchUpdate`) but has no separate probe confirm yet.
 
 ## Pull requests
 
