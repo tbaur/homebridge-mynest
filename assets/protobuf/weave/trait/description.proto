@@ -1,0 +1,39 @@
+// Protobuf schema for response to Nest Observe API call
+
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+
+package weave.trait.description;
+
+// Messages
+
+message DeviceIdentityTrait {
+  String_Indirect manufacturer = 2;
+  String_Indirect model_name = 4;
+  string serial_number = 6;
+  string fw_version = 7;
+}
+
+// The name the user gave a device in the Nest app.
+//
+// Added here from observed wire data: the `label` trait is a single
+// length-delimited string in field 1. Devices that were never renamed send an
+// empty payload, so callers must fall back to the room annotation.
+message LabelSettingsTrait {
+  string label = 1;
+}
+
+// Indirects
+
+message String_Indirect {
+  string value = 1;
+}
+
+message Float_Indirect {
+  float value = 1;
+}
+
+message Int32_Indirect {
+  int32 value = 1;
+}

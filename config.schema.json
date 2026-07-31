@@ -1,0 +1,108 @@
+{
+  "pluginAlias": "MyNest",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Exposes Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in HomeKit using a Nest Account access token (not Google cookie auth).\n\nHow to get the token: [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).",
+  "footerDisplay": "Thermostats are read-only in this version. Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "MyNest",
+        "required": true,
+        "description": "Name shown in the Homebridge log."
+      },
+      "accessToken": {
+        "title": "Nest access token",
+        "type": "string",
+        "required": true,
+        "minLength": 32,
+        "x-schema-form": {
+          "type": "password"
+        },
+        "description": "The access_token value from https://home.nest.com/session while signed in to a Nest Account. Google account JWTs and ya29. OAuth tokens will not work."
+      },
+      "allowThermostatControl": {
+        "title": "Allow thermostat control",
+        "type": "boolean",
+        "default": false,
+        "description": "Reserved for a future write path. Thermostats stay read-only in this version even when enabled; the plugin logs a warning at startup."
+      },
+      "exposeProtectOccupancy": {
+        "title": "Expose Protect occupancy",
+        "type": "boolean",
+        "default": true,
+        "description": "Publish an occupancy sensor for mains-powered Protects that report Nest auto_away. This is ~10-minute presence, not motion."
+      },
+      "exposeProtectTemperature": {
+        "title": "Expose Protect temperature",
+        "type": "boolean",
+        "default": false,
+        "description": "Publish temperature and humidity measured by each Nest Protect."
+      },
+      "ignoredDeviceIds": {
+        "title": "Ignored device IDs",
+        "type": "array",
+        "required": false,
+        "description": "Nest device IDs or serial numbers to leave out of HomeKit. IDs appear in the Homebridge log when devices are added.",
+        "items": {
+          "type": "string",
+          "title": "Device ID",
+          "placeholder": "e.g. 18B4300000ACBFBD"
+        }
+      },
+      "fieldTest": {
+        "title": "Use Nest field-test servers",
+        "type": "boolean",
+        "default": false,
+        "description": "Point the plugin at home.ft.nest.com / grpc-web.ft.nest.com. Leave off unless you were told otherwise."
+      },
+      "diagnosticsInterval": {
+        "title": "Diagnostics interval (seconds)",
+        "type": "integer",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 3600,
+        "description": "Seconds between health heartbeats in the Homebridge log. 0 disables (default). Values 1–29 are raised to 30."
+      },
+      "structuredLogs": {
+        "title": "Structured diagnostic logs",
+        "type": "boolean",
+        "default": false,
+        "description": "When diagnostics are enabled, also emit a machine-readable JSON line alongside each human-readable health report."
+      },
+      "debug": {
+        "title": "Debug logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Emit verbose diagnostics. Tokens are redacted, but review any log before sharing it publicly."
+      }
+    }
+  },
+  "layout": [
+    {
+      "type": "fieldset",
+      "title": "Account",
+      "items": ["name", "accessToken"]
+    },
+    {
+      "type": "fieldset",
+      "title": "Devices",
+      "items": [
+        "allowThermostatControl",
+        "exposeProtectOccupancy",
+        "exposeProtectTemperature",
+        "ignoredDeviceIds"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced",
+      "expandable": true,
+      "expanded": false,
+      "items": ["fieldTest", "diagnosticsInterval", "structuredLogs", "debug"]
+    }
+  ]
+}
