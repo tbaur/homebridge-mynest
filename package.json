@@ -39,7 +39,7 @@
   },
   "homepage": "https://github.com/tbaur/homebridge-mynest#readme",
   "dependencies": {
-    "protobufjs": "^7.5.4"
+    "protobufjs": "^8.7.1"
   },
   "devDependencies": {
     "@homebridge/hap-nodejs": "^2.0.4",
