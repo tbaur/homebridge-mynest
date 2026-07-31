@@ -174,7 +174,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     if (this.#config.allowThermostatControl) {
       this.#log.warn(
-        'Allow Thermostat Control is enabled, but HomeKit temperature writes are not supported yet; thermostats remain read-only.',
+        'Allow Thermostat Control ignored — thermostats are read-only in this version.',
       )
     }
 
@@ -217,7 +217,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     // REST is up; Observe usually follows within a second. Naming both avoids
     // implying thermostats are already live when only app_launch succeeded.
-    this.#log.info('Connected to Nest (REST session open; Observe connecting)')
+    this.#log.info('Connected to Nest (REST up; Observe connecting)')
   }
 
   #stop(): void {
@@ -272,7 +272,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     }
     this.#hasFatal = true
     this.#log.error(
-      `${error.message} No further updates will be attempted; paste a fresh Nest Account access token from https://home.nest.com/session and restart Homebridge. HomeKit accessories were kept so rooms and automations are not torn down.`,
+      `${error.message} Paste a fresh token from https://home.nest.com/session and restart. Accessories were kept.`,
     )
     // Mark Protect smoke/CO inactive/faulted while handlers can still refresh.
     // `#stop` sets `#isShuttingDown` and drops `#scheduleUpdate`, so the
@@ -357,7 +357,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
         this.#observeRemovalCandidates.delete(id)
       }
       this.#log.warn(
-        `Observe reconnect named ${snapshotIds.size} device(s) after ${previousCount} were known; treating the snapshot as incomplete and keeping prior Observe state`,
+        `Observe reconnect incomplete (${snapshotIds.size} devices, had ${previousCount}) — keeping prior state`,
       )
       return
     }
@@ -390,7 +390,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     }
 
     this.#log.info(
-      `Observe no longer reports ${removed.length} device(s); removing from HomeKit`,
+      `Observe dropped ${removed.length} device(s) — removing from HomeKit`,
     )
     this.#bucketsChanged = true
     this.#scheduleUpdate()
@@ -579,7 +579,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
         continue
       }
 
-      this.#log.info(`Removing ${accessory.displayName}, which Nest no longer reports`)
+      this.#log.info(`Removing ${accessory.displayName} — Nest no longer reports it`)
       this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory])
       this.#cachedAccessories.delete(uuid)
     }
@@ -592,7 +592,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     const accessories = [...this.#cachedAccessories.values()]
     this.#log.warn(
-      `Unregistering ${accessories.length} cached accessory(ies): ${reason}`,
+      `Unregistering ${accessories.length} cached accessory(ies) — ${reason}`,
     )
     this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, accessories)
     this.#cachedAccessories.clear()

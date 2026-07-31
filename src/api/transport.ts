@@ -283,8 +283,8 @@ export class NestTransport {
     this.#wasRestAlarmFeedAvailable = available
     this.#options.log.warn(
       available
-        ? 'Nest REST alarm feed restored; Protect smoke/CO are live again (accessories were kept in HomeKit).'
-        : 'Nest REST alarm feed unavailable; Protect smoke/CO stay in HomeKit but are marked inactive until REST refreshes.',
+        ? 'REST alarm feed restored — Protect Smoke/CO live again.'
+        : 'REST alarm feed unavailable — Protect Smoke/CO kept, marked inactive.',
     )
     this.#options.onRestAlarmFeedChange?.(available)
   }
@@ -433,11 +433,11 @@ export class NestTransport {
       const snapshot = this.#objects.applyAppLaunchSnapshot(objects)
       if (snapshot.truncated) {
         this.#options.log.warn(
-          `app_launch returned ${objects.length} object(s) after ${snapshot.previousCount} were known; treating the snapshot as incomplete and keeping prior REST state`,
+          `app_launch incomplete (${objects.length} objects, had ${snapshot.previousCount}) — keeping prior REST state`,
         )
       } else if (snapshot.dropped.length > 0) {
         this.#options.log.info(
-          `REST no longer reports ${snapshot.dropped.length} object(s); dropping from inventory`,
+          `REST dropped ${snapshot.dropped.length} object(s) from inventory`,
         )
       }
       this.#options.onBuckets(this.#objects.toBuckets())
@@ -583,10 +583,10 @@ export class NestTransport {
         this.#restCycles++
         consecutiveFailures = 0
         this.#restForbidden = 0
-        // Idle long-polls routinely run ~SUBSCRIBE_TIMEOUT_MS; counting them as
-        // API latency makes a quiet house look like a multi-minute p95 outage.
+        // Subscribe is a long-poll by design (idle or not). Never fold its wait
+        // into API latency percentiles — session/app_launch remain the samples.
         this.#options.metrics?.apiRequest?.(Date.now() - cycleStartedAt, true, {
-          sampleLatency: !result.isIdle,
+          sampleLatency: false,
         })
         this.#options.metrics?.restCycle?.(true, Date.now() - cycleStartedAt)
         this.#noteRestSuccess()
@@ -601,7 +601,10 @@ export class NestTransport {
           return
         }
         const networked = !(error instanceof CircuitBreakerError)
-        this.#options.metrics?.apiRequest?.(Date.now() - cycleStartedAt, false, networked)
+        this.#options.metrics?.apiRequest?.(Date.now() - cycleStartedAt, false, {
+          networked,
+          sampleLatency: false,
+        })
         this.#options.metrics?.restCycle?.(false, Date.now() - cycleStartedAt)
         this.#emitRestAlarmFeedAvailability()
         if (!(await this.#handleLoopError('REST subscribe', error, 'rest'))) {
@@ -676,12 +679,12 @@ export class NestTransport {
 
         if (this.#observeForbiddenDead && this.#restForbiddenDead) {
           this.#options.onFatal(new AuthenticationError(
-            `Nest returned HTTP 403 on both REST and Observe ${FORBIDDEN_FATAL_THRESHOLD} times in a row. The access token may be revoked; capture a fresh one from https://home.nest.com/session.`,
+            `Nest returned HTTP 403 on both REST and Observe ${FORBIDDEN_FATAL_THRESHOLD} times — token may be revoked; get a fresh one from https://home.nest.com/session.`,
             { cause: error },
           ))
         } else {
           this.#options.log.error(
-            `${context} giving up after ${count} consecutive HTTP 403 responses; the other Nest transport will keep running if it can.`,
+            `${context} giving up after ${count} HTTP 403s — other transport keeps running if it can.`,
           )
         }
         return false
@@ -756,7 +759,7 @@ export class NestTransport {
       }
       this.#didWarnObserveSilent = true
       this.#options.log.warn(
-        'Observe has produced no frames since startup. Thermostats and Observe-only Protects will not appear until the protobuf stream connects; enable debug logging or run `npm run verify` if this persists.',
+        'Observe produced no frames since startup — thermostats / Observe-only Protects wait until it connects.',
       )
     }, OBSERVE_STARTUP_WARN_MS)
     this.#observeStartupWarnTimer.unref?.()

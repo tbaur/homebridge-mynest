@@ -7,7 +7,7 @@
 [![Homebridge](https://img.shields.io/badge/homebridge-%3E%3D1.6.0%20%7C%7C%202.x-purple)](https://homebridge.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in Apple HomeKit through Homebridge, using a **Nest Account** access token only (no Google cookie / `issueToken` auth).
+Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in Apple HomeKit through Homebridge, using a **Nest Account** access token only.
 
 ## Features
 
@@ -34,7 +34,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 
 <!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->
 - **Homebridge 2 safe** — Live updates use stored getters + `updateValue(...)`, not removed `getValue()` or stale `.value` reads
-- **412 Tests** — Jest suite with an 80% coverage gate across statements, branches, functions, and lines
+- **413 Tests** — Jest suite with an 80% coverage gate across statements, branches, functions, and lines
 - **Strict TypeScript** — `strict` mode with unused locals/params and no implicit returns
 - **Secret hygiene** — Access tokens are redacted from logs
 - **No analytics** — Zero tracking or data collection

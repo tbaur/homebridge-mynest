@@ -256,7 +256,7 @@ describe('NestTransport', () => {
     // One transport giving up must not fatal — REST may still be updating Protects.
     expect(fatals).toHaveLength(0)
     expect(log.warns.join('\n')).toContain('HTTP 403')
-    expect(log.errors.join('\n')).toMatch(/giving up.*other Nest transport/i)
+    expect(log.errors.join('\n')).toMatch(/giving up.*other transport/i)
   })
 
   it('does not fatal when REST alone returns repeated HTTP 403 while Observe is healthy', async () => {
@@ -275,7 +275,7 @@ describe('NestTransport', () => {
 
     expect(fatals).toHaveLength(0)
     expect(log.warns.join('\n')).toContain('REST subscribe')
-    expect(log.errors.join('\n')).toMatch(/giving up.*other Nest transport/i)
+    expect(log.errors.join('\n')).toMatch(/giving up.*other transport/i)
   })
 
   it('fatals only after both REST and Observe exhaust their HTTP 403 budgets', async () => {

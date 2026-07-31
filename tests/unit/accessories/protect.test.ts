@@ -59,6 +59,10 @@ const clear: ProtectState = {
 }
 
 describe('ProtectAccessory', () => {
+  beforeEach(() => {
+    ProtectAccessory.resetOccupancyHintForTests()
+  })
+
   it('publishes a smoke and a CO sensor', () => {
     const { read } = build(clear)
 
@@ -101,7 +105,8 @@ describe('ProtectAccessory', () => {
     expect(hasService(accessory, Service.SmokeSensor)).toBe(false)
     expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(false)
     expect(hasService(accessory, Service.Battery)).toBe(true)
-    expect(log.infos.join('\n')).toContain('no smoke/CO')
+    expect(log.infos.join('\n')).toMatch(/Observe-only — no Smoke\/CO/)
+    expect(log.infos.join('\n')).toMatch(/publishing battery only/)
   })
 
   it('grows smoke and CO sensors when REST alarm state arrives later', () => {
@@ -156,7 +161,7 @@ describe('ProtectAccessory', () => {
       .toBe(Characteristic.StatusFault.GENERAL_FAULT)
     expect(hasService(accessory, Service.OccupancySensor)).toBe(true)
     expect(read(Service.OccupancySensor, Characteristic.StatusActive)).toBe(false)
-    expect(log.warns.join('\n')).toMatch(/kept in HomeKit but marked inactive/i)
+    expect(log.warns.join('\n')).toMatch(/Smoke\/CO kept, marked inactive/)
   })
 
   it('marks smoke and CO live again when the REST alarm feed recovers', () => {
@@ -183,7 +188,7 @@ describe('ProtectAccessory', () => {
     expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(true)
     expect(read(Service.SmokeSensor, Characteristic.StatusFault))
       .toBe(Characteristic.StatusFault.NO_FAULT)
-    expect(log.infos.join('\n')).toMatch(/smoke\/CO are live again/i)
+    expect(log.infos.join('\n')).toMatch(/Smoke\/CO live again/)
   })
 
   it('grows an occupancy sensor when REST auto_away arrives later', () => {
@@ -234,13 +239,31 @@ describe('ProtectAccessory', () => {
       .toBe(Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED)
   })
 
-  it('says in the log that occupancy is presence, not motion', () => {
-    // Anyone building an automation on this needs to know it will not react to
-    // someone walking past.
-    const { log } = build(clear)
+  it('logs once that occupancy is presence, not motion', () => {
+    const platform = createPlatformStub()
+    const log = createRecordingLogger()
+    const make = (name: string, id: string) => {
+      const accessory = createAccessory(name)
+      const device: DeviceOfKind<'protect'> = {
+        identity: {
+          id,
+          kind: 'protect',
+          name,
+          sources: { observe: true, rest: true },
+          model: 'Topaz-2.7',
+          serialNumber: id,
+        },
+        state: clear,
+      }
+      return new ProtectAccessory(platform, accessory, device, log)
+    }
 
-    expect(log.infos.join('\n')).toContain('not motion')
-    expect(log.infos.join('\n')).toContain('10-minute')
+    make('Hallway Protect', 'PROTECT01')
+    make('Basement Protect', 'PROTECT02')
+
+    const hints = log.infos.filter((line) => line.includes('Protect occupancy'))
+    expect(hints).toHaveLength(1)
+    expect(hints[0]).toMatch(/~10-min presence \(auto_away\), not motion/)
   })
 
   it('publishes no occupancy sensor for a battery-powered Protect', () => {

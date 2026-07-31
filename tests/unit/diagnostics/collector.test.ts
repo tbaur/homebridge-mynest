@@ -238,7 +238,7 @@ describe('DiagnosticsCollector', () => {
     const report = collector.buildHeartbeat(m.readers)
 
     expect(formatDiagnosticLine(report)).toBe(
-      'Health: healthy | devices 5 (2T/2P/1S) | obs connected rest running | '
+      'Health: healthy | devices 5 (2T/2P/1S) | obs live rest live | '
       + `api p50 ${report.api.p50Ms}ms p95 ${report.api.p95Ms}ms (req 2, err 0)`,
     )
   })

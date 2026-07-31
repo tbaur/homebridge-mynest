@@ -26,6 +26,21 @@ function diagnosticLabel(msg) {
             return msg;
     }
 }
+/** Short operator-facing label for a Nest transport lifecycle state. */
+function formatTransportState(state) {
+    switch (state) {
+        case 'connected':
+        case 'running':
+            return 'live';
+        case 'forbidden_dead':
+            return 'auth-failed';
+        case 'connecting':
+        case 'stopped':
+            return state;
+        default:
+            return state;
+    }
+}
 /** Concise human-readable summary line for a diagnostics report. */
 function formatDiagnosticLine(report) {
     const { lifecycle, devices, transport, api, circuitBreaker } = report;
@@ -45,7 +60,8 @@ function formatDiagnosticLine(report) {
     const breakerText = breakerParts.length > 0 ? ` | breaker ${breakerParts.join(' ')}` : '';
     return (`${diagnosticLabel(report.msg)}: ${lifecycle.health}${reasonText} | `
         + `devices ${devices.total} (${kindText}) | `
-        + `obs ${transport.observeState} rest ${transport.restState}`
+        + `obs ${formatTransportState(transport.observeState)} `
+        + `rest ${formatTransportState(transport.restState)}`
         + `${breakerText} | `
         + `api p50 ${api.p50Ms}ms p95 ${api.p95Ms}ms (req ${api.requests}, err ${api.errors})`);
 }

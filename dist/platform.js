@@ -135,7 +135,7 @@ class MyNestPlatform {
         }
         this.#startedAt = Date.now();
         if (this.#config.allowThermostatControl) {
-            this.#log.warn('Allow Thermostat Control is enabled, but HomeKit temperature writes are not supported yet; thermostats remain read-only.');
+            this.#log.warn('Allow Thermostat Control ignored — thermostats are read-only in this version.');
         }
         const diagnostics = this.#diagnostics;
         const transport = new transport_1.NestTransport({
@@ -174,7 +174,7 @@ class MyNestPlatform {
         this.#startDiagnostics();
         // REST is up; Observe usually follows within a second. Naming both avoids
         // implying thermostats are already live when only app_launch succeeded.
-        this.#log.info('Connected to Nest (REST session open; Observe connecting)');
+        this.#log.info('Connected to Nest (REST up; Observe connecting)');
     }
     #stop() {
         this.#isShuttingDown = true;
@@ -221,7 +221,7 @@ class MyNestPlatform {
             return;
         }
         this.#hasFatal = true;
-        this.#log.error(`${error.message} No further updates will be attempted; paste a fresh Nest Account access token from https://home.nest.com/session and restart Homebridge. HomeKit accessories were kept so rooms and automations are not torn down.`);
+        this.#log.error(`${error.message} Paste a fresh token from https://home.nest.com/session and restart. Accessories were kept.`);
         // Mark Protect smoke/CO inactive/faulted while handlers can still refresh.
         // `#stop` sets `#isShuttingDown` and drops `#scheduleUpdate`, so the
         // transport's onRestAlarmFeedChange callback would not reach HomeKit.
@@ -295,7 +295,7 @@ class MyNestPlatform {
             for (const id of snapshotIds) {
                 this.#observeRemovalCandidates.delete(id);
             }
-            this.#log.warn(`Observe reconnect named ${snapshotIds.size} device(s) after ${previousCount} were known; treating the snapshot as incomplete and keeping prior Observe state`);
+            this.#log.warn(`Observe reconnect incomplete (${snapshotIds.size} devices, had ${previousCount}) — keeping prior state`);
             return;
         }
         const knownDeviceIds = this.#observe.resourceIds.filter((id) => id.startsWith('DEVICE_'));
@@ -321,7 +321,7 @@ class MyNestPlatform {
         if (removed.length === 0) {
             return;
         }
-        this.#log.info(`Observe no longer reports ${removed.length} device(s); removing from HomeKit`);
+        this.#log.info(`Observe dropped ${removed.length} device(s) — removing from HomeKit`);
         this.#bucketsChanged = true;
         this.#scheduleUpdate();
     }
@@ -475,7 +475,7 @@ class MyNestPlatform {
             if (context?.deviceId && known.has(context.deviceId)) {
                 continue;
             }
-            this.#log.info(`Removing ${accessory.displayName}, which Nest no longer reports`);
+            this.#log.info(`Removing ${accessory.displayName} — Nest no longer reports it`);
             this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
             this.#cachedAccessories.delete(uuid);
         }
@@ -485,7 +485,7 @@ class MyNestPlatform {
             return;
         }
         const accessories = [...this.#cachedAccessories.values()];
-        this.#log.warn(`Unregistering ${accessories.length} cached accessory(ies): ${reason}`);
+        this.#log.warn(`Unregistering ${accessories.length} cached accessory(ies) — ${reason}`);
         this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, accessories);
         this.#cachedAccessories.clear();
         this.#handlers.clear();
