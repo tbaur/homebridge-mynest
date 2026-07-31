@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.8](https://github.com/tbaur/homebridge-mynest/compare/v0.1.7...v0.1.8) (2026-07-31)
+
+
+### Bug Fixes
+
+* republish cached thermostats so Home shows room tiles ([9d97dd2](https://github.com/tbaur/homebridge-mynest/commit/9d97dd2d57598b5a25e3662b40d5ce4cffe52f65))
+
 ## [0.1.7](https://github.com/tbaur/homebridge-mynest/compare/v0.1.6...v0.1.7) (2026-07-31)
 
 
