@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.9](https://github.com/tbaur/homebridge-mynest/compare/v0.1.8...v0.1.9) (2026-07-31)
+
+
+### Bug Fixes
+
+* stop same-UUID thermostat republish that never restored tiles ([dc01a42](https://github.com/tbaur/homebridge-mynest/commit/dc01a4270adb292d43141716bce07f48d319ba05))
+
 ## [0.1.8](https://github.com/tbaur/homebridge-mynest/compare/v0.1.7...v0.1.8) (2026-07-31)
 
 
