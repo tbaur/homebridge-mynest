@@ -23,12 +23,6 @@ export interface AccessoryContext {
     deviceId: string;
     kind: DeviceKind;
     displayName: string;
-    /**
-     * HomeKit presentation generation. When below the platform `HAP_TILE_EPOCH`,
-     * the accessory is republished so Apple Home picks up category / HAP fixes
-     * that `updatePlatformAccessories` does not surface as room tiles.
-     */
-    tileEpoch?: number;
 }
 /** One HomeKit accessory backed by one Nest device. */
 export declare abstract class NestAccessory<TState> {
