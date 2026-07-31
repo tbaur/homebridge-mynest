@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.10](https://github.com/tbaur/homebridge-mynest/compare/v0.1.9...v0.1.10) (2026-07-31)
+
+
+### Features
+
+* add Eco Mode switches and friendlier thermostat write logs ([#21](https://github.com/tbaur/homebridge-mynest/issues/21)) ([fa5f385](https://github.com/tbaur/homebridge-mynest/commit/fa5f3859df07da8d757f0f5ffe9b61facc3dffb9))
+
 ## [0.1.9](https://github.com/tbaur/homebridge-mynest/compare/v0.1.8...v0.1.9) (2026-07-31)
 
 
