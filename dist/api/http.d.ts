@@ -17,7 +17,8 @@ export type FetchLike = typeof globalThis.fetch;
 export interface SendOptions {
     method: 'GET' | 'POST';
     headers: Record<string, string>;
-    body?: string;
+    /** JSON string for REST, or raw protobuf bytes for BatchUpdateState. */
+    body?: string | Buffer | Uint8Array;
     /** Client-side deadline. Never omitted: no Nest call may wait forever. */
     timeoutMs: number;
     /** Caller-owned abort, used for shutdown. Distinct from the timeout. */

@@ -17,7 +17,7 @@ export interface RecordedCall {
   url: string
   method?: string
   headers: Record<string, string>
-  body?: string
+  body?: string | Buffer | Uint8Array
 }
 
 export interface ScriptedFetch {
@@ -42,7 +42,7 @@ export function textFetch(
       url: String(url),
       method: options.method,
       headers: (options.headers ?? {}) as Record<string, string>,
-      body: options.body as string | undefined,
+      body: options.body as string | Buffer | Uint8Array | undefined,
     })
 
     return new Response(text, {
@@ -63,7 +63,7 @@ export function hangingFetch(): ScriptedFetch {
       url: String(url),
       method: options.method,
       headers: (options.headers ?? {}) as Record<string, string>,
-      body: options.body as string | undefined,
+      body: options.body as string | Buffer | Uint8Array | undefined,
     })
 
     return new Promise<Response>((_resolve, reject) => {

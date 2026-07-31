@@ -37,8 +37,7 @@ describe('validateConfig', () => {
     expect(config).toMatchObject({
       name: 'MyNest',
       fieldTest: false,
-      // Writing to a thermostat is a different class of risk from reading one,
-      // so it stays off until asked for.
+      // Opt-in: omitted key must stay false so upgrades do not start HVAC writes.
       allowThermostatControl: false,
       exposeProtectOccupancy: true,
       exposeProtectTemperature: false,

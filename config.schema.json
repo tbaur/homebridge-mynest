@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": true,
   "headerDisplay": "Exposes Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in HomeKit using a Nest Account access token (not Google cookie auth).\n\nHow to get the token: [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).",
-  "footerDisplay": "Thermostats are read-only in this version. Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
+  "footerDisplay": "Thermostat mode/setpoints write through Nest BatchUpdateState only when Allow thermostat control is enabled (off by default). Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
   "schema": {
     "type": "object",
     "properties": {
@@ -28,7 +28,7 @@
         "title": "Allow thermostat control",
         "type": "boolean",
         "default": false,
-        "description": "Reserved for a future write path. Thermostats stay read-only in this version even when enabled; the plugin logs a warning at startup."
+        "description": "Opt in to let HomeKit change thermostat mode and setpoints via Nest BatchUpdateState. Off by default so upgrades stay read-only until you enable control. Confirm with nest-probe probe 12 (--confirm) on your account first."
       },
       "exposeProtectOccupancy": {
         "title": "Expose Protect occupancy",

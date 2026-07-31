@@ -6,8 +6,9 @@
  *
  * @fileoverview Protobuf schema loading and Observe frame decoding.
  *
- * The schemas under `assets/protobuf/` are decode-only and deliberately
- * partial: Nest publishes hundreds of traits and this plugin reads a dozen.
+ * The schemas under `assets/protobuf/` are deliberately partial: Nest publishes
+ * hundreds of traits and this plugin reads a dozen (and encodes thermostat
+ * setpoint writes).
  * A trait with no vendored schema is skipped rather than treated as an error,
  * which is what lets the plugin keep working when Nest adds one.
  */

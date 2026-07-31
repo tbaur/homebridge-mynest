@@ -6,13 +6,10 @@
  *
  * @fileoverview Nest thermostat as a HomeKit Thermostat service.
  *
- * Read-only in this version. Nest moved thermostats to its protobuf backend,
- * and on the account this plugin was developed against they do not appear in
- * the REST API at all — so the old REST write path cannot reach them, and the
- * protobuf write path has not been confirmed against a live device. Guessing
- * it would mean shipping code that changes what a house's heating is doing
- * based on an unverified payload, so the setpoint characteristics are
- * published without write handlers until that path is proven.
+ * Mode and setpoints write through Nest `BatchUpdateState` when
+ * `allowThermostatControl` is enabled. Target characteristics keep write
+ * permissions either way — stripping them makes the Home app show
+ * "No Response" and hide room tiles.
  */
 import type { PlatformAccessory } from 'homebridge';
 import type { NestDevice, ThermostatState } from '../types/device';

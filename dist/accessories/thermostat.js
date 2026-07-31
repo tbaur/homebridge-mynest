@@ -7,17 +7,15 @@
  *
  * @fileoverview Nest thermostat as a HomeKit Thermostat service.
  *
- * Read-only in this version. Nest moved thermostats to its protobuf backend,
- * and on the account this plugin was developed against they do not appear in
- * the REST API at all — so the old REST write path cannot reach them, and the
- * protobuf write path has not been confirmed against a live device. Guessing
- * it would mean shipping code that changes what a house's heating is doing
- * based on an unverified payload, so the setpoint characteristics are
- * published without write handlers until that path is proven.
+ * Mode and setpoints write through Nest `BatchUpdateState` when
+ * `allowThermostatControl` is enabled. Target characteristics keep write
+ * permissions either way — stripping them makes the Home app show
+ * "No Response" and hide room tiles.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ThermostatAccessory = void 0;
 const settings_1 = require("../settings");
+const sanitizers_1 = require("../utils/sanitizers");
 const base_1 = require("./base");
 /** Midpoint of the two setpoints, used for HomeKit's single target in range mode. */
 function midpoint(low, high) {
@@ -37,16 +35,41 @@ class ThermostatAccessory extends base_1.NestAccessory {
         const { Characteristic, Service: HapService } = this.platform;
         this.#service = this.resolveService(HapService.Thermostat);
         this.#service.setCharacteristic(Characteristic.Name, this.identity.name);
+        this.accessory
+            .setPrimaryService?.(this.#service);
         // Required Thermostat characteristics must never return null from onGet —
         // HomeKit marks the accessory "No Response" and hides room tiles.
         this.#bindRequired(Characteristic.CurrentTemperature, () => this.state.currentTemperatureC, 20);
         this.#bindRequired(Characteristic.CurrentHeatingCoolingState, () => this.#currentHeatingCoolingState(), Characteristic.CurrentHeatingCoolingState.OFF);
-        // Offering a mode the equipment cannot deliver produces a control that
-        // fails when used, so the list is narrowed to what Nest says it can do.
-        this.#bindRequired(Characteristic.TargetHeatingCoolingState, () => this.#targetHeatingCoolingState(), Characteristic.TargetHeatingCoolingState.HEAT);
-        this.#bindSetpoint(Characteristic.TargetTemperature, () => this.#targetTemperature());
-        this.#bindSetpoint(Characteristic.HeatingThresholdTemperature, () => this.state.targetTemperatureLowC);
-        this.#bindSetpoint(Characteristic.CoolingThresholdTemperature, () => this.state.targetTemperatureHighC);
+        this.#bindRequired(Characteristic.TargetHeatingCoolingState, () => this.#targetHeatingCoolingState(), Characteristic.TargetHeatingCoolingState.HEAT, {
+            write: async (value) => {
+                await this.#write({ mode: this.#modeFromHomeKit(value) });
+            },
+        });
+        this.#bindSetpoint(Characteristic.TargetTemperature, () => this.#targetTemperature(), {
+            write: async (value) => {
+                if (typeof value !== 'number') {
+                    return;
+                }
+                await this.#write({ targetTemperatureC: value });
+            },
+        });
+        this.#bindSetpoint(Characteristic.HeatingThresholdTemperature, () => this.state.targetTemperatureLowC, {
+            write: async (value) => {
+                if (typeof value !== 'number') {
+                    return;
+                }
+                await this.#write({ targetTemperatureLowC: value });
+            },
+        });
+        this.#bindSetpoint(Characteristic.CoolingThresholdTemperature, () => this.state.targetTemperatureHighC, {
+            write: async (value) => {
+                if (typeof value !== 'number') {
+                    return;
+                }
+                await this.#write({ targetTemperatureHighC: value });
+            },
+        });
         // Nest owns what the device's own screen shows; HomeKit is always given
         // Celsius regardless.
         this.#bindRequired(Characteristic.TemperatureDisplayUnits, () => this.state.displayUnit === 'F'
@@ -69,7 +92,6 @@ class ThermostatAccessory extends base_1.NestAccessory {
         const { Characteristic } = this.platform;
         this.#service.getCharacteristic(Characteristic.TargetHeatingCoolingState).setProps({
             validValues: this.#supportedTargetStates(),
-            perms: this.#readOnlyPerms(),
         });
         for (const type of [
             Characteristic.TargetTemperature,
@@ -80,11 +102,41 @@ class ThermostatAccessory extends base_1.NestAccessory {
                 minValue: settings_1.MIN_SETPOINT_C,
                 maxValue: settings_1.MAX_SETPOINT_C,
                 minStep: settings_1.SETPOINT_STEP_C,
-                perms: this.#readOnlyPerms(),
             });
         }
         this.#service.getCharacteristic(Characteristic.TemperatureDisplayUnits).setProps({
             perms: this.#readOnlyPerms(),
+        });
+    }
+    /**
+     * Send a Nest write when control is enabled; otherwise refresh so HomeKit
+     * does not keep a slider position Nest never accepted.
+     *
+     * Nest errors are logged and the last good values are pushed back — never
+     * rethrown into HAP `onSet`, which would mark the accessory "No Response"
+     * for a long sticky period in the Home app.
+     */
+    async #write(patch) {
+        try {
+            const sent = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch);
+            if (!sent) {
+                this.#revertHomeKitValues();
+            }
+        }
+        catch (error) {
+            this.log.warn(`Thermostat write failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
+            this.#revertHomeKitValues();
+        }
+    }
+    /**
+     * Push Nest's last known values after a refused or failed write.
+     *
+     * HAP assigns the HomeKit-requested value *after* `onSet` resolves, so a
+     * synchronous `refresh()` inside the handler is overwritten. Defer one tick.
+     */
+    #revertHomeKitValues() {
+        setImmediate(() => {
+            this.binder.refresh();
         });
     }
     /** Humidity often arrives after the first Observe snapshot; bind when present. */
@@ -101,7 +153,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
      * still skips undefined Nest readings so we do not push placeholders as if
      * they were live — only `onGet` needs a non-null answer for HomeKit.
      */
-    #bindRequired(type, read, fallback) {
+    #bindRequired(type, read, fallback, options = {}) {
         const characteristic = this.binder.bind(this.#service, type, () => {
             const value = read();
             if (value !== undefined && value !== null) {
@@ -109,7 +161,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
             }
             const current = this.#service.getCharacteristic(type).value;
             return current !== undefined && current !== null ? current : fallback;
-        });
+        }, options.write ? { write: options.write } : {});
         if (characteristic.value === null || characteristic.value === undefined) {
             characteristic.updateValue(fallback);
         }
@@ -126,7 +178,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
      * last HAP value or Nest's floor as a non-null placeholder until the first
      * real update.
      */
-    #bindSetpoint(type, read) {
+    #bindSetpoint(type, read, options = {}) {
         const characteristic = this.binder.bind(this.#service, type, () => {
             const value = read();
             if (value !== undefined) {
@@ -139,7 +191,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
                 && current <= settings_1.MAX_SETPOINT_C
                 ? current
                 : settings_1.MIN_SETPOINT_C;
-        });
+        }, options.write ? { write: options.write } : {});
         if (typeof characteristic.value === 'number' && characteristic.value < settings_1.MIN_SETPOINT_C) {
             characteristic.updateValue(settings_1.MIN_SETPOINT_C);
         }
@@ -147,16 +199,9 @@ class ThermostatAccessory extends base_1.NestAccessory {
             minValue: settings_1.MIN_SETPOINT_C,
             maxValue: settings_1.MAX_SETPOINT_C,
             minStep: settings_1.SETPOINT_STEP_C,
-            perms: this.#readOnlyPerms(),
         });
     }
-    /**
-     * Permissions for a control this version cannot act on.
-     *
-     * Dropping the write permission makes the Home app present the thermostat as
-     * a readout. Leaving it writable would offer a slider that silently fails,
-     * which is a worse answer than not offering one.
-     */
+    /** Permissions for a control this plugin does not act on (display units). */
     #readOnlyPerms() {
         const { Perms: perms } = this.platform.api.hap;
         return ["pr" /* perms.PAIRED_READ */, "ev" /* perms.NOTIFY */];
@@ -213,6 +258,20 @@ class ThermostatAccessory extends base_1.NestAccessory {
             range: Characteristic.TargetHeatingCoolingState.AUTO,
         };
         return this.state.mode === undefined ? undefined : byMode[this.state.mode];
+    }
+    #modeFromHomeKit(value) {
+        const { Characteristic } = this.platform;
+        switch (value) {
+            case Characteristic.TargetHeatingCoolingState.OFF:
+                return 'off';
+            case Characteristic.TargetHeatingCoolingState.COOL:
+                return 'cool';
+            case Characteristic.TargetHeatingCoolingState.AUTO:
+                return 'range';
+            case Characteristic.TargetHeatingCoolingState.HEAT:
+            default:
+                return 'heat';
+        }
     }
     /**
      * The single setpoint HomeKit asks for.

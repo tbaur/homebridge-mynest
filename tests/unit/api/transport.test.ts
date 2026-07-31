@@ -120,6 +120,63 @@ function createTransport(overrides: Partial<ConstructorParameters<typeof NestTra
 }
 
 describe('NestTransport', () => {
+  it('POSTs BatchUpdateState when updating thermostat settings', async () => {
+    const batchCalls: string[] = []
+    const base = createNestFetch()
+    const fetch = (async (url: unknown, init?: RequestInit) => {
+      const target = String(url)
+      if (target.includes('BatchUpdateState')) {
+        batchCalls.push(target)
+        return new Response(new Uint8Array(), { status: 200 })
+      }
+      return base.fetch(target, init)
+    }) as unknown as FetchLike
+
+    const { transport, log } = createTransport({ fetchImpl: fetch })
+    await transport.start()
+
+    await transport.updateThermostatSettings({
+      resourceId: 'DEVICE_ABC',
+      mode: 'heat',
+      targetTemperatureHeatC: 22,
+      targetTemperatureCoolC: 27,
+      standbyMode: 'heat',
+      clearEco: false,
+    })
+
+    expect(batchCalls).toHaveLength(1)
+    expect(batchCalls[0]).toContain('/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState')
+    expect(log.infos.join('\n')).toMatch(/Thermostat write DEVICE_ABC/)
+
+    transport.stop()
+  })
+
+  it('logs and rethrows when BatchUpdateState fails', async () => {
+    const base = createNestFetch()
+    const fetch = (async (url: unknown, init?: RequestInit) => {
+      const target = String(url)
+      if (target.includes('BatchUpdateState')) {
+        return new Response('no', { status: 503 })
+      }
+      return base.fetch(target, init)
+    }) as unknown as FetchLike
+
+    const { transport, log } = createTransport({ fetchImpl: fetch })
+    await transport.start()
+
+    await expect(transport.updateThermostatSettings({
+      resourceId: 'DEVICE_ABC',
+      mode: 'heat',
+      targetTemperatureHeatC: 22,
+      targetTemperatureCoolC: 27,
+      standbyMode: 'heat',
+      clearEco: false,
+    })).rejects.toThrow(/503/)
+
+    expect(log.warns.join('\n')).toMatch(/BatchUpdateState failed/)
+    transport.stop()
+  })
+
   it('opens a session and enumerates the account before returning', async () => {
     const { transport, calls, buckets } = createTransport()
 

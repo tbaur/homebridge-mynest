@@ -46,6 +46,8 @@ export interface NestEndpoints {
     readonly grpcOrigin: string;
     /** Path on {@link grpcOrigin} that streams trait snapshots and patches. */
     readonly observePath: string;
+    /** Path on {@link grpcOrigin} for thermostat (and other trait) writes. */
+    readonly batchUpdatePath: string;
     /** Path appended to the session's `transport_url` for the REST long-poll. */
     readonly subscribePath: string;
 }

@@ -22,11 +22,10 @@ export interface MyNestPlatformConfig {
     /** Talk to Nest's field-test environment instead of production. */
     fieldTest?: unknown;
     /**
-     * Allow HomeKit to change thermostat setpoints and modes.
-     *
-     * Off by default. Everything else the plugin does is read-only, and a
-     * misbehaving automation that can drive the heating is a different class of
-     * risk from one that can only read it.
+     * Allow HomeKit to change thermostat setpoints and modes via Nest
+     * BatchUpdateState. Off by default (opt-in) so upgrades do not start driving
+     * HVAC until the operator enables control. Target characteristics stay
+     * writable for Home presentation either way.
      */
     allowThermostatControl?: unknown;
     /** Publish an occupancy sensor for each Nest Protect that reports one. */

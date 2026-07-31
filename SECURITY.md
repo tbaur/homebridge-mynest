@@ -41,7 +41,7 @@ This plugin implements:
 - Nest Account tokens only — Google JWT / `ya29.` shapes are rejected at config validation
 - Secret redaction in structured logs
 - Transport URL host allowlisting before the session token is sent
-- Read-only thermostat publication until a write path is proven against a live device
+- Thermostat writes use Nest BatchUpdateState behind opt-in `allowThermostatControl` (off by default)
 - No analytics or telemetry
 
 ## Scope limits

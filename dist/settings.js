@@ -46,6 +46,7 @@ const PRODUCTION_ENDPOINTS = {
     sessionUrl: 'https://home.nest.com/session',
     grpcOrigin: 'https://grpc-web.production.nest.com',
     observePath: '/nestlabs.gateway.v2.GatewayService/Observe',
+    batchUpdatePath: '/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState',
     subscribePath: '/v5/subscribe',
 };
 const FIELD_TEST_ENDPOINTS = {
@@ -53,6 +54,7 @@ const FIELD_TEST_ENDPOINTS = {
     sessionUrl: 'https://home.ft.nest.com/session',
     grpcOrigin: 'https://grpc-web.ft.nest.com',
     observePath: PRODUCTION_ENDPOINTS.observePath,
+    batchUpdatePath: PRODUCTION_ENDPOINTS.batchUpdatePath,
     subscribePath: PRODUCTION_ENDPOINTS.subscribePath,
 };
 /** Resolve the endpoint set for the configured environment. */

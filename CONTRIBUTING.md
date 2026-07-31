@@ -31,7 +31,7 @@ cp .env.example .env
 npm run verify
 ```
 
-`verify` is read-only. Thermostat writes are not available yet.
+`verify` is read-only. Thermostat writes go through Nest BatchUpdateState; confirm with `xtmp/nest-probe` probe 12 (`--confirm`) before trusting a new Nest schema change.
 
 ## Pull requests
 

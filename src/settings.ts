@@ -58,6 +58,8 @@ export interface NestEndpoints {
   readonly grpcOrigin: string
   /** Path on {@link grpcOrigin} that streams trait snapshots and patches. */
   readonly observePath: string
+  /** Path on {@link grpcOrigin} for thermostat (and other trait) writes. */
+  readonly batchUpdatePath: string
   /** Path appended to the session's `transport_url` for the REST long-poll. */
   readonly subscribePath: string
 }
@@ -67,6 +69,7 @@ const PRODUCTION_ENDPOINTS: NestEndpoints = {
   sessionUrl: 'https://home.nest.com/session',
   grpcOrigin: 'https://grpc-web.production.nest.com',
   observePath: '/nestlabs.gateway.v2.GatewayService/Observe',
+  batchUpdatePath: '/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState',
   subscribePath: '/v5/subscribe',
 }
 
@@ -75,6 +78,7 @@ const FIELD_TEST_ENDPOINTS: NestEndpoints = {
   sessionUrl: 'https://home.ft.nest.com/session',
   grpcOrigin: 'https://grpc-web.ft.nest.com',
   observePath: PRODUCTION_ENDPOINTS.observePath,
+  batchUpdatePath: PRODUCTION_ENDPOINTS.batchUpdatePath,
   subscribePath: PRODUCTION_ENDPOINTS.subscribePath,
 }
 

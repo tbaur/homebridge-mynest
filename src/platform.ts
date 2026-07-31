@@ -33,12 +33,15 @@ import {
   isDeviceOfKind,
   type DeviceInventory,
   type DeviceKind,
+  type HvacMode,
   type NestDevice,
+  type ThermostatState,
 } from './types/device'
 import type { BucketMap } from './types/nest'
 import { ConfigurationError } from './errors'
 import { NestTransport } from './api/transport'
 import type { TraitUpdate } from './api/protobuf'
+import { buildThermostatSetpointWrite } from './api/thermostat-write'
 import {
   DiagnosticsCollector,
   type DiagnosticsReaders,
@@ -184,9 +187,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     this.#startedAt = Date.now()
 
     if (this.#config.allowThermostatControl) {
-      this.#log.warn(
-        'Allow Thermostat Control ignored — thermostats are read-only in this version.',
-      )
+      this.#log.info('Thermostat control enabled (Nest BatchUpdateState).')
     }
 
     const diagnostics = this.#diagnostics
@@ -573,6 +574,41 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       return new ProtectAccessory(this, accessory, device, log)
     }
     return new TemperatureSensorAccessory(this, accessory, device, log)
+  }
+
+  /**
+   * Apply a HomeKit-originated thermostat change via Nest BatchUpdateState.
+   *
+   * No-ops (with a warning) when control is disabled so characteristics can
+   * stay writable for HomeKit presentation without guessing at HVAC writes.
+   *
+   * @returns `true` when a Nest write was sent; `false` when control is off.
+   */
+  async applyThermostatWrite(
+    deviceId: string,
+    state: ThermostatState,
+    patch: Partial<{
+      mode: HvacMode
+      targetTemperatureC: number
+      targetTemperatureLowC: number
+      targetTemperatureHighC: number
+    }>,
+  ): Promise<boolean> {
+    if (!this.#config?.allowThermostatControl) {
+      this.#log.warn(
+        `Ignoring thermostat write for ${deviceId} — enable Allow thermostat control in config.`,
+      )
+      return false
+    }
+
+    const transport = this.#transport
+    if (!transport) {
+      throw new ConfigurationError('Nest transport is not running')
+    }
+
+    const write = buildThermostatSetpointWrite(toResourceId(deviceId), state, patch)
+    await transport.updateThermostatSettings(write)
+    return true
   }
 
   /**

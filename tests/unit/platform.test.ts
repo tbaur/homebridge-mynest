@@ -195,10 +195,9 @@ describe('MyNestPlatform', () => {
     expect(api.registered).toHaveLength(0)
   })
 
-  it('warns that thermostat writes are unsupported when the flag is on', async () => {
+  it('logs that thermostat control is enabled when the flag is on', async () => {
     await launch({ allowThermostatControl: true })
-    expect(log.warns.join('\n')).toContain('Allow Thermostat Control ignored')
-    expect(log.warns.join('\n')).toMatch(/read-only/i)
+    expect(log.infos.join('\n')).toMatch(/Thermostat control enabled/)
   })
 
   it('keeps Protect smoke/CO when the REST alarm feed becomes unavailable', async () => {

@@ -12,11 +12,12 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 | `src/api/rest.ts` | `app_launch` + `/v5/subscribe` |
 | `src/api/observe.ts` | HTTP/2 Observe stream |
 | `src/api/framing.ts` / `protobuf.ts` | Length-delimited frames and trait decode |
-| `src/api/transport.ts` | Independent REST + Observe run loops |
+| `src/api/thermostat-write.ts` / `batch-update.ts` | Encode + POST Nest BatchUpdateState for thermostat control |
+| `src/api/transport.ts` | Independent REST + Observe run loops (+ thermostat writes) |
 | `src/state/*` | Observe∪REST merge, Protect/thermostat/sensor readers |
 | `src/accessories/*` | HomeKit accessories + HB2-safe `CharacteristicBinder` |
 | `src/utils/sanitizers.ts` | Central secret redaction |
-| `assets/protobuf/` | Vendored decode-only Nest schemas + ObserveTraits blob |
+| `assets/protobuf/` | Vendored Nest schemas (Observe decode + thermostat write encode) + ObserveTraits blob |
 
 ## Design principles
 

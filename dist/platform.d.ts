@@ -13,6 +13,7 @@
  */
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 import type { ResolvedConfig } from './types/config';
+import { type HvacMode, type ThermostatState } from './types/device';
 export declare class MyNestPlatform implements DynamicPlatformPlugin {
     #private;
     readonly Service: typeof Service;
@@ -22,5 +23,19 @@ export declare class MyNestPlatform implements DynamicPlatformPlugin {
     get resolvedConfig(): ResolvedConfig;
     /** Homebridge replays cached accessories here before `didFinishLaunching`. */
     configureAccessory(accessory: PlatformAccessory): void;
+    /**
+     * Apply a HomeKit-originated thermostat change via Nest BatchUpdateState.
+     *
+     * No-ops (with a warning) when control is disabled so characteristics can
+     * stay writable for HomeKit presentation without guessing at HVAC writes.
+     *
+     * @returns `true` when a Nest write was sent; `false` when control is off.
+     */
+    applyThermostatWrite(deviceId: string, state: ThermostatState, patch: Partial<{
+        mode: HvacMode;
+        targetTemperatureC: number;
+        targetTemperatureLowC: number;
+        targetTemperatureHighC: number;
+    }>): Promise<boolean>;
 }
 //# sourceMappingURL=platform.d.ts.map
