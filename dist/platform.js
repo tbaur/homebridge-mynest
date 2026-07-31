@@ -412,6 +412,7 @@ class MyNestPlatform {
     /** Create or adopt the HomeKit accessory for a device seen for the first time. */
     #publish(device) {
         const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${device.identity.id}`);
+        const category = this.#categoryFor(device.identity.kind);
         const context = {
             deviceId: device.identity.id,
             kind: device.identity.kind,
@@ -423,10 +424,16 @@ class MyNestPlatform {
             accessory = cached;
             accessory.context = context;
             accessory.displayName = device.identity.name;
+            // Homebridge 2.x may omit uncategorized accessories from room tiles even
+            // though they still appear under Settings → Bridge → Accessories.
+            accessory.category = category;
             this.api.updatePlatformAccessories([accessory]);
         }
         else {
-            accessory = new this.api.platformAccessory(device.identity.name, uuid);
+            // Pass category to Homebridge's PlatformAccessory; also assign it because
+            // some doubles (and older HAP paths) ignore the constructor argument.
+            accessory = new this.api.platformAccessory(device.identity.name, uuid, category);
+            accessory.category = category;
             accessory.context = context;
             this.#cachedAccessories.set(uuid, accessory);
             this.api.registerPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
@@ -439,6 +446,21 @@ class MyNestPlatform {
         }
         const log = (0, logger_1.createScopedLogger)(this.#rawLog, device.identity.name, this.#config?.debug === true);
         this.#handlers.set(device.identity.id, this.#createHandler(accessory, device, log));
+    }
+    /** HAP accessory category so Home shows room tiles (required on Homebridge 2). */
+    #categoryFor(kind) {
+        const { Categories } = this.api.hap;
+        switch (kind) {
+            case 'thermostat':
+                return 9 /* Categories.THERMOSTAT */;
+            case 'protect':
+            case 'temperature_sensor':
+                return 10 /* Categories.SENSOR */;
+            default: {
+                const exhaustive = kind;
+                return exhaustive;
+            }
+        }
     }
     #createHandler(accessory, device, log) {
         if ((0, device_1.isDeviceOfKind)(device, 'thermostat')) {

@@ -11,13 +11,22 @@ import { EventEmitter } from 'node:events'
 import { Accessory, Characteristic, Service, uuid } from '@homebridge/hap-nodejs'
 import type { API, Logging, PlatformAccessory } from 'homebridge'
 
-const hapPerms = (jest.requireActual('@homebridge/hap-nodejs') as {
+const hapActual = jest.requireActual('@homebridge/hap-nodejs') as {
   Perms: Record<string, string>
-}).Perms
+  Categories: Record<string, number>
+}
+const hapPerms = hapActual.Perms
+const hapCategories = hapActual.Categories
 
 /** A Homebridge `API` double that records register / unregister / update. */
 export class FakeHomebridgeApi extends EventEmitter {
-  readonly hap = { Service, Characteristic, uuid, Perms: hapPerms }
+  readonly hap = {
+    Service,
+    Characteristic,
+    uuid,
+    Perms: hapPerms,
+    Categories: hapCategories,
+  }
   readonly platformAccessory = Accessory
 
   readonly registered: PlatformAccessory[] = []
