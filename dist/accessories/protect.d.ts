@@ -31,6 +31,8 @@ import type { MyNestPlatform } from '../platform';
 import { NestAccessory } from './base';
 export declare class ProtectAccessory extends NestAccessory<ProtectState> {
     #private;
+    /** @internal Clears the process-wide occupancy hint flag (tests only). */
+    static resetOccupancyHintForTests(): void;
     constructor(platform: MyNestPlatform, accessory: PlatformAccessory, device: Extract<NestDevice, {
         identity: {
             kind: 'protect';

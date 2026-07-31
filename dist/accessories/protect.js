@@ -25,17 +25,23 @@
  * goes stale, tiles stay published (so HomeKit rooms/automations survive) but
  * are marked inactive/faulted — never a live frozen all-clear. See `docs/PROTOCOL.md`.
  */
+var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProtectAccessory = void 0;
 const settings_1 = require("../settings");
 const protect_state_1 = require("../state/protect-state");
 const base_1 = require("./base");
 class ProtectAccessory extends base_1.NestAccessory {
+    /** Once per process — the hint is the same for every Protect. */
+    static #didLogOccupancyHint = false;
     #smokeService = null;
     #coService = null;
     #didLogMissingAlarms = false;
     #didLogAlarmFeedStale = false;
-    #didLogOccupancy = false;
+    /** @internal Clears the process-wide occupancy hint flag (tests only). */
+    static resetOccupancyHintForTests() {
+        _a.#didLogOccupancyHint = false;
+    }
     constructor(platform, accessory, device, log) {
         super(platform, accessory, device, log);
         this.bindCharacteristics();
@@ -71,7 +77,7 @@ class ProtectAccessory extends base_1.NestAccessory {
             this.#coService = null;
             if (!this.#didLogMissingAlarms) {
                 this.#didLogMissingAlarms = true;
-                this.log.info(`${this.identity.name}: no smoke/CO sensors — Nest has not reported alarm state over REST for this Protect (common for Observe-only units). Battery and online status may still appear.`);
+                this.log.info(`${this.identity.name}: Observe-only — no Smoke/CO (REST has no alarm state); ${this.#describeNonAlarmPublish()}.`);
             }
             return;
         }
@@ -79,12 +85,12 @@ class ProtectAccessory extends base_1.NestAccessory {
         if (this.state.isAlarmFeedStale) {
             if (!this.#didLogAlarmFeedStale) {
                 this.#didLogAlarmFeedStale = true;
-                this.log.warn(`${this.identity.name}: Nest REST is not refreshing alarm state — smoke/CO kept in HomeKit but marked inactive until REST recovers.`);
+                this.log.warn(`${this.identity.name}: REST alarm feed stale — Smoke/CO kept, marked inactive.`);
             }
         }
         else if (this.#didLogAlarmFeedStale) {
             this.#didLogAlarmFeedStale = false;
-            this.log.info(`${this.identity.name}: Nest REST alarm feed restored — smoke/CO are live again.`);
+            this.log.info(`${this.identity.name}: REST alarm feed restored — Smoke/CO live again.`);
         }
         this.#smokeService = this.resolveService(HapService.SmokeSensor);
         this.#smokeService.setCharacteristic(Characteristic.Name, `${this.identity.name} Smoke`);
@@ -108,6 +114,24 @@ class ProtectAccessory extends base_1.NestAccessory {
     /** Alarm readings are live only while online and the REST feed is fresh. */
     #isAlarmReadingLive() {
         return this.state.isOnline !== false && this.state.isAlarmFeedStale !== true;
+    }
+    /** What an Observe-only Protect will still expose (for the missing-alarm log). */
+    #describeNonAlarmPublish() {
+        const parts = [];
+        if (this.state.isBatteryLow !== undefined || this.state.batteryVolts !== undefined) {
+            parts.push('battery');
+        }
+        if (this.config.exposeProtectTemperature) {
+            if (this.state.temperatureC !== undefined) {
+                parts.push('temperature');
+            }
+            if (this.state.humidity !== undefined) {
+                parts.push('humidity');
+            }
+        }
+        return parts.length > 0
+            ? `publishing ${parts.join(' + ')} only`
+            : 'nothing else to publish yet';
     }
     /**
      * Standalone battery for Protects that cannot publish smoke/CO yet.
@@ -164,9 +188,9 @@ class ProtectAccessory extends base_1.NestAccessory {
         this.binder.bind(service, Characteristic.StatusFault, () => this.#isAlarmReadingLive()
             ? Characteristic.StatusFault.NO_FAULT
             : Characteristic.StatusFault.GENERAL_FAULT);
-        if (!this.#didLogOccupancy) {
-            this.#didLogOccupancy = true;
-            this.log.info(`${this.identity.name}: occupancy is Nest's ${settings_1.PROTECT_OCCUPANCY_HOLD_OFF_SEC / 60}-minute presence verdict, not motion — it will not react instantly to someone walking past.`);
+        if (!_a.#didLogOccupancyHint) {
+            _a.#didLogOccupancyHint = true;
+            this.log.info(`Protect occupancy is Nest ~${settings_1.PROTECT_OCCUPANCY_HOLD_OFF_SEC / 60}-min presence (auto_away), not motion.`);
         }
     }
     /**
@@ -268,4 +292,5 @@ class ProtectAccessory extends base_1.NestAccessory {
     }
 }
 exports.ProtectAccessory = ProtectAccessory;
+_a = ProtectAccessory;
 //# sourceMappingURL=protect.js.map
