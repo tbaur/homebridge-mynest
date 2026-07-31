@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.5](https://github.com/tbaur/homebridge-mynest/compare/v0.1.4...v0.1.5) (2026-07-31)
+
+
+### Bug Fixes
+
+* set HAP accessory categories for HomeKit room tiles ([#11](https://github.com/tbaur/homebridge-mynest/issues/11)) ([cef3bb5](https://github.com/tbaur/homebridge-mynest/commit/cef3bb556cc067869078c8b1247a49bf5a2099a5))
+
 ## [0.1.4](https://github.com/tbaur/homebridge-mynest/compare/v0.1.3...v0.1.4) (2026-07-31)
 
 
