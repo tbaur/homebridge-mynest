@@ -90,6 +90,8 @@ HomeKit has no Eco thermostat mode, so the plugin exposes Eco as a Switch (per t
 
 There is no nest-probe confirm path for Eco-only writes yet; enable `allowThermostatControl` only after you are comfortable with live Nest writes on your account.
 
+The optional house-wide switch (`exposeGlobalEcoSwitch`) posts Eco to every live thermostat accessory. It reports success only when every write succeeds; HomeKit stays optimistic until Nest's all-Eco aggregate matches (or 45s elapses and Nest truth wins).
+
 ## Homebridge 2 update path
 
 Never push live values with removed `Characteristic.getValue()`, and never call `updateValue(characteristic.value)` (that is the cached value). Store the getter next to the characteristic and call `updateValue(getFunc())` on Nest updates. See `src/utils/bound-characteristics.ts`.

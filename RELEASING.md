@@ -7,14 +7,14 @@ Releases are fully automated with [release-please](https://github.com/googleapis
 1. A branch is created and changes are committed.
 2. A PR is opened with a **Conventional Commit title**. The title determines the next version when the PR is squash-merged into `main`:
 
-   | PR title prefix | Example | Version bump (pre-1.0) |
+   | PR title prefix | Example | Version bump (1.x) |
    | --- | --- | --- |
-   | `fix:` | `fix: rate-limit REST subscribe success path` | patch (0.1.0 → 0.1.1) |
-   | `feat:` | `feat: thermostat write path behind confirm` | patch (0.1.0 → 0.1.1) |
-   | `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer | `feat!: drop Node 20` | minor (0.1.0 → 0.2.0) |
+   | `fix:` | `fix: rate-limit REST subscribe success path` | patch (1.0.0 → 1.0.1) |
+   | `feat:` | `feat: expose Protect humidity` | minor (1.0.0 → 1.1.0) |
+   | `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer | `feat!: drop Node 20` | major (1.0.0 → 2.0.0) |
    | `chore:`, `docs:`, `refactor:`, `test:`, `ci:` | `docs: fix typo` | no release |
 
-   The bumps above are damped while the version is below `1.0.0`, because `release-please-config.json` sets `bump-minor-pre-major` and `bump-patch-for-minor-pre-major`. Once `1.0.0` ships, the same prefixes resume their normal meaning.
+   To force an exact version (for example graduating to `1.0.0`), put `Release-As: 1.0.0` in the commit/PR body footer. release-please will open a Release PR for that version.
 
 3. The **Tests** workflow runs on the PR (matrix: Node 20, 22, 24, plus a security audit). The PR is squash-merged to `main`.
 4. **release-please** opens or updates a **Release PR** titled `chore(main): release X.Y.Z`.

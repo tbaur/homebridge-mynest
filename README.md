@@ -75,7 +75,9 @@ Use the Homebridge UI, or add the platform to `config.json`:
 
 ### 4. Restart Homebridge
 
-Thermostats, Protects, and temperature sensors appear in the Home app as Nest reports them.
+Thermostats, Protects, and temperature sensors appear in the Home app as Nest reports them. The log should show `Connected to Nest`, then device adds, then `Platform ready`.
+
+Thermostat control (mode, setpoints, Eco) stays off until you enable **Allow thermostat control**. Optionally enable **Expose global Eco switch** for a house-wide Nest Eco Mode tile.
 
 ## Supported Devices
 
@@ -85,7 +87,7 @@ Thermostats, Protects, and temperature sensors appear in the Home app as Nest re
 | Nest Protect | Smoke + CO (+ optional occupancy / temp) | Smoke/CO require REST `topaz`; occupancy is ~10-minute presence |
 | Temperature Sensor | Temperature Sensor | Battery + temperature |
 
-Cameras, doorbells, locks, and Home/Away structure switches are out of scope for v1.
+Cameras, doorbells, locks, and Home/Away structure switches are out of scope.
 
 ## Configuration Options
 
@@ -113,8 +115,10 @@ Nest does not expose a reliable Protect motion event stream to third-party clien
 
 1. **Authentication error** — Token missing, truncated, Google JWT/`ya29.`, or revoked. Capture a fresh Nest Account token ([docs/AUTH.md](docs/AUTH.md)).
 2. **Thermostat missing** — Modern thermostats are Observe-only on some accounts. With default logging the plugin warns within about a minute if Observe produced no frames; set `debug: true` for stream detail, or run `npm run verify`.
-3. **Protect without smoke/CO** — Likely Observe-only (missing from REST). The accessory still appears; alarm tiles wait for REST.
-4. **No occupancy** — Battery Protect, power unknown, Observe-only Protect, or `exposeProtectOccupancy` off.
+3. **Thermostat in Settings but no room tile** — Remove and re-add the My Nest child bridge in the Home app, then assign rooms again. Same-UUID republish does not clear Apple Home's stuck presentation.
+4. **Eco / setpoint changes snap back** — Enable **Allow thermostat control**. With control off, HomeKit can still move the UI (required for tiles) but Nest ignores the write and the plugin reverts.
+5. **Protect without smoke/CO** — Likely Observe-only (missing from REST). The accessory still appears; alarm tiles wait for REST.
+6. **No occupancy** — Battery Protect, power unknown, Observe-only Protect, or `exposeProtectOccupancy` off.
 
 ## Security
 

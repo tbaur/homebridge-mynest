@@ -4,9 +4,10 @@
 
 | Version | Supported         |
 | ------- | ----------------- |
-| 0.1.x   | ✅ Active support |
+| 1.x.x   | ✅ Active support |
+| 0.1.x   | ❌ Unsupported (upgrade to 1.x) |
 
-While the plugin is pre-1.0, only the most recent release is supported. Fixes are shipped forward rather than backported.
+Only the latest 1.x release is supported. Fixes are shipped forward rather than backported.
 
 ## Reporting a Vulnerability
 
@@ -41,7 +42,7 @@ This plugin implements:
 - Nest Account tokens only — Google JWT / `ya29.` shapes are rejected at config validation
 - Secret redaction in structured logs
 - Transport URL host allowlisting before the session token is sent
-- Thermostat writes use Nest BatchUpdateState behind opt-in `allowThermostatControl` (off by default)
+- Thermostat mode/setpoint/Eco writes use Nest BatchUpdateState behind opt-in `allowThermostatControl` (off by default)
 - No analytics or telemetry
 
 ## Scope limits
