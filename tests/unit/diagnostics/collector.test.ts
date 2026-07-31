@@ -148,16 +148,30 @@ describe('DiagnosticsCollector', () => {
     )
   })
 
-  it('marks observeDown after the silence grace when no recent frames', () => {
+  it('marks observeDown only when Observe stays connecting past the grace window', () => {
     const m = makeReaders()
     const collector = new DiagnosticsCollector({ pluginVersion: '0.1.0', config: baseConfig() })
 
+    // Connected + quiet (old last frame) is normal Nest silence, not down.
+    m.observeState.value = 'connected'
     m.lastObserveFrameAgeSec.value = 90
     m.uptimeSec.value = 120
+    expect(collector.rollup(m.readers).reasons).not.toContain('observeDown')
+
+    m.observeState.value = 'connecting'
     expect(collector.rollup(m.readers).reasons).toContain('observeDown')
 
-    m.lastObserveFrameAgeSec.value = 5
+    m.uptimeSec.value = 10
     expect(collector.rollup(m.readers).reasons).not.toContain('observeDown')
+  })
+
+  it('omits latency samples when sampleLatency is false', () => {
+    const collector = new DiagnosticsCollector({ pluginVersion: '0.1.0', config: baseConfig() })
+
+    collector.apiRequest(100, true)
+    collector.apiRequest(120_000, true, { sampleLatency: false })
+
+    expect(collector.percentile(95)).toBe(100)
   })
 
   it('marks apiErrorRateHigh once enough recent failures accumulate', () => {

@@ -155,7 +155,7 @@ class MyNestPlatform {
             statusHeartbeatEnabled: this.#config.diagnosticsInterval <= 0,
             metrics: diagnostics
                 ? {
-                    apiRequest: (ms, ok, networked) => diagnostics.apiRequest(ms, ok, networked),
+                    apiRequest: (ms, ok, options) => diagnostics.apiRequest(ms, ok, options),
                     sessionLogin: () => diagnostics.sessionLogin(),
                     restCycle: (ok, ms) => diagnostics.restCycle(ok, ms),
                     observeReconnect: () => diagnostics.observeReconnect(),

@@ -17,13 +17,24 @@
  */
 import type { ResolvedConfig } from '../types/config';
 import type { DeviceGauges, DiagnosticsSnapshot, TransportGauges } from './types';
+/** Options for {@link DiagnosticsCollector.apiRequest}. */
+export interface ApiRequestMetricOptions {
+    /** False when no network fetch ran (e.g. open circuit). Defaults to true. */
+    networked?: boolean;
+    /**
+     * Whether to include `latencyMs` in percentile samples. Defaults to
+     * {@link networked}. Idle REST subscribe long-polls set this false so a
+     * quiet house does not report multi-minute p95.
+     */
+    sampleLatency?: boolean;
+}
 /** Accessors the collector calls to read live in-memory state. */
 export interface DiagnosticsReaders {
     transport: () => TransportGauges;
     devices: () => DeviceGauges;
     /** Platform has permanently stopped after Nest auth failure. */
     fatalActive: () => boolean;
-    /** Wall-clock seconds since platform start (for Observe silence grace). */
+    /** Wall-clock seconds since platform start (for Observe connecting grace). */
     uptimeSec: () => number;
 }
 interface CollectorOptions {
@@ -44,10 +55,14 @@ export declare class DiagnosticsCollector {
     /**
      * Record a single API request outcome and its wall-clock duration.
      *
-     * Latency is only sampled when a network fetch was actually attempted
-     * (`networked`), so pre-flight skips do not skew percentiles.
+     * Latency is only sampled when a network fetch was attempted and
+     * {@link ApiRequestMetricOptions.sampleLatency} is not false, so open-breaker
+     * skips and idle subscribe long-polls do not skew percentiles.
+     *
+     * The third argument accepts the legacy `networked` boolean or an options
+     * object (`{ networked, sampleLatency }`).
      */
-    apiRequest(latencyMs: number, ok: boolean, networked?: boolean): void;
+    apiRequest(latencyMs: number, ok: boolean, options?: boolean | ApiRequestMetricOptions): void;
     /** Record the result of a REST subscribe / app_launch cycle. */
     restCycle(ok: boolean, durationMs: number): void;
     /** Record an Observe reconnect (a new HTTP/2 session is opening). */

@@ -66,7 +66,10 @@ export interface NestTransportOptions {
 }
 /** Counter hooks used by the platform diagnostics collector. */
 export interface TransportMetrics {
-    apiRequest?: (latencyMs: number, ok: boolean, networked?: boolean) => void;
+    apiRequest?: (latencyMs: number, ok: boolean, options?: boolean | {
+        networked?: boolean;
+        sampleLatency?: boolean;
+    }) => void;
     sessionLogin?: () => void;
     restCycle?: (ok: boolean, durationMs: number) => void;
     observeReconnect?: () => void;

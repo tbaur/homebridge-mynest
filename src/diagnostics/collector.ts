@@ -32,10 +32,23 @@ const API_ERROR_MIN_SAMPLES = 10
 const API_ERROR_RATE_THRESHOLD = 0.5
 
 /**
- * Seconds Observe may stay silent (after the startup grace) before health
- * is degraded. Matches the transport's own silence warning window.
+ * Seconds Observe may stay in `connecting` (after startup) before health is
+ * degraded. Nest Observe is event-driven: a quiet connected stream often has
+ * no frames for minutes, so frame silence alone is not a failure signal.
  */
-const OBSERVE_DOWN_THRESHOLD_SEC = 60
+const OBSERVE_CONNECTING_DOWN_SEC = 60
+
+/** Options for {@link DiagnosticsCollector.apiRequest}. */
+export interface ApiRequestMetricOptions {
+  /** False when no network fetch ran (e.g. open circuit). Defaults to true. */
+  networked?: boolean
+  /**
+   * Whether to include `latencyMs` in percentile samples. Defaults to
+   * {@link networked}. Idle REST subscribe long-polls set this false so a
+   * quiet house does not report multi-minute p95.
+   */
+  sampleLatency?: boolean
+}
 
 /** Accessors the collector calls to read live in-memory state. */
 export interface DiagnosticsReaders {
@@ -43,7 +56,7 @@ export interface DiagnosticsReaders {
   devices: () => DeviceGauges
   /** Platform has permanently stopped after Nest auth failure. */
   fatalActive: () => boolean
-  /** Wall-clock seconds since platform start (for Observe silence grace). */
+  /** Wall-clock seconds since platform start (for Observe connecting grace). */
   uptimeSec: () => number
 }
 
@@ -108,16 +121,30 @@ export class DiagnosticsCollector {
   /**
    * Record a single API request outcome and its wall-clock duration.
    *
-   * Latency is only sampled when a network fetch was actually attempted
-   * (`networked`), so pre-flight skips do not skew percentiles.
+   * Latency is only sampled when a network fetch was attempted and
+   * {@link ApiRequestMetricOptions.sampleLatency} is not false, so open-breaker
+   * skips and idle subscribe long-polls do not skew percentiles.
+   *
+   * The third argument accepts the legacy `networked` boolean or an options
+   * object (`{ networked, sampleLatency }`).
    */
-  apiRequest(latencyMs: number, ok: boolean, networked = true): void {
+  apiRequest(
+    latencyMs: number,
+    ok: boolean,
+    options: boolean | ApiRequestMetricOptions = {},
+  ): void {
+    const resolved = typeof options === 'boolean'
+      ? { networked: options, sampleLatency: options }
+      : options
+    const networked = resolved.networked ?? true
+    const sampleLatency = resolved.sampleLatency ?? networked
+
     this.#apiRequests++
     if (!ok) {
       this.#apiErrors++
     }
 
-    if (networked && Number.isFinite(latencyMs) && latencyMs >= 0) {
+    if (sampleLatency && Number.isFinite(latencyMs) && latencyMs >= 0) {
       this.#latencies.push(latencyMs)
       if (this.#latencies.length > LATENCY_WINDOW) {
         this.#latencies.shift()
@@ -225,12 +252,11 @@ export class DiagnosticsCollector {
     }
 
     const uptimeSec = readers.uptimeSec()
+    // Only "stuck connecting" is Observe-down. A connected quiet stream is
+    // healthy — Nest often sends no frames for long stretches on a calm home.
     if (
-      transport.observeState !== 'forbidden_dead'
-      && transport.observeState !== 'stopped'
-      && uptimeSec >= OBSERVE_DOWN_THRESHOLD_SEC
-      && (transport.lastObserveFrameAgeSec === null
-        || transport.lastObserveFrameAgeSec >= OBSERVE_DOWN_THRESHOLD_SEC)
+      transport.observeState === 'connecting'
+      && uptimeSec >= OBSERVE_CONNECTING_DOWN_SEC
     ) {
       reasons.push('observeDown')
     }
