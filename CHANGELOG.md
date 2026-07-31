@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.6](https://github.com/tbaur/homebridge-mynest/compare/v0.1.5...v0.1.6) (2026-07-31)
+
+
+### Bug Fixes
+
+* never return null from required thermostat onGets ([#13](https://github.com/tbaur/homebridge-mynest/issues/13)) ([f3abd0f](https://github.com/tbaur/homebridge-mynest/commit/f3abd0f43931e58cbfc0e4f23505b1a5f109ee55))
+
 ## [0.1.5](https://github.com/tbaur/homebridge-mynest/compare/v0.1.4...v0.1.5) (2026-07-31)
 
 

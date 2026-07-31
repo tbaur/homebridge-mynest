@@ -1,7 +1,7 @@
 {
   "name": "homebridge-mynest",
   "displayName": "Homebridge My Nest",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A Homebridge plugin for Nest thermostats, Nest Protect, and Nest temperature sensors using a Nest Account access token",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
