@@ -90,6 +90,11 @@ class ThermostatAccessory extends base_1.NestAccessory {
      */
     #applyCharacteristicProps() {
         const { Characteristic } = this.platform;
+        this.#service.getCharacteristic(Characteristic.CurrentTemperature).setProps({
+            minValue: 0,
+            maxValue: 100,
+            minStep: settings_1.SETPOINT_STEP_C,
+        });
         this.#service.getCharacteristic(Characteristic.TargetHeatingCoolingState).setProps({
             validValues: this.#supportedTargetStates(),
         });

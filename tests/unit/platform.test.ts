@@ -303,13 +303,15 @@ describe('MyNestPlatform', () => {
     expect(byId.get(OBSERVE_ONLY_PROTECT_ID)).toBe(Categories.SENSOR)
   })
 
-  it('repairs a cached accessory missing its HomeKit category', async () => {
+  it('republishes a cached thermostat so Apple Home can show a room tile', async () => {
+    // updatePlatformAccessories alone leaves Settings-only "No Response" tiles.
     const cachedUuid = uuid.generate(`${UUID_PREFIX}${THERMOSTAT_ID}`)
     const cached = new Accessory('Hallway Thermostat', cachedUuid) as unknown as PlatformAccessory
     cached.context = {
       deviceId: THERMOSTAT_ID,
       kind: 'thermostat',
       displayName: 'Hallway Thermostat',
+      // Missing tileEpoch → force unregister + register.
     }
     cached.category = Categories.OTHER
 
@@ -335,8 +337,14 @@ describe('MyNestPlatform', () => {
     })
     flushSync()
 
-    expect(cached.category).toBe(Categories.THERMOSTAT)
-    expect(api.updated).toContain(cached)
+    expect(api.unregistered).toContain(cached)
+    const republished = api.registered.find(
+      (accessory) => (accessory.context as { deviceId?: string }).deviceId === THERMOSTAT_ID,
+    )
+    expect(republished).toBeDefined()
+    expect(republished!.category).toBe(Categories.THERMOSTAT)
+    expect((republished!.context as { tileEpoch?: number }).tileEpoch).toBe(1)
+    expect(log.infos.join('\n')).toMatch(/Republishing thermostat/)
   })
 
   it('adopts a cached accessory instead of registering a duplicate', async () => {
