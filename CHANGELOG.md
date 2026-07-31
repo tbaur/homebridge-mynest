@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [0.1.1](https://github.com/tbaur/homebridge-mynest/compare/v0.1.0...v0.1.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* show Ignored Device IDs input in Homebridge UI ([#3](https://github.com/tbaur/homebridge-mynest/issues/3)) ([0e7d966](https://github.com/tbaur/homebridge-mynest/commit/0e7d9668ae1e9dc01da5fd5e04c8aceeae361fe6))
+
 ## [Unreleased]
 
 ## 0.1.0
