@@ -19,8 +19,13 @@
 import type { ResolvedConfig } from '../types/config'
 import type { DeviceGauges, DiagnosticsSnapshot, TransportGauges } from './types'
 
-/** Maximum number of recent request latencies retained for percentile math. */
-const LATENCY_WINDOW = 200
+/**
+ * Recent request latencies retained for percentile math.
+ *
+ * Kept short so a rare slow `app_launch` cannot pin p95 for hours while the
+ * subscribe loop generates high request volume without latency samples.
+ */
+const LATENCY_WINDOW = 40
 
 /** Recent request outcomes retained for the rollup error-rate calculation. */
 const OUTCOME_WINDOW = 50
@@ -44,8 +49,8 @@ export interface ApiRequestMetricOptions {
   networked?: boolean
   /**
    * Whether to include `latencyMs` in percentile samples. Defaults to
-   * {@link networked}. Idle REST subscribe long-polls set this false so a
-   * quiet house does not report multi-minute p95.
+   * {@link networked}. REST `/v5/subscribe` long-polls always set this false
+   * — wait time is not request latency (session/`app_launch` still sample).
    */
   sampleLatency?: boolean
 }
@@ -123,7 +128,7 @@ export class DiagnosticsCollector {
    *
    * Latency is only sampled when a network fetch was attempted and
    * {@link ApiRequestMetricOptions.sampleLatency} is not false, so open-breaker
-   * skips and idle subscribe long-polls do not skew percentiles.
+   * skips and REST subscribe long-polls do not skew percentiles.
    *
    * The third argument accepts the legacy `networked` boolean or an options
    * object (`{ networked, sampleLatency }`).

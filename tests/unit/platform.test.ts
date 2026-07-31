@@ -193,8 +193,8 @@ describe('MyNestPlatform', () => {
 
   it('warns that thermostat writes are unsupported when the flag is on', async () => {
     await launch({ allowThermostatControl: true })
-    expect(log.warns.join('\n')).toContain('Allow Thermostat Control')
-    expect(log.warns.join('\n')).toMatch(/not supported yet/i)
+    expect(log.warns.join('\n')).toContain('Allow Thermostat Control ignored')
+    expect(log.warns.join('\n')).toMatch(/read-only/i)
   })
 
   it('keeps Protect smoke/CO when the REST alarm feed becomes unavailable', async () => {
@@ -370,7 +370,7 @@ describe('MyNestPlatform', () => {
     )
     expect(removedIds).toContain(OBSERVE_ONLY_PROTECT_ID)
     expect(removedIds).not.toContain(THERMOSTAT_ID)
-    expect(log.infos.join('\n')).toMatch(/no longer reports/i)
+    expect(log.infos.join('\n')).toMatch(/Observe dropped|Nest no longer reports/i)
   })
 
   it('does not prune when a reconnect snapshot looks truncated', async () => {
@@ -543,8 +543,8 @@ describe('MyNestPlatform', () => {
     // Token expiry needs a manual paste + restart — not accessory churn.
     expect(api.unregistered).toHaveLength(0)
     expect(api.registered).toHaveLength(published)
-    expect(log.errors.join('\n')).toMatch(/fresh Nest Account access token/i)
-    expect(log.errors.join('\n')).toContain('No further updates will be attempted')
+    expect(log.errors.join('\n')).toMatch(/home\.nest\.com\/session/)
+    expect(log.errors.join('\n')).toMatch(/Accessories were kept/)
     // Last readings stay, but must not look like a live all-clear after auth dies.
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(false)
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusFault).value)
