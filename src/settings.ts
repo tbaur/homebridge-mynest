@@ -7,11 +7,12 @@
  * @fileoverview Plugin-wide constants and Nest endpoints.
  *
  * Nest publishes no consumer API for these paths and no documentation. Every
- * value here was confirmed empirically against a live account with a
- * read-only probe kit, and each one that looks arbitrary carries a comment
- * explaining why it is what it is. Treat this file as the record of what the
- * service actually does, because nothing external will tell you when it
- * changes.
+ * value here was confirmed empirically against a live account with the
+ * nest-probe kit (reads by default; probe 12 dry-runs BatchUpdateState encode,
+ * with optional operator `--confirm` for a live POST), and each one that looks
+ * arbitrary carries a comment explaining why it is what it is. Treat this file
+ * as the record of what the service actually does, because nothing external
+ * will tell you when it changes.
  */
 
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -58,6 +59,8 @@ export interface NestEndpoints {
   readonly grpcOrigin: string
   /** Path on {@link grpcOrigin} that streams trait snapshots and patches. */
   readonly observePath: string
+  /** Path on {@link grpcOrigin} for thermostat (and other trait) writes. */
+  readonly batchUpdatePath: string
   /** Path appended to the session's `transport_url` for the REST long-poll. */
   readonly subscribePath: string
 }
@@ -67,6 +70,7 @@ const PRODUCTION_ENDPOINTS: NestEndpoints = {
   sessionUrl: 'https://home.nest.com/session',
   grpcOrigin: 'https://grpc-web.production.nest.com',
   observePath: '/nestlabs.gateway.v2.GatewayService/Observe',
+  batchUpdatePath: '/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState',
   subscribePath: '/v5/subscribe',
 }
 
@@ -75,6 +79,7 @@ const FIELD_TEST_ENDPOINTS: NestEndpoints = {
   sessionUrl: 'https://home.ft.nest.com/session',
   grpcOrigin: 'https://grpc-web.ft.nest.com',
   observePath: PRODUCTION_ENDPOINTS.observePath,
+  batchUpdatePath: PRODUCTION_ENDPOINTS.batchUpdatePath,
   subscribePath: PRODUCTION_ENDPOINTS.subscribePath,
 }
 

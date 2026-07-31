@@ -21,6 +21,8 @@ const protobuf_1 = require("./protobuf");
 const rest_1 = require("./rest");
 const session_1 = require("./session");
 const observe_1 = require("./observe");
+const batch_update_1 = require("./batch-update");
+const thermostat_write_1 = require("./thermostat-write");
 const circuit_breaker_1 = require("./circuit-breaker");
 const retry_1 = require("../utils/retry");
 const sanitizers_1 = require("../utils/sanitizers");
@@ -207,6 +209,39 @@ class NestTransport {
             this.#startStatusHeartbeat();
         }
         this.#scheduleObserveStartupWarn();
+    }
+    /**
+     * Push a thermostat mode/setpoint change through BatchUpdateState.
+     *
+     * Observe-only thermostats have no REST `/v5/put` path; this is the write
+     * Nest's own web app uses. Callers should already have gated on
+     * `allowThermostatControl`.
+     */
+    async updateThermostatSettings(write) {
+        if (this.#isStopped) {
+            throw new errors_1.ConfigurationError('Nest transport is stopped; cannot write thermostat settings');
+        }
+        const session = await this.#ensureSession();
+        const body = (0, thermostat_write_1.encodeTargetTemperatureBatchUpdate)(write);
+        const started = Date.now();
+        try {
+            await (0, batch_update_1.postBatchUpdateState)({
+                session,
+                endpoints: this.#options.endpoints,
+                body,
+                signal: this.#abort.signal,
+                fetchImpl: this.#options.fetchImpl,
+            });
+            this.#options.metrics?.apiRequest?.(Date.now() - started, true, { networked: true });
+            this.#options.log.info(`Thermostat write ${write.resourceId}: mode=${write.mode} `
+                + `heat=${write.targetTemperatureHeatC.toFixed(1)} `
+                + `cool=${write.targetTemperatureCoolC.toFixed(1)}`);
+        }
+        catch (error) {
+            this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true });
+            // Accessory `#write` logs once and reverts HomeKit — do not warn here too.
+            throw error;
+        }
     }
     /** Stop both loops and release the session. */
     stop() {

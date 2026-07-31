@@ -55,6 +55,22 @@ function readOwnTemperature(state, resourceId) {
  * thermostat switched off still reports `HEAT`. Reading `hvacMode` alone
  * therefore shows every off thermostat as heating.
  */
+/** Nest's retained `settings.hvacMode` (never OFF — that is `active=0`). */
+function readLastHvacMode(settings) {
+    if (!settings) {
+        return undefined;
+    }
+    switch ((0, traits_1.readEnum)(settings, 'settings', 'hvacMode')) {
+        case 'HEAT':
+            return 'heat';
+        case 'COOL':
+            return 'cool';
+        case 'RANGE':
+            return 'range';
+        default:
+            return undefined;
+    }
+}
 function readMode(settings) {
     if (!settings) {
         return undefined;
@@ -67,16 +83,7 @@ function readMode(settings) {
     if ((0, traits_1.readIntFlag)(settings, 'active', 'value') !== true) {
         return 'off';
     }
-    switch ((0, traits_1.readEnum)(settings, 'settings', 'hvacMode')) {
-        case 'HEAT':
-            return 'heat';
-        case 'COOL':
-            return 'cool';
-        case 'RANGE':
-            return 'range';
-        default:
-            return undefined;
-    }
+    return readLastHvacMode(settings);
 }
 /** What the equipment is doing, from the relay states Nest reports. */
 function readActivity(control) {
@@ -101,10 +108,12 @@ function readThermostatFromObserve(state, resourceId, options = {}) {
     const mode = readMode(setpoints);
     const heatSetpoint = (0, traits_1.readIndirectFloat)(setpoints, 'settings', 'targetTemperatureHeat');
     const coolSetpoint = (0, traits_1.readIndirectFloat)(setpoints, 'settings', 'targetTemperatureCool');
+    const lastHvacMode = readLastHvacMode(setpoints);
     return {
         currentTemperatureC: options.comfortTemperatureC ?? readOwnTemperature(state, resourceId),
         currentHumidity: (0, traits_1.readHumidity)(state.trait(resourceId, 'humidity')),
         mode,
+        lastHvacMode,
         activity: readActivity(state.trait(resourceId, 'hvac_control')),
         // In `range` mode Nest carries both bounds and no single setpoint, so the
         // single value is only meaningful for the mode that is actually in use.
@@ -183,6 +192,7 @@ function mergeThermostatState(observe, rest) {
         currentTemperatureC: observe?.currentTemperatureC ?? rest?.currentTemperatureC,
         currentHumidity: observe?.currentHumidity ?? rest?.currentHumidity,
         mode: observe?.mode ?? rest?.mode,
+        lastHvacMode: observe?.lastHvacMode ?? rest?.lastHvacMode,
         activity: observe?.activity ?? rest?.activity,
         targetTemperatureC: observe?.targetTemperatureC ?? rest?.targetTemperatureC,
         targetTemperatureLowC: observe?.targetTemperatureLowC ?? rest?.targetTemperatureLowC,

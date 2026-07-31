@@ -1,6 +1,6 @@
 # Protocol notes
 
-Nest publishes no consumer API. Everything below was confirmed with a read-only probe kit against a live Nest Account. Treat this as a working map of private backends, not a promise Nest will keep them stable.
+Nest publishes no consumer API. Everything below was confirmed with a probe kit against a live Nest Account. Treat this as a working map of private backends, not a promise Nest will keep them stable.
 
 ## Dual transport
 
@@ -68,7 +68,15 @@ An Observe-only Protect gets no smoke/CO HomeKit services until REST reports ala
 
 ## Thermostat writes
 
-HVAC state updates arrive over Observe (`setpoint` / `hvac_control` / `eco`). The protobuf write path has not been verified against a live device in this plugin, so thermostats are published read-only. `allowThermostatControl` is reserved for a future confirm-gated write path.
+HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_control` / `eco`). Writes use the same protobuf gateway as the Nest web app:
+
+1. Encode `nest.trait.hvac.TargetTemperatureSettingsTrait` (mode via `settings.hvacMode` + `active`; setpoints as `targetTemperatureHeat` / `targetTemperatureCool`).
+2. Wrap in `nest.rpc.NestMessage` `{ set: [{ object: { id: DEVICE_…, key: target_temperature_settings, uuid }, property: Any }] }`.
+3. `POST https://grpc-web.production.nest.com/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState` with `Content-Type: application/x-protobuf` and the session Basic token.
+
+`off` is `active=0` with a standby `HEAT`/`COOL` left in `hvacMode` — Nest does not store an OFF enum there. REST `/v5/put` cannot reach Observe-only thermostats.
+
+Probe kit: `xtmp/nest-probe` probe 12 dry-runs the encode; `--confirm` POSTs a live bump. Plugin flag: `allowThermostatControl` (default **off** — opt in after a live confirm on your account). Manual HomeKit writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
 
 ## Homebridge 2 update path
 

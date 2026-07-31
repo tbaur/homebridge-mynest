@@ -37,7 +37,7 @@ function build(state: ThermostatState) {
   const read = (type: typeof Characteristic.CurrentTemperature): unknown =>
     service.getCharacteristic(type as never).value
 
-  return { handler, accessory, service, log, read, device }
+  return { handler, accessory, service, platform, log, read, device }
 }
 
 const heating: ThermostatState = {
@@ -229,14 +229,53 @@ describe('ThermostatAccessory', () => {
     expect(read(Characteristic.CurrentTemperature)).toBe(19.5)
   })
 
-  it('does not accept writes, because the write path is unverified', () => {
-    // Nest serves these over its protobuf backend and the write payload has
-    // never been confirmed against a live device. Publishing a control that
-    // guesses at it would change what a house's heating is doing.
+  it('keeps write permission on target characteristics (Home needs them for tiles)', () => {
+    // Stripping PAIRED_WRITE made the Home app show "No Response" and hide
+    // room tiles even when Favorites / Home View were on.
     const { service } = build(heating)
 
     expect(service.getCharacteristic(Characteristic.TargetTemperature).props.perms)
-      .not.toContain('pw')
+      .toContain('pw')
+    expect(service.getCharacteristic(Characteristic.TargetHeatingCoolingState).props.perms)
+      .toContain('pw')
+  })
+
+  it('routes target temperature writes through the platform', async () => {
+    const { service, platform } = build(heating)
+    const spy = jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(true)
+
+    await service.getCharacteristic(Characteristic.TargetTemperature)
+      .handleSetRequest(22.5)
+
+    expect(spy).toHaveBeenCalledWith(
+      'THERM01',
+      expect.objectContaining({ targetTemperatureC: 21 }),
+      { targetTemperatureC: 22.5 },
+    )
+  })
+
+  it('does not reject onSet when a Nest write fails', async () => {
+    // Throwing out of onSet makes Home sticky "No Response".
+    const { service, platform, read } = build(heating)
+    jest.spyOn(platform, 'applyThermostatWrite').mockRejectedValue(new Error('Nest 503'))
+
+    await expect(
+      service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24),
+    ).resolves.toBeUndefined()
+
+    // HAP assigns the requested value after onSet; revert is deferred one tick.
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(read(Characteristic.TargetTemperature)).toBe(21)
+  })
+
+  it('reverts HomeKit when thermostat control is disabled', async () => {
+    const { service, platform, read } = build(heating)
+    jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(false)
+
+    await service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(read(Characteristic.TargetTemperature)).toBe(21)
   })
 
   it('records the device details HomeKit shows', () => {

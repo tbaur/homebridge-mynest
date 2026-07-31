@@ -51,7 +51,7 @@ describe('appLaunch', () => {
 
     await appLaunch({ session, endpoints, bucketTypes: APP_LAUNCH_BUCKET_TYPES, fetchImpl: fetch })
 
-    expect(JSON.parse(calls[0].body!).known_bucket_types).toEqual([...APP_LAUNCH_BUCKET_TYPES])
+    expect(JSON.parse(String(calls[0].body)).known_bucket_types).toEqual([...APP_LAUNCH_BUCKET_TYPES])
     expect(calls[0].url).toContain('/user/5551234/app_launch')
   })
 
@@ -94,7 +94,7 @@ describe('subscribeOnce', () => {
 
     await subscribeOnce({ session, endpoints, objects: [topaz], fetchImpl: fetch })
 
-    expect(JSON.parse(calls[0].body!).objects).toEqual([
+    expect(JSON.parse(String(calls[0].body)).objects).toEqual([
       { object_key: 'topaz.ABC123', object_revision: 7, object_timestamp: 1700000000 },
     ])
   })

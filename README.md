@@ -13,7 +13,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 
 ### Device Support
 
-- **Thermostats** — Current temperature, mode, activity, setpoints, humidity when Nest reports it (read-only in this version)
+- **Thermostats** — Current temperature, mode, activity, setpoints, humidity when Nest reports it; HomeKit can change mode/setpoints when Allow thermostat control is enabled (opt-in)
 - **Nest Protect** — Smoke and CO from REST when available; battery / online from REST and/or Observe; optional occupancy and Protect temperature
 - **Temperature Sensors** — Nest Temperature Sensor (kryptonite) pucks
 - **Dual transport** — Merges Nest REST subscribe with HTTP/2 Observe so Observe-only devices still appear
@@ -34,7 +34,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 
 <!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->
 - **Homebridge 2 safe** — Live updates use stored getters + `updateValue(...)`, not removed `getValue()` or stale `.value` reads
-- **417 Tests** — Jest suite with an 80% coverage gate across statements, branches, functions, and lines
+- **438 Tests** — Jest suite with an 80% coverage gate across statements, branches, functions, and lines
 - **Strict TypeScript** — `strict` mode with unused locals/params and no implicit returns
 - **Secret hygiene** — Access tokens are redacted from logs
 - **No analytics** — Zero tracking or data collection
@@ -81,7 +81,7 @@ Thermostats, Protects, and temperature sensors appear in the Home app as Nest re
 
 | Nest device | HomeKit accessory | Notes |
 | --- | --- | --- |
-| Thermostat | Thermostat | Read-only; Observe is source of truth |
+| Thermostat | Thermostat | Observe is source of truth; mode/setpoints writable when `allowThermostatControl` is on (opt-in) |
 | Nest Protect | Smoke + CO (+ optional occupancy / temp) | Smoke/CO require REST `topaz`; occupancy is ~10-minute presence |
 | Temperature Sensor | Temperature Sensor | Battery + temperature |
 
@@ -95,7 +95,7 @@ Cameras, doorbells, locks, and Home/Away structure switches are out of scope for
 | --- | --- | --- |
 | `name` | `MyNest` | Required. Plugin instance name shown in Homebridge logs. |
 | `accessToken` | — | Required. Nest Account `access_token` from [docs/AUTH.md](docs/AUTH.md). |
-| `allowThermostatControl` | `false` | Reserved; writes are not supported yet (warns if enabled). |
+| `allowThermostatControl` | `false` | Opt in to send mode/setpoint changes to Nest via BatchUpdateState. |
 | `exposeProtectOccupancy` | `true` | Occupancy from REST `auto_away` when Nest computes it on a mains-powered Protect. |
 | `exposeProtectTemperature` | `false` | Temperature/humidity measured by each Protect. |
 | `ignoredDeviceIds` | `[]` | Device IDs or serials to leave out of HomeKit. |

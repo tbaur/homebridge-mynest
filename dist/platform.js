@@ -18,6 +18,7 @@ const settings_1 = require("./settings");
 const device_1 = require("./types/device");
 const errors_1 = require("./errors");
 const transport_1 = require("./api/transport");
+const thermostat_write_1 = require("./api/thermostat-write");
 const collector_1 = require("./diagnostics/collector");
 const format_1 = require("./diagnostics/format");
 const classify_1 = require("./state/classify");
@@ -141,7 +142,7 @@ class MyNestPlatform {
         }
         this.#startedAt = Date.now();
         if (this.#config.allowThermostatControl) {
-            this.#log.warn('Allow Thermostat Control ignored — thermostats are read-only in this version.');
+            this.#log.info('Thermostat control enabled (Nest BatchUpdateState).');
         }
         const diagnostics = this.#diagnostics;
         const transport = new transport_1.NestTransport({
@@ -470,6 +471,27 @@ class MyNestPlatform {
             return new protect_1.ProtectAccessory(this, accessory, device, log);
         }
         return new temperature_sensor_1.TemperatureSensorAccessory(this, accessory, device, log);
+    }
+    /**
+     * Apply a HomeKit-originated thermostat change via Nest BatchUpdateState.
+     *
+     * No-ops (with a warning) when control is disabled so characteristics can
+     * stay writable for HomeKit presentation without guessing at HVAC writes.
+     *
+     * @returns `true` when a Nest write was sent; `false` when control is off.
+     */
+    async applyThermostatWrite(deviceId, state, patch) {
+        if (!this.#config?.allowThermostatControl) {
+            this.#log.warn(`Ignoring thermostat write for ${deviceId} — enable Allow thermostat control in config.`);
+            return false;
+        }
+        const transport = this.#transport;
+        if (!transport) {
+            throw new errors_1.ConfigurationError('Nest transport is not running');
+        }
+        const write = (0, thermostat_write_1.buildThermostatSetpointWrite)((0, classify_1.toResourceId)(deviceId), state, patch);
+        await transport.updateThermostatSettings(write);
+        return true;
     }
     /**
      * Drop accessories Nest no longer reports — never because a transport is down.

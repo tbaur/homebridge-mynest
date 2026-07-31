@@ -50,6 +50,12 @@ export interface ThermostatState {
     readonly currentTemperatureC?: number;
     readonly currentHumidity?: number;
     readonly mode?: HvacMode;
+    /**
+     * Nest's `settings.hvacMode` even while the unit is off (`active=0`).
+     * Nest never stores OFF there — HomeKit `off` clears `active` and leaves
+     * this mode in place for the next wake.
+     */
+    readonly lastHvacMode?: Exclude<HvacMode, 'off'>;
     readonly activity?: HvacActivity;
     /** Single setpoint, used in `heat` and `cool` modes. */
     readonly targetTemperatureC?: number;

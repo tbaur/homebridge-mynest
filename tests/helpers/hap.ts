@@ -70,6 +70,7 @@ export function createPlatformStub(config: Partial<ResolvedConfig> = {}): MyNest
     Service,
     Characteristic,
     resolvedConfig: createResolvedConfig(config),
+    applyThermostatWrite: jest.fn(async () => false),
   } as unknown as MyNestPlatform
 }
 

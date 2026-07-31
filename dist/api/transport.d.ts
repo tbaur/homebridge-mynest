@@ -17,6 +17,7 @@ import type { BucketMap } from '../types/nest';
 import type { TraitUpdate } from './protobuf';
 import { type Http2Connect } from './observe';
 import type { FetchLike } from './http';
+import { type ThermostatSetpointWrite } from './thermostat-write';
 import { CircuitBreaker, type CircuitBreakerStatus } from './circuit-breaker';
 import type { Logger } from '../utils/logger';
 export interface NestTransportOptions {
@@ -118,6 +119,14 @@ export declare class NestTransport {
      *   proceed without a session, so this is surfaced rather than retried.
      */
     start(): Promise<void>;
+    /**
+     * Push a thermostat mode/setpoint change through BatchUpdateState.
+     *
+     * Observe-only thermostats have no REST `/v5/put` path; this is the write
+     * Nest's own web app uses. Callers should already have gated on
+     * `allowThermostatControl`.
+     */
+    updateThermostatSettings(write: ThermostatSetpointWrite): Promise<void>;
     /** Stop both loops and release the session. */
     stop(): void;
 }
