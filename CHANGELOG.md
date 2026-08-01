@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [1.1.0](https://github.com/tbaur/homebridge-mynest/compare/v1.0.0...v1.1.0) (2026-08-01)
+
+
+### Features
+
+* allow diagnostics interval up to 24h as a number field ([#27](https://github.com/tbaur/homebridge-mynest/issues/27)) ([9f988f7](https://github.com/tbaur/homebridge-mynest/commit/9f988f7d2cc21c5e6e072ce1914b0d767aa0168e))
+
 ## [1.0.0](https://github.com/tbaur/homebridge-mynest/compare/v0.1.10...v1.0.0) (2026-07-31)
 
 
