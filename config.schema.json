@@ -70,8 +70,11 @@
         "type": "integer",
         "default": 0,
         "minimum": 0,
-        "maximum": 3600,
-        "description": "Seconds between health heartbeats in the Homebridge log. 0 disables (default). Values 1–29 are raised to 30."
+        "maximum": 86400,
+        "x-schema-form": {
+          "type": "number"
+        },
+        "description": "Seconds between health heartbeats in the Homebridge log. 0 disables (default). Allowed range 0–86400 (24h); values 1–29 are raised to 30."
       },
       "structuredLogs": {
         "title": "Structured diagnostic logs",
@@ -116,7 +119,15 @@
       "title": "Advanced",
       "expandable": true,
       "expanded": false,
-      "items": ["fieldTest", "diagnosticsInterval", "structuredLogs", "debug"]
+      "items": [
+        "fieldTest",
+        {
+          "key": "diagnosticsInterval",
+          "type": "number"
+        },
+        "structuredLogs",
+        "debug"
+      ]
     }
   ]
 }

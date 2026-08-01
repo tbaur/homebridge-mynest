@@ -103,7 +103,7 @@ Cameras, doorbells, locks, and Home/Away structure switches are out of scope.
 | `exposeProtectTemperature` | `false` | Temperature/humidity measured by each Protect. |
 | `ignoredDeviceIds` | `[]` | Device IDs or serials to leave out of HomeKit. |
 | `fieldTest` | `false` | Use Nest field-test hosts. |
-| `diagnosticsInterval` | `0` | Seconds between health heartbeats in the log; `0` off, else `30`–`3600`. |
+| `diagnosticsInterval` | `0` | Seconds between health heartbeats in the log; `0` off, else `30`–`86400` (24h). |
 | `structuredLogs` | `false` | When diagnostics are enabled, also emit a machine-readable JSON line alongside each human summary. |
 | `debug` | `false` | Verbose logging; tokens are redacted. |
 

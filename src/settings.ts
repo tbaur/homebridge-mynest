@@ -236,6 +236,22 @@ export const MAX_REQUEST_ATTEMPTS = 3
  */
 export const REDISCOVERY_INTERVAL_MS = 60 * 60 * 1_000
 
+/**
+ * Shortest allowed diagnostics heartbeat when the feature is enabled (seconds).
+ *
+ * Sub-floor positive values are raised to this rather than rejected.
+ */
+export const MIN_DIAGNOSTICS_INTERVAL_SEC = 30
+
+/**
+ * Cap on the diagnostics heartbeat interval, in seconds (one day).
+ *
+ * Bounded so an over-range `setInterval` delay cannot collapse to 1 ms in Node
+ * (delays above 2^31-1 ms do), and so the config UI can offer a typed field
+ * instead of a one-hour slider.
+ */
+export const MAX_DIAGNOSTICS_INTERVAL_SEC = 86_400
+
 // ---------------------------------------------------------------------------
 // Device behaviour
 // ---------------------------------------------------------------------------

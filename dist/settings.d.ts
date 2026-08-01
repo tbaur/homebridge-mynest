@@ -169,6 +169,20 @@ export declare const MAX_REQUEST_ATTEMPTS = 3;
  */
 export declare const REDISCOVERY_INTERVAL_MS: number;
 /**
+ * Shortest allowed diagnostics heartbeat when the feature is enabled (seconds).
+ *
+ * Sub-floor positive values are raised to this rather than rejected.
+ */
+export declare const MIN_DIAGNOSTICS_INTERVAL_SEC = 30;
+/**
+ * Cap on the diagnostics heartbeat interval, in seconds (one day).
+ *
+ * Bounded so an over-range `setInterval` delay cannot collapse to 1 ms in Node
+ * (delays above 2^31-1 ms do), and so the config UI can offer a typed field
+ * instead of a one-hour slider.
+ */
+export declare const MAX_DIAGNOSTICS_INTERVAL_SEC = 86400;
+/**
  * Nest's own occupancy hold-off for a Protect, in seconds.
  *
  * A Protect does not report motion. It reports `auto_away`, which Nest flips
