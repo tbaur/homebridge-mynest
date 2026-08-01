@@ -16,7 +16,11 @@
  */
 
 import { ConfigurationError } from '../errors'
-import { PLATFORM_NAME } from '../settings'
+import {
+  MAX_DIAGNOSTICS_INTERVAL_SEC,
+  MIN_DIAGNOSTICS_INTERVAL_SEC,
+  PLATFORM_NAME,
+} from '../settings'
 import type {
   ConfigValidationResult,
   MyNestPlatformConfig,
@@ -45,12 +49,6 @@ const JWT_PATTERN = /^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./
  * Google's OAuth access tokens, which users also reach for by mistake.
  */
 const GOOGLE_TOKEN_PATTERN = /^ya29\./
-
-/** Shortest allowed diagnostics heartbeat when the feature is enabled. */
-const MIN_DIAGNOSTICS_INTERVAL_SEC = 30
-
-/** Longest allowed diagnostics heartbeat. */
-const MAX_DIAGNOSTICS_INTERVAL_SEC = 3600
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback

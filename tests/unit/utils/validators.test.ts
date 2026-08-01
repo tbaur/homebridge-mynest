@@ -55,6 +55,21 @@ describe('validateConfig', () => {
     expect(warnings.join('\n')).toMatch(/Diagnostics Interval was raised from 10 to 30/)
   })
 
+  it('accepts a three-hour diagnostics interval', () => {
+    const { config, warnings } = validateConfig(base({ diagnosticsInterval: 10_800 }))
+    expect(config.diagnosticsInterval).toBe(10_800)
+    expect(warnings).toEqual([])
+  })
+
+  it('accepts a one-day diagnostics interval', () => {
+    const { config } = validateConfig(base({ diagnosticsInterval: 86_400 }))
+    expect(config.diagnosticsInterval).toBe(86_400)
+  })
+
+  it('rejects a diagnostics interval above 24 hours', () => {
+    expect(() => validateConfig(base({ diagnosticsInterval: 86_401 }))).toThrow(/86400/)
+  })
+
   it('rejects a negative diagnostics interval', () => {
     expect(() => validateConfig(base({ diagnosticsInterval: -1 }))).toThrow(/Diagnostics Interval/)
   })

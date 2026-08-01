@@ -51,7 +51,8 @@ export interface MyNestPlatformConfig {
   /**
    * Seconds between opt-in health heartbeats in the Homebridge log.
    *
-   * `0` (default) disables them. A non-zero value below 30 is raised to 30.
+   * `0` (default) disables them. A non-zero value below 30 is raised to 30;
+   * the maximum is 86400 (24h).
    */
   diagnosticsInterval?: unknown
 

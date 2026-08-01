@@ -39,10 +39,6 @@ const JWT_PATTERN = /^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./;
  * Google's OAuth access tokens, which users also reach for by mistake.
  */
 const GOOGLE_TOKEN_PATTERN = /^ya29\./;
-/** Shortest allowed diagnostics heartbeat when the feature is enabled. */
-const MIN_DIAGNOSTICS_INTERVAL_SEC = 30;
-/** Longest allowed diagnostics heartbeat. */
-const MAX_DIAGNOSTICS_INTERVAL_SEC = 3600;
 function parseBoolean(value, fallback) {
     return typeof value === 'boolean' ? value : fallback;
 }
@@ -87,12 +83,12 @@ function parseDiagnosticsInterval(value, warnings) {
     if (value < 0) {
         throw new errors_1.ConfigurationError('Diagnostics Interval cannot be negative');
     }
-    if (value > MAX_DIAGNOSTICS_INTERVAL_SEC) {
-        throw new errors_1.ConfigurationError(`Diagnostics Interval cannot exceed ${MAX_DIAGNOSTICS_INTERVAL_SEC} seconds`);
+    if (value > settings_1.MAX_DIAGNOSTICS_INTERVAL_SEC) {
+        throw new errors_1.ConfigurationError(`Diagnostics Interval cannot exceed ${settings_1.MAX_DIAGNOSTICS_INTERVAL_SEC} seconds`);
     }
-    if (value < MIN_DIAGNOSTICS_INTERVAL_SEC) {
-        warnings.push(`Diagnostics Interval was raised from ${value} to ${MIN_DIAGNOSTICS_INTERVAL_SEC} seconds.`);
-        return MIN_DIAGNOSTICS_INTERVAL_SEC;
+    if (value < settings_1.MIN_DIAGNOSTICS_INTERVAL_SEC) {
+        warnings.push(`Diagnostics Interval was raised from ${value} to ${settings_1.MIN_DIAGNOSTICS_INTERVAL_SEC} seconds.`);
+        return settings_1.MIN_DIAGNOSTICS_INTERVAL_SEC;
     }
     return value;
 }
