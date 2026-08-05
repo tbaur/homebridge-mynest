@@ -9,4 +9,3 @@
 import type { DiagnosticsSnapshot } from './types';
 /** Concise human-readable summary line for a diagnostics report. */
 export declare function formatDiagnosticLine(report: DiagnosticsSnapshot): string;
-//# sourceMappingURL=format.d.ts.map

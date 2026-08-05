@@ -149,4 +149,3 @@ function assertNestTransportUrl(transportUrl) {
     }
     return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
 }
-//# sourceMappingURL=session.js.map

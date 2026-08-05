@@ -42,4 +42,3 @@ export declare class ProtectAccessory extends NestAccessory<ProtectState> {
     protected onServicesMayChange(): void;
     protected describeState(): string;
 }
-//# sourceMappingURL=protect.d.ts.map

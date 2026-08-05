@@ -17,9 +17,8 @@ jobs:
 
     strategy:
       matrix:
-        # Homebridge 2 (the devDependency the accessory tests run against)
-        # requires Node ^22 || ^24, so 20.x cannot install a supportable tree.
-        # Node 20 remains supported for Homebridge 1.x users via engines.
+        # Homebridge 2 requires Node ^22 || ^24, so those are the only
+        # versions this plugin can run under end to end.
         node-version: [22.x, 24.x]
 
     steps:
@@ -60,6 +59,14 @@ jobs:
 
     - name: Run tests
       run: npm test
+      env:
+        NODE_ENV: test
+
+    # The standing config uses forceExit, which would swallow a leaked timer or
+    # socket. This runs the whole suite without it, so a leak fails the build
+    # rather than depending on someone remembering to check locally.
+    - name: Check for leaked handles
+      run: npm run test:detect-handles
       env:
         NODE_ENV: test
 

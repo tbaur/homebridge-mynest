@@ -16,7 +16,7 @@ The next release requires **Homebridge 2.x and Node.js 22 or newer**; Homebridge
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do NOT open a public issue**
-2. Email the maintainer directly or use GitHub's [private vulnerability reporting](https://github.com/tbaur/homebridge-mynest/security/advisories/new)
+2. Use GitHub's [private vulnerability reporting](https://github.com/tbaur/homebridge-mynest/security/advisories/new)
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce

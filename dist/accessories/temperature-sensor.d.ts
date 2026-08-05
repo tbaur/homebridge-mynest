@@ -25,4 +25,3 @@ export declare class TemperatureSensorAccessory extends NestAccessory<Temperatur
     protected bindCharacteristics(): void;
     protected describeState(): string;
 }
-//# sourceMappingURL=temperature-sensor.d.ts.map

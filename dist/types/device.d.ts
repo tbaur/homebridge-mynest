@@ -181,4 +181,3 @@ export interface DeviceInventory {
         };
     }>>;
 }
-//# sourceMappingURL=device.d.ts.map

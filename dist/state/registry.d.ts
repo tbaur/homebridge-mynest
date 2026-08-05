@@ -37,4 +37,3 @@ export interface BuildInventoryOptions {
 export declare function buildInventory(options: BuildInventoryOptions): DeviceInventory;
 /** Every device in an inventory, in a stable order, for logging and iteration. */
 export declare function listDevices(inventory: DeviceInventory): NestDevice[];
-//# sourceMappingURL=registry.d.ts.map

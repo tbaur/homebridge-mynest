@@ -8,4 +8,3 @@
  * @fileoverview Diagnostics report shapes for health/activity logging.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-//# sourceMappingURL=types.js.map

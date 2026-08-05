@@ -49,4 +49,3 @@ export declare function readHumidity(trait: unknown): number | undefined;
 export declare function isPlausibleTemperature(celsius: number): boolean;
 /** An enum protobufjs rendered as its symbolic name. */
 export declare function readEnum(source: unknown, ...path: readonly string[]): string | undefined;
-//# sourceMappingURL=traits.d.ts.map

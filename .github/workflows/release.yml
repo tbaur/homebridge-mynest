@@ -89,8 +89,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # clean first so a stale committed dist artifact cannot be published in
+      # place of a file the current source no longer emits.
       - name: Build TypeScript
-        run: npm run build
+        run: npm run clean && npm run build
 
       - name: Run linter
         run: npm run lint

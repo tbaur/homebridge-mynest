@@ -25,7 +25,7 @@ export interface DeviceGauges {
     /** Devices skipped via `ignoredDeviceIds`. */
     ignored: number;
 }
-/** Live Nest transport gauges from {@link NestTransport.status}. */
+/** Live Nest transport gauges from `NestTransport.status` (`api/transport.ts`). */
 export interface TransportGauges {
     hasSession: boolean;
     observeState: string;
@@ -94,4 +94,3 @@ export interface DiagnosticsSnapshot {
     /** Redacted config echo, present only on boot/shutdown snapshots. */
     config?: Record<string, unknown>;
 }
-//# sourceMappingURL=types.d.ts.map

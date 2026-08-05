@@ -9,6 +9,7 @@ npm install
 npm test
 npm run build
 npm run lint
+npm run typecheck
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture and [RELEASING.md](RELEASING.md) for the release-please / npm Trusted Publishing flow.

@@ -319,4 +319,3 @@ class ProtectAccessory extends base_1.NestAccessory {
 }
 exports.ProtectAccessory = ProtectAccessory;
 _a = ProtectAccessory;
-//# sourceMappingURL=protect.js.map

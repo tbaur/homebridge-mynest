@@ -119,4 +119,3 @@ export declare class ObjectList {
      */
     toBuckets(): BucketMap;
 }
-//# sourceMappingURL=rest.d.ts.map

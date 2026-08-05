@@ -61,4 +61,3 @@ export interface ObserveSessionOptions {
  * @throws {ObserveStreamError} On a transport or protocol failure.
  */
 export declare function runObserveSession(options: ObserveSessionOptions): Promise<ObserveSessionResult>;
-//# sourceMappingURL=observe.d.ts.map

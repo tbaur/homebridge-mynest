@@ -373,4 +373,3 @@ export declare const MAX_REPORTED_TEMPERATURE_C = 100;
  * sensor would disagree with itself between a thermostat tile and its own.
  */
 export declare const REPORTED_TEMPERATURE_STEP_C = 0.1;
-//# sourceMappingURL=settings.d.ts.map

@@ -63,4 +63,3 @@ function resolveLowBattery(batteryLevel, volts) {
     }
     return undefined;
 }
-//# sourceMappingURL=sensor-state.js.map

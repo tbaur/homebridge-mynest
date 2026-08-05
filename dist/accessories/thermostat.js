@@ -367,4 +367,3 @@ class ThermostatAccessory extends base_1.NestAccessory {
     }
 }
 exports.ThermostatAccessory = ThermostatAccessory;
-//# sourceMappingURL=thermostat.js.map

@@ -14,6 +14,10 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 | `src/api/framing.ts` / `protobuf.ts` | Length-delimited frames and trait decode |
 | `src/api/thermostat-write.ts` / `batch-update.ts` | Encode + POST Nest BatchUpdateState (setpoints and Eco Mode) |
 | `src/api/transport.ts` | Independent REST + Observe run loops (+ thermostat / Eco writes) |
+| `src/api/circuit-breaker.ts` | Per-endpoint failure budget that parks a dead endpoint instead of hammering it |
+| `src/api/http.ts` | Shared fetch plumbing: client deadlines, bounded bodies, error classification |
+| `src/errors/` | Typed error hierarchy driving retry / breaker / fatal decisions |
+| `src/utils/retry.ts` | Exponential backoff with jitter and abort support |
 | `src/state/*` | Observe∪REST merge, Protect/thermostat/sensor readers |
 | `src/accessories/thermostat.ts` | Thermostat + per-device Eco Mode switch |
 | `src/accessories/global-eco.ts` | Optional house-wide Eco Mode switch (`exposeGlobalEcoSwitch`) |

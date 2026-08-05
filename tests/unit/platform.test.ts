@@ -541,6 +541,18 @@ describe('MyNestPlatform', () => {
     expect(log.infos.join('\n')).toContain('Platform ready')
   })
 
+  // config.schema.json points the user at this log line as the only way to find
+  // a value for ignoredDeviceIds, so the id has to stay in it.
+  it('logs the device id when adding an accessory', async () => {
+    await launch()
+    flushSync()
+
+    const added = log.infos.filter((line) => line.startsWith('Added '))
+
+    expect(added.length).toBeGreaterThan(0)
+    expect(added.join('\n')).toContain(`[${PROTECT_ID}]`)
+  })
+
   it('publishes Observe-only thermostats and Protects from the union', async () => {
     await launch()
     flushSync()

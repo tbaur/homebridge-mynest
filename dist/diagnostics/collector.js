@@ -318,4 +318,3 @@ function redactConfig(config) {
         debug: config.debug,
     };
 }
-//# sourceMappingURL=collector.js.map

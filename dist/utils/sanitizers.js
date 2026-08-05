@@ -227,4 +227,3 @@ function sanitizeUrl(url) {
         return sanitizeString(url);
     }
 }
-//# sourceMappingURL=sanitizers.js.map

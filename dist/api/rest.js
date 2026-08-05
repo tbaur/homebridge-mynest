@@ -295,4 +295,3 @@ class ObjectList {
     }
 }
 exports.ObjectList = ObjectList;
-//# sourceMappingURL=rest.js.map

@@ -78,4 +78,3 @@ export declare class ObserveState {
     /** Every protobuf type a resource has reported, for device classification. */
     typeUrls(resourceId: string): readonly string[];
 }
-//# sourceMappingURL=observe-state.d.ts.map

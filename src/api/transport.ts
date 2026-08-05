@@ -563,7 +563,7 @@ export class NestTransport {
    * Concurrent callers share one refresh. Four call sites can race — both run
    * loops, `app_launch`, and every BatchUpdateState write — and each caller
    * that arrives during an in-flight open would otherwise start its own, with
-   * up to {@link MAX_REQUEST_ATTEMPTS} retries behind it. A five-thermostat
+   * up to `MAX_REQUEST_ATTEMPTS` retries behind it. A five-thermostat
    * global Eco press against a stale session was fifteen session opens.
    */
   async #ensureSession(options: { force?: boolean } = {}): Promise<NestSession> {

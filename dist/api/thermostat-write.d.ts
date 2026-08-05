@@ -8,9 +8,10 @@
  *
  * Modern Nest thermostats are Observe-only; REST `/v5/put` cannot reach them.
  * Writes go to `TraitBatchApi/BatchUpdateState` as a `nest.rpc.NestMessage`
- * whose `set` entries carry encoded trait bytes. The encode shape matches the
- * Nest web app / community protobuf path and probe 12 dry-runs; enable
- * `allowThermostatControl` only after a live `--confirm` on your account.
+ * whose `set` entries carry encoded trait bytes. The encode shape was
+ * established against a live account with a maintainer-only probe kit that is
+ * not part of this repository, so a change here cannot be validated by the unit
+ * tests alone. `allowThermostatControl` is off by default for that reason.
  */
 import type { HvacMode, ThermostatState } from '../types/device';
 /** Fully qualified type URL Nest expects inside google.protobuf.Any. */
@@ -64,4 +65,3 @@ export declare function formatThermostatUpdateLog(write: ThermostatSetpointWrite
 export declare function encodeEcoModeBatchUpdate(resourceId: string, ecoOn: boolean): Buffer;
 /** Encode a NestMessage suitable for TraitBatchApi/BatchUpdateState. */
 export declare function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrite): Buffer;
-//# sourceMappingURL=thermostat-write.d.ts.map

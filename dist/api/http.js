@@ -174,4 +174,3 @@ async function requestJson(url, options) {
         throw new errors_1.ApiParseError(`${(0, sanitizers_1.sanitizeUrl)(url)} returned HTTP ${response.status} with a body that is not JSON`, { cause: error instanceof Error ? error : undefined });
     }
 }
-//# sourceMappingURL=http.js.map

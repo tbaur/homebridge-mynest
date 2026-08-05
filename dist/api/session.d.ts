@@ -38,4 +38,3 @@ export declare function authenticatedHeaders(session: NestSession): Record<strin
  *   the plugin needs, which means Nest changed the contract.
  */
 export declare function openSession(options: OpenSessionOptions): Promise<NestSession>;
-//# sourceMappingURL=session.d.ts.map

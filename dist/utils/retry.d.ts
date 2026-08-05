@@ -46,4 +46,3 @@ export interface RetryOptions {
  * telling the client how long to wait is better information than a guess.
  */
 export declare function withRetry<T>(operation: () => Promise<T>, options?: RetryOptions): Promise<T>;
-//# sourceMappingURL=retry.d.ts.map

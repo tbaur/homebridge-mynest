@@ -193,4 +193,3 @@ function describeOccupancySource(source) {
             return 'Nest REST is not refreshing alarm state, so occupancy is a cached reading marked inactive until REST recovers';
     }
 }
-//# sourceMappingURL=protect-state.js.map

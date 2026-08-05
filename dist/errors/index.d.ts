@@ -165,4 +165,3 @@ export declare function createApiError(status: number, message: string, options?
 }): NestError;
 /** Recognise the several shapes an aborted or timed-out request arrives in. */
 export declare function isAbortError(error: unknown): boolean;
-//# sourceMappingURL=index.d.ts.map

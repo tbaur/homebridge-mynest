@@ -150,4 +150,3 @@ exports.CharacteristicBinder = CharacteristicBinder;
 function describeCharacteristic(characteristic, type) {
     return characteristic.displayName || type.UUID;
 }
-//# sourceMappingURL=bound-characteristics.js.map

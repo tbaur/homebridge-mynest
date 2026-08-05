@@ -78,4 +78,3 @@ export declare class CharacteristicBinder {
     get size(): number;
 }
 export {};
-//# sourceMappingURL=bound-characteristics.d.ts.map

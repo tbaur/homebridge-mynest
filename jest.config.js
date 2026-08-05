@@ -31,38 +31,66 @@ module.exports = {
   collectCoverage: true,
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  // Per-area floors as well as a global one, set just under the current figures
-  // so a regression fails the build. The global number alone is carried by small
-  // fully-covered modules, which let the two largest and most consequential
-  // files sit below the stated bar while the gate stayed green.
+  // Per-area floors, each set just under the current figure so a regression
+  // fails the build.
+  //
+  // Two things to know before editing this. First, a path key REMOVES its
+  // matching files from the `global` pool — it does not add a second gate on top
+  // of it. So `global` here only covers what no path key matches (`index.ts`,
+  // `settings.ts`, `types/device.ts`), and every area that matters needs its own
+  // key or it is ungated. Second, every key must list all four metrics: a key
+  // that omits `statements` leaves statements unmeasured for those files
+  // entirely. Both mistakes were live here, and made the advertised gate far
+  // weaker than it looked.
   coverageThreshold: {
+    // Residual pool only: the files no path key below matches.
     global: {
-      branches: 83,
-      functions: 94,
-      lines: 92,
-      statements: 92,
+      branches: 95,
+      functions: 95,
+      lines: 95,
+      statements: 95,
     },
     './src/api/': {
-      branches: 80,
-      functions: 91,
+      branches: 79,
+      functions: 90,
       lines: 90,
+      statements: 90,
     },
     './src/platform.ts': {
       branches: 74,
       functions: 81,
       lines: 86,
+      statements: 86,
     },
     './src/accessories/': {
-      branches: 80,
+      branches: 81,
+      functions: 99,
       lines: 92,
+      statements: 92,
     },
     './src/state/': {
-      branches: 92,
-      lines: 96,
+      branches: 93,
+      functions: 99,
+      lines: 97,
+      statements: 97,
     },
     './src/utils/': {
       branches: 92,
+      functions: 99,
       lines: 97,
+      statements: 97,
+    },
+    './src/diagnostics/': {
+      branches: 89,
+      functions: 99,
+      lines: 96,
+      statements: 96,
+    },
+    './src/errors/': {
+      branches: 89,
+      functions: 99,
+      lines: 98,
+      statements: 98,
     },
   },
   collectCoverageFrom: [

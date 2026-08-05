@@ -53,4 +53,3 @@ class TemperatureSensorAccessory extends base_1.NestAccessory {
     }
 }
 exports.TemperatureSensorAccessory = TemperatureSensorAccessory;
-//# sourceMappingURL=temperature-sensor.js.map

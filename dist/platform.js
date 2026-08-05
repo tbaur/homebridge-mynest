@@ -632,7 +632,10 @@ class MyNestPlatform {
                 : device.identity.sources.observe
                     ? 'Observe only'
                     : 'REST only';
-            this.#log.info(`Added ${device.identity.kind} "${device.identity.name}" (via ${via})`);
+            // The id is here because config.schema.json points at this line as the way
+            // to find a value for ignoredDeviceIds; there is no other route to it.
+            this.#log.info(`Added ${device.identity.kind} "${device.identity.name}" `
+                + `[${device.identity.id}] (via ${via})`);
         }
         const log = (0, logger_1.createScopedLogger)(this.#rawLog, device.identity.name, this.#config?.debug === true);
         this.#handlers.set(device.identity.id, this.#createHandler(accessory, device, log));
@@ -1016,4 +1019,3 @@ class MyNestPlatform {
     }
 }
 exports.MyNestPlatform = MyNestPlatform;
-//# sourceMappingURL=platform.js.map

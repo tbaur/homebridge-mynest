@@ -136,4 +136,3 @@ const KIND_LABELS = {
     protect: 'Protect',
     temperature_sensor: 'Temperature Sensor',
 };
-//# sourceMappingURL=classify.js.map

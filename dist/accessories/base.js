@@ -156,4 +156,3 @@ class NestAccessory {
     }
 }
 exports.NestAccessory = NestAccessory;
-//# sourceMappingURL=base.js.map

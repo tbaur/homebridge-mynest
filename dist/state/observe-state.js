@@ -194,4 +194,3 @@ function digestValue(value) {
     }
     return `${value.length.toString(16)}:${(hash >>> 0).toString(16)}`;
 }
-//# sourceMappingURL=observe-state.js.map

@@ -14,6 +14,7 @@ Brief description of the changes.
 - [ ] Tests added/updated
 - [ ] All tests pass (`npm test`)
 - [ ] Linting passes (`npm run lint`)
+- [ ] Tests typecheck (`npm run typecheck`)
 
 ## Checklist
 

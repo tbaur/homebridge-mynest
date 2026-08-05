@@ -82,4 +82,3 @@ export declare class CircuitBreaker {
      */
     execute<T>(operation: () => Promise<T>, options?: CircuitBreakerExecuteOptions): Promise<T>;
 }
-//# sourceMappingURL=circuit-breaker.d.ts.map

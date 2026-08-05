@@ -69,7 +69,7 @@ export interface MyNestPlatformConfig {
 /** Configuration after validation, with every value present and in range. */
 export interface ResolvedConfig {
   /**
-   * Instance name, normalised to {@link PLATFORM_NAME} when unset.
+   * Instance name, normalised to `PLATFORM_NAME` (`settings.ts`) when unset.
    *
    * Homebridge itself applies this to log lines and to the child-bridge name;
    * the plugin only resolves it so the value it reports is the one in effect.

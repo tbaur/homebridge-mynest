@@ -101,4 +101,3 @@ export declare class DiagnosticsCollector {
     snapshot(msg: string, readers: DiagnosticsReaders): DiagnosticsSnapshot;
 }
 export {};
-//# sourceMappingURL=collector.d.ts.map

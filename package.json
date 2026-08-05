@@ -48,7 +48,7 @@
   },
   "engines": {
     "homebridge": "^2.0.0",
-    "node": ">=22.0.0"
+    "node": "^22 || ^24"
   },
   "peerDependencies": {
     "homebridge": "^2.0.0"
@@ -62,6 +62,7 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run clean && npm run build",
     "verify": "npm run build && node scripts/verify.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
@@ -69,7 +70,7 @@
     "test:watch": "NODE_ENV=test jest --watch",
     "test:unit": "NODE_ENV=test jest --coverage --testPathPatterns=tests/unit",
     "test:integration": "NODE_ENV=test jest --testPathPatterns=tests/integration --collectCoverage=false",
-    "test:detect-handles": "NODE_ENV=test jest --detectOpenHandles --forceExit=false --testPathPatterns=tests/unit --collectCoverage=false",
+    "test:detect-handles": "NODE_ENV=test jest --detectOpenHandles --forceExit=false --collectCoverage=false",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

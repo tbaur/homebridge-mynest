@@ -107,4 +107,3 @@ function isPlausibleTemperature(celsius) {
 function readEnum(source, ...path) {
     return readString(source, ...path);
 }
-//# sourceMappingURL=traits.js.map

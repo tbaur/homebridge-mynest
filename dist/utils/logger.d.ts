@@ -34,4 +34,3 @@ export interface Logger {
  *   hundreds of trait patches a minute.
  */
 export declare function createScopedLogger(base: Logger, _scope: string, isDebugEnabled: boolean): Logger;
-//# sourceMappingURL=logger.d.ts.map

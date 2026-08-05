@@ -86,4 +86,3 @@ export declare abstract class NestAccessory<TState> {
      */
     protected toLowBatteryValue(isBatteryLow: boolean | undefined): CharacteristicValue | undefined;
 }
-//# sourceMappingURL=base.d.ts.map

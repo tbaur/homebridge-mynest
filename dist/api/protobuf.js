@@ -204,4 +204,3 @@ function decodeTrait(update) {
         return undefined;
     }
 }
-//# sourceMappingURL=protobuf.js.map

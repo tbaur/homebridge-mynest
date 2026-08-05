@@ -211,4 +211,3 @@ function mergeThermostatState(observe, rest) {
         displayUnit: observe?.displayUnit,
     };
 }
-//# sourceMappingURL=thermostat-state.js.map

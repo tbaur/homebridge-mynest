@@ -51,4 +51,3 @@ export declare function sendRequest(url: string, options: SendOptions): Promise<
  *   and reporting that as a JSON syntax error hides what happened.
  */
 export declare function requestJson<T>(url: string, options: SendOptions): Promise<T>;
-//# sourceMappingURL=http.d.ts.map

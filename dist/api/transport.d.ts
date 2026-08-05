@@ -150,4 +150,3 @@ export declare class NestTransport {
     /** Stop both loops and release the session. */
     stop(): void;
 }
-//# sourceMappingURL=transport.d.ts.map

@@ -48,4 +48,3 @@ async function postBatchUpdateState(options) {
         throw (0, errors_1.createApiError)(response.status, `${(0, sanitizers_1.sanitizeUrl)(url)} returned HTTP ${response.status} [request-id ${requestId}]`, { retryAfterMs: (0, errors_1.parseRetryAfterMs)(response.headers.get('retry-after')) });
     }
 }
-//# sourceMappingURL=batch-update.js.map

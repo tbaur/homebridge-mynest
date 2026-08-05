@@ -73,4 +73,3 @@ export declare function readProtectState(options: {
 }): ProtectState;
 /** A user-facing explanation for why occupancy is or is not published. */
 export declare function describeOccupancySource(source: OccupancySource): string;
-//# sourceMappingURL=protect-state.d.ts.map

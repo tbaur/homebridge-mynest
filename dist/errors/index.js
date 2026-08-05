@@ -270,4 +270,3 @@ function isAbortError(error) {
     const code = 'code' in error ? String(error.code) : '';
     return name === 'AbortError' || name === 'TimeoutError' || code === 'ABORT_ERR';
 }
-//# sourceMappingURL=index.js.map

@@ -162,4 +162,3 @@ class GlobalEcoAccessory {
     }
 }
 exports.GlobalEcoAccessory = GlobalEcoAccessory;
-//# sourceMappingURL=global-eco.js.map

@@ -261,4 +261,3 @@ function listDevices(inventory) {
         ...inventory.temperatureSensors.values(),
     ];
 }
-//# sourceMappingURL=registry.js.map

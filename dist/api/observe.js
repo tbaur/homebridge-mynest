@@ -269,4 +269,3 @@ function runObserveSession(options) {
         request.end(traitsRequest);
     });
 }
-//# sourceMappingURL=observe.js.map

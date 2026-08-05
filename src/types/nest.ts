@@ -77,7 +77,7 @@ export type BucketMap = Readonly<Record<string, Readonly<Record<string, unknown>
 /**
  * `structure.{id}` — one home.
  *
- * Requested in {@link APP_LAUNCH_BUCKET_TYPES} and recorded here as the shape
+ * Requested in `APP_LAUNCH_BUCKET_TYPES` (`settings.ts`) and recorded here as the shape
  * Nest returns, but nothing reads it yet: room names come from `where` and the
  * device list from the Observe ∪ REST union. `num_thermostats` in particular is
  * deliberately not trusted — the account this plugin was built against reported

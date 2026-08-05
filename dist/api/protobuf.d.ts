@@ -79,4 +79,3 @@ export declare function decodeFrame(frame: Buffer): DecodedFrame;
  *   device has, and this plugin reads a small subset of them.
  */
 export declare function decodeTrait(update: TraitUpdate): Record<string, unknown> | undefined;
-//# sourceMappingURL=protobuf.d.ts.map

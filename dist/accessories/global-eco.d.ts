@@ -33,4 +33,3 @@ export declare class GlobalEcoAccessory {
      */
     dispose(): void;
 }
-//# sourceMappingURL=global-eco.d.ts.map

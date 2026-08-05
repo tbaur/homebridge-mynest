@@ -9,9 +9,10 @@
  *
  * Modern Nest thermostats are Observe-only; REST `/v5/put` cannot reach them.
  * Writes go to `TraitBatchApi/BatchUpdateState` as a `nest.rpc.NestMessage`
- * whose `set` entries carry encoded trait bytes. The encode shape matches the
- * Nest web app / community protobuf path and probe 12 dry-runs; enable
- * `allowThermostatControl` only after a live `--confirm` on your account.
+ * whose `set` entries carry encoded trait bytes. The encode shape was
+ * established against a live account with a maintainer-only probe kit that is
+ * not part of this repository, so a change here cannot be validated by the unit
+ * tests alone. `allowThermostatControl` is off by default for that reason.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ECO_MODE_STATE_TYPE_URL = exports.TARGET_TEMPERATURE_SETTINGS_TYPE_URL = void 0;
@@ -225,4 +226,3 @@ function resolveStandbyMode(state, patchMode) {
 function clampSetpoint(celsius) {
     return Math.min(settings_1.MAX_SETPOINT_C, Math.max(settings_1.MIN_SETPOINT_C, celsius));
 }
-//# sourceMappingURL=thermostat-write.js.map
