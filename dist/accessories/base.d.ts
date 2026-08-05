@@ -12,7 +12,7 @@
  * working on Homebridge 2 — see `utils/bound-characteristics.ts` for why the
  * obvious alternatives silently stop updating.
  */
-import type { PlatformAccessory, Service } from 'homebridge';
+import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { DeviceIdentity, DeviceKind, NestDevice } from '../types/device';
 import type { ResolvedConfig } from '../types/config';
 import type { Logger } from '../utils/logger';
@@ -78,5 +78,11 @@ export declare abstract class NestAccessory<TState> {
      * reporting whatever value it last held.
      */
     protected removeService(type: Parameters<PlatformAccessory['getService']>[0]): void;
+    /**
+     * Map a low-battery verdict onto HomeKit's enum.
+     *
+     * `undefined` when Nest has said nothing, so the binder leaves the last known
+     * value in place rather than publishing "normal" on no evidence.
+     */
+    protected toLowBatteryValue(isBatteryLow: boolean | undefined): CharacteristicValue | undefined;
 }
-//# sourceMappingURL=base.d.ts.map

@@ -132,4 +132,3 @@ function validateConfig(raw) {
     }
     return { config, warnings };
 }
-//# sourceMappingURL=validators.js.map

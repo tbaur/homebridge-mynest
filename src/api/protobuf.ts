@@ -34,6 +34,16 @@ export interface DecodedFrame {
   readonly traits: readonly TraitUpdate[]
   /** Set when Nest reported a stream-level status instead of trait data. */
   readonly status?: { code?: number, message?: string }
+  /**
+   * True when the frame did not parse as a `StreamBody` at all.
+   *
+   * Reported rather than swallowed because it is the difference between the
+   * routine case (frame 0 of every connection is a catalogue in another shape)
+   * and the catastrophic one (Nest changed the trait schema, so *every* frame
+   * decodes to nothing while the frame counter keeps climbing and health stays
+   * green). Callers watch the ratio.
+   */
+  readonly isUndecodable?: boolean
 }
 
 /**
@@ -44,24 +54,32 @@ export interface DecodedFrame {
  * others exist so a misconfigured `files` list in package.json fails with a
  * clear message rather than an obscure protobufjs parse error.
  */
-function resolveSchemaDirectory(): string {
-  const candidates = [
-    resolve(__dirname, '..', '..', 'assets', 'protobuf'),
-    resolve(__dirname, '..', '..', '..', 'assets', 'protobuf'),
-  ]
+let cachedSchemaDirectory: string | null = null
 
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'root.proto'))) {
-      return candidate
-    }
+function resolveSchemaDirectory(): string {
+  if (cachedSchemaDirectory !== null) {
+    return cachedSchemaDirectory
+  }
+
+  // One candidate only. The path is the same two levels up from both `src/api`
+  // under ts-jest and `dist/api` in the published package. A `../../..` fallback
+  // resolves to `node_modules/assets/protobuf` for an installed package — outside
+  // this package entirely — so a broken install would silently load wire-format
+  // schemas that any other package's postinstall could have planted, and those
+  // schemas decide how remote bytes become device state.
+  const candidate = resolve(__dirname, '..', '..', 'assets', 'protobuf')
+  if (existsSync(join(candidate, 'root.proto'))) {
+    cachedSchemaDirectory = candidate
+    return candidate
   }
 
   throw new Error(
-    `Could not find the bundled Nest protobuf schemas. Looked in: ${candidates.join(', ')}`,
+    `Could not find the bundled Nest protobuf schemas. Looked in: ${candidate}`,
   )
 }
 
 let cachedRoot: protobuf.Root | null = null
+let cachedTraitsRequest: Buffer | null = null
 
 /**
  * Load the protobuf schemas once per process.
@@ -75,9 +93,16 @@ export function loadSchemas(): protobuf.Root {
   return cachedRoot
 }
 
-/** The opaque request body that tells Nest which traits to stream. */
+/**
+ * The opaque request body that tells Nest which traits to stream.
+ *
+ * Read once. This is called on every Observe connection, and reconnects can
+ * come every few seconds during an outage — synchronous filesystem IO on the
+ * event loop at that cadence stalls every plugin in the process.
+ */
 export function readObserveTraitsRequest(): Buffer {
-  return readFileSync(join(resolveSchemaDirectory(), 'ObserveTraits.protobuf'))
+  cachedTraitsRequest ??= readFileSync(join(resolveSchemaDirectory(), 'ObserveTraits.protobuf'))
+  return cachedTraitsRequest
 }
 
 /** protobufjs renders `google.protobuf.Any` fields under either spelling. */
@@ -109,14 +134,16 @@ interface RawStreamBody {
  * own handshake.
  */
 export function decodeFrame(frame: Buffer): DecodedFrame {
-  const root = loadSchemas()
-  const streamBody = root.lookupType('nest.rpc.StreamBody')
+  const streamBody = lookupCachedType('nest.rpc.StreamBody')
+  if (!streamBody) {
+    return { traits: [], isUndecodable: true }
+  }
 
   let decoded: RawStreamBody
   try {
     decoded = streamBody.decode(frame) as unknown as RawStreamBody
   } catch {
-    return { traits: [] }
+    return { traits: [], isUndecodable: true }
   }
 
   const traits: TraitUpdate[] = []
@@ -160,8 +187,48 @@ export function decodeFrame(frame: Buffer): DecodedFrame {
   return { traits }
 }
 
-/** Trait type names already known to have no vendored schema. */
+/**
+ * Trait type names already known to have no vendored schema.
+ *
+ * Bounded: the names come from Nest, so an unbounded set is a slow leak driven
+ * by remote input. Past the cap the lookup simply repeats, which costs a little
+ * time rather than memory that is never reclaimed.
+ */
+const MAX_UNKNOWN_TYPES = 512
 const unknownTypes = new Set<string>()
+
+/**
+ * Resolved protobuf types, memoized.
+ *
+ * `lookupType` splits the name and walks the namespace on every call, and the
+ * opening snapshot alone is hundreds of traits — the negative results were
+ * already cached, but the successful ones were re-resolved per frame.
+ */
+const resolvedTypes = new Map<string, protobuf.Type>()
+
+/** Resolve a protobuf type once, or `undefined` when no schema covers it. */
+function lookupCachedType(typeName: string): protobuf.Type | undefined {
+  const cached = resolvedTypes.get(typeName)
+  if (cached) {
+    return cached
+  }
+  if (unknownTypes.has(typeName)) {
+    return undefined
+  }
+
+  try {
+    const type = loadSchemas().lookupType(typeName)
+    if (resolvedTypes.size < MAX_UNKNOWN_TYPES) {
+      resolvedTypes.set(typeName, type)
+    }
+    return type
+  } catch {
+    if (unknownTypes.size < MAX_UNKNOWN_TYPES) {
+      unknownTypes.add(typeName)
+    }
+    return undefined
+  }
+}
 
 /**
  * Decode a trait payload into a plain object.
@@ -176,19 +243,14 @@ export function decodeTrait(update: TraitUpdate): Record<string, unknown> | unde
   }
 
   const typeName = update.typeUrl.split('/').pop()
-  if (!typeName || unknownTypes.has(typeName)) {
+  if (!typeName) {
     return undefined
   }
 
-  const root = loadSchemas()
-
-  let type: protobuf.Type
-  try {
-    type = root.lookupType(typeName)
-  } catch {
-    // Cached so a trait streamed on every frame does not repeat the lookup and
-    // the exception it throws for the lifetime of the process.
-    unknownTypes.add(typeName)
+  // Memoized both ways: a trait streamed on every frame neither repeats the
+  // namespace walk nor repeats the exception it throws when no schema exists.
+  const type = lookupCachedType(typeName)
+  if (!type) {
     return undefined
   }
 

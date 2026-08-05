@@ -188,6 +188,43 @@ describe('buildInventory', () => {
     expect(thermostat?.identity.serialNumber).toBe('TSTAT0001')
   })
 
+  it('merges a legacy thermostat across its shared and device buckets', () => {
+    // A REST-only thermostat is split across two buckets: `shared` carries the
+    // setpoints, `device` carries the room, serial, and model. Reading only the
+    // first match dropped the room assignment, so the device was published as
+    // "Thermostat 0001" instead of "Hallway Thermostat".
+    const inventory = buildInventory({
+      observe: new ObserveState(),
+      buckets: {
+        where: buckets.where!,
+        shared: {
+          [THERMOSTAT_ID]: {
+            target_temperature_type: 'heat',
+            target_temperature: 21,
+            current_temperature: 19.5,
+          },
+        },
+        device: {
+          [THERMOSTAT_ID]: {
+            serial_number: 'TSTAT-LEGACY',
+            where_id: 'where-hall',
+            model_version: 'Nest Learning Thermostat 3rd Gen',
+            structure_id: 'structure_1',
+          },
+        },
+      },
+      ignoredDeviceIds: empty,
+    })
+    const thermostat = inventory.thermostats.get(THERMOSTAT_ID)
+
+    expect(thermostat?.identity.name).toBe('Hallway Thermostat')
+    expect(thermostat?.identity.serialNumber).toBe('TSTAT-LEGACY')
+    expect(thermostat?.identity.whereId).toBe('where-hall')
+    expect(thermostat?.identity.structureId).toBe('structure_1')
+    expect(thermostat?.identity.model).toBe('Nest Learning Thermostat 3rd Gen')
+    expect(thermostat?.state.targetTemperatureC).toBe(21)
+  })
+
   it('returns an empty inventory when neither transport has reported', () => {
     const inventory = buildInventory({ observe: new ObserveState(), buckets: {}, ignoredDeviceIds: empty })
 

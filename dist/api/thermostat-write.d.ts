@@ -8,14 +8,15 @@
  *
  * Modern Nest thermostats are Observe-only; REST `/v5/put` cannot reach them.
  * Writes go to `TraitBatchApi/BatchUpdateState` as a `nest.rpc.NestMessage`
- * whose `set` entries carry encoded trait bytes. The encode shape matches the
- * Nest web app / community protobuf path and probe 12 dry-runs; enable
- * `allowThermostatControl` only after a live `--confirm` on your account.
+ * whose `set` entries carry encoded trait bytes. The encode shape was
+ * established against a live account with a maintainer-only probe kit that is
+ * not part of this repository, so a change here cannot be validated by the unit
+ * tests alone. `allowThermostatControl` is off by default for that reason.
  */
 import type { HvacMode, ThermostatState } from '../types/device';
 /** Fully qualified type URL Nest expects inside google.protobuf.Any. */
 export declare const TARGET_TEMPERATURE_SETTINGS_TYPE_URL = "type.nestlabs.com/nest.trait.hvac.TargetTemperatureSettingsTrait";
-/** Eco clear uses the same BatchUpdateState NestMessage as setpoints. */
+/** Eco set and clear use the same BatchUpdateState NestMessage as setpoints. */
 export declare const ECO_MODE_STATE_TYPE_URL = "type.nestlabs.com/nest.trait.hvac.EcoModeStateTrait";
 /** One setpoint / mode change ready to encode. */
 export interface ThermostatSetpointWrite {
@@ -41,6 +42,11 @@ export interface ThermostatSetpointWrite {
  *
  * Always produces both heat and cool floats: Nest's trait carries the pair
  * even on heat-only equipment, and omitting one can bounce the other bound.
+ *
+ * The bound the user actually moved is authoritative. When honouring it would
+ * cross the other bound, the *untouched* one yields — sending a value the user
+ * did not ask for is worse than moving a bound they were not looking at, and
+ * the Home app shows their requested number either way.
  */
 export declare function buildThermostatSetpointWrite(resourceId: string, state: ThermostatState, patch: Partial<{
     mode: HvacMode;
@@ -59,4 +65,3 @@ export declare function formatThermostatUpdateLog(write: ThermostatSetpointWrite
 export declare function encodeEcoModeBatchUpdate(resourceId: string, ecoOn: boolean): Buffer;
 /** Encode a NestMessage suitable for TraitBatchApi/BatchUpdateState. */
 export declare function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrite): Buffer;
-//# sourceMappingURL=thermostat-write.d.ts.map

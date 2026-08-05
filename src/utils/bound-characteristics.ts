@@ -33,6 +33,14 @@ export type CharacteristicWriter = (value: CharacteristicValue) => Promise<void>
 
 type CharacteristicType = WithUUID<new () => Characteristic>
 
+/**
+ * Reader failures warned about before falling back to debug.
+ *
+ * A broken mapping throws on every refresh, so this has to be visible without
+ * flooding the log of an otherwise healthy install.
+ */
+const MAX_READ_FAILURE_WARNINGS = 3
+
 interface Binding {
   readonly characteristic: Characteristic
   readonly service: Service
@@ -49,10 +57,19 @@ interface Binding {
  */
 export class CharacteristicBinder {
   #bindings: Binding[] = []
+  #readFailures = 0
   readonly #log: Logger
+  readonly #label: string
 
-  constructor(log: Logger) {
+  /**
+   * @param label Device name written into failure messages. `createScopedLogger`
+   *   deliberately does not prefix lines, so without it
+   *   `Could not compute Smoke Detected` names no device — unactionable in a
+   *   house with a dozen Protects.
+   */
+  constructor(log: Logger, label = 'accessory') {
     this.#log = log
+    this.#label = label
   }
 
   /**
@@ -127,9 +144,19 @@ export class CharacteristicBinder {
       try {
         value = binding.read()
       } catch (error) {
-        this.#log.debug(
-          `Could not compute ${binding.name}: ${error instanceof Error ? error.message : String(error)}`,
-        )
+        // Warned for the first few, then dropped to debug. A state-mapping bug
+        // throws on every refresh forever, and `createScopedLogger` discards
+        // debug entirely unless the operator enabled it — so at debug only, an
+        // accessory silently stopped updating and the log said nothing.
+        this.#readFailures++
+        const message = `${this.#label}: could not compute ${binding.name} `
+          + `(${this.#readFailures} failure(s)): `
+          + `${error instanceof Error ? error.message : String(error)}`
+        if (this.#readFailures <= MAX_READ_FAILURE_WARNINGS) {
+          this.#log.warn(message)
+        } else {
+          this.#log.debug(message)
+        }
         continue
       }
 

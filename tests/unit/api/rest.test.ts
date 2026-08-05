@@ -62,6 +62,36 @@ describe('appLaunch', () => {
       .resolves.toEqual([topaz])
   })
 
+  it('refuses object keys that would write onto Object.prototype', async () => {
+    // `object_key` is server-controlled and is split into two object keys by
+    // `toBuckets`. `__proto__.x` on a plain object resolves to
+    // Object.prototype and pollutes every object in the Homebridge process;
+    // `constructor.prototype` throws a TypeError that then recurs forever,
+    // because the poisoned entry is already stored.
+    const { fetch } = jsonFetch({
+      updated_buckets: [
+        topaz,
+        { object_key: '__proto__.polluted', value: 'PWNED' },
+        { object_key: 'constructor.prototype', value: {} },
+        { object_key: 'topaz.__proto__', value: 'PWNED' },
+      ],
+    })
+
+    const objects = await appLaunch({ session, endpoints, bucketTypes: [], fetchImpl: fetch })
+
+    expect(objects).toEqual([topaz])
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('falls through an empty updated_buckets to the objects spelling', async () => {
+    // `??` stops at an empty array, so a response carrying both keys reported
+    // no updates and the real ones were discarded.
+    const { fetch } = jsonFetch({ updated_buckets: [], objects: [topaz] })
+
+    await expect(appLaunch({ session, endpoints, bucketTypes: [], fetchImpl: fetch }))
+      .resolves.toEqual([topaz])
+  })
+
   it('drops entries with no object key rather than failing the whole read', async () => {
     const { fetch } = jsonFetch({ updated_buckets: [topaz, { value: {} }, null] })
 
@@ -81,7 +111,7 @@ describe('subscribeOnce', () => {
   it('returns the objects that changed', async () => {
     const { fetch } = jsonFetch({ objects: [topaz] })
 
-    const result = await subscribeOnce({ session, endpoints, objects: [], fetchImpl: fetch })
+    const result = await subscribeOnce({ session, endpoints, revisions: [], fetchImpl: fetch })
 
     expect(result.isIdle).toBe(false)
     expect(result.objects).toEqual([topaz])
@@ -92,7 +122,7 @@ describe('subscribeOnce', () => {
     // and changes nothing about what Nest returns.
     const { fetch, calls } = jsonFetch({ objects: [] })
 
-    await subscribeOnce({ session, endpoints, objects: [topaz], fetchImpl: fetch })
+    await subscribeOnce({ session, endpoints, revisions: [topaz], fetchImpl: fetch })
 
     expect(JSON.parse(String(calls[0].body)).objects).toEqual([
       { object_key: 'topaz.ABC123', object_revision: 7, object_timestamp: 1700000000 },
@@ -102,7 +132,7 @@ describe('subscribeOnce', () => {
   it('posts to the account\'s own transport host', async () => {
     const { fetch, calls } = jsonFetch({ objects: [] })
 
-    await subscribeOnce({ session, endpoints, objects: [], fetchImpl: fetch })
+    await subscribeOnce({ session, endpoints, revisions: [], fetchImpl: fetch })
 
     expect(calls[0].url).toBe('https://czfe123.transport.home.nest.com/v5/subscribe')
   })
@@ -112,24 +142,52 @@ describe('subscribeOnce', () => {
     // an error would fill the log with failures when nothing is wrong.
     const { fetch } = hangingFetch()
 
-    const result = await subscribeOnce({ session, endpoints, objects: [], timeoutMs: 10, fetchImpl: fetch })
+    const result = await subscribeOnce({ session, endpoints, revisions: [], timeoutMs: 10, fetchImpl: fetch })
 
-    expect(result).toEqual({ isIdle: true, objects: [] })
+    // `hadResponse: false` is the load-bearing part: a quiet house and a
+    // blackholed route both time out, so the caller needs to know Nest never
+    // answered rather than counting silence as a healthy cycle.
+    expect(result).toEqual({ isIdle: true, objects: [], hadResponse: false })
   })
 
   it('treats a server-side long-poll expiry as idle', async () => {
+    // `timeoutMs: 0` makes any elapsed time clear the "did it actually wait?"
+    // bar, isolating the status handling from the timing check below.
     for (const status of [502, 504]) {
       const { fetch } = textFetch('', { status })
 
-      await expect(subscribeOnce({ session, endpoints, objects: [], fetchImpl: fetch }))
-        .resolves.toEqual({ isIdle: true, objects: [] })
+      await expect(subscribeOnce({
+        session,
+        endpoints,
+        revisions: [],
+        fetchImpl: fetch,
+        timeoutMs: 0,
+      })).resolves.toEqual({ isIdle: true, objects: [], hadResponse: true })
+    }
+  })
+
+  it('rejects a 502/504 that came back too fast to be an expired long-poll', async () => {
+    // A failing Nest edge returns these in milliseconds. Reporting that as a
+    // successful idle cycle refreshes the Protect alarm-feed staleness clock —
+    // leaving a frozen all-clear on a life-safety tile — and clears the backoff
+    // that would otherwise throttle the retry.
+    for (const status of [502, 504]) {
+      const { fetch } = textFetch('', { status })
+
+      await expect(subscribeOnce({
+        session,
+        endpoints,
+        revisions: [],
+        fetchImpl: fetch,
+        timeoutMs: 120_000,
+      })).rejects.toThrow(/too fast to be an expired long-poll/)
     }
   })
 
   it('reports an empty result as idle', async () => {
     const { fetch } = jsonFetch({ objects: [] })
 
-    await expect(subscribeOnce({ session, endpoints, objects: [], fetchImpl: fetch }))
+    await expect(subscribeOnce({ session, endpoints, revisions: [], fetchImpl: fetch }))
       .resolves.toMatchObject({ isIdle: true })
   })
 
@@ -140,7 +198,7 @@ describe('subscribeOnce', () => {
     const pending = subscribeOnce({
       session,
       endpoints,
-      objects: [],
+      revisions: [],
       timeoutMs: 60_000,
       fetchImpl: fetch,
       signal: controller.signal,
@@ -153,13 +211,13 @@ describe('subscribeOnce', () => {
   it('raises a real HTTP failure', async () => {
     const { fetch } = textFetch('nope', { status: 500 })
 
-    await expect(subscribeOnce({ session, endpoints, objects: [], fetchImpl: fetch })).rejects.toThrow()
+    await expect(subscribeOnce({ session, endpoints, revisions: [], fetchImpl: fetch })).rejects.toThrow()
   })
 
   it('reports an unparseable body as a parse error', async () => {
     const { fetch } = textFetch('<html>error</html>')
 
-    await expect(subscribeOnce({ session, endpoints, objects: [], fetchImpl: fetch }))
+    await expect(subscribeOnce({ session, endpoints, revisions: [], fetchImpl: fetch }))
       .rejects.toThrow(ApiParseError)
   })
 })
@@ -267,6 +325,25 @@ describe('ObjectList', () => {
     list.merge([{ object_key: 'where.structure.0001', value: { wheres: [] } }])
 
     expect(list.toBuckets()).toEqual({ where: { 'structure.0001': { wheres: [] } } })
+  })
+
+  it('cannot be made to pollute Object.prototype or throw, even bypassing the boundary', () => {
+    // `merge` is reachable without going through `readObjects`, so `toBuckets`
+    // carries its own guard rather than trusting the caller.
+    const list = new ObjectList()
+    list.merge([
+      { object_key: '__proto__.polluted', value: 'PWNED' },
+      { object_key: 'constructor.prototype', value: {} },
+      { object_key: 'prototype.x', value: 'PWNED' },
+      { object_key: 'topaz.__proto__', value: 'PWNED' },
+      topaz,
+    ])
+
+    const buckets = list.toBuckets()
+
+    expect(Object.keys(buckets)).toEqual(['topaz'])
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    expect(Object.prototype).not.toHaveProperty('polluted')
   })
 
   it('skips a malformed object key rather than creating a nameless bucket', () => {

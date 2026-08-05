@@ -67,6 +67,8 @@ export function readIntFlag(source: unknown, ...path: readonly string[]): boolea
  * stale HomeKit reading, whereas a spurious `0` shows freezing on a working
  * thermostat.
  */
+
+import { MAX_REPORTED_TEMPERATURE_C, MIN_REPORTED_TEMPERATURE_C } from '../settings'
 export function readIndirectFloat(source: unknown, ...path: readonly string[]): number | undefined {
   return readNumber(source, ...path, 'value')
 }
@@ -97,7 +99,10 @@ export function readHumidity(trait: unknown): number | undefined {
  * which throws rather than clamping.
  */
 export function isPlausibleTemperature(celsius: number): boolean {
-  return celsius > -50 && celsius < 100
+  // Inclusive, and from the same constants the HAP characteristic props use —
+  // duplicating the bounds as literals let the reader and the published range
+  // disagree at exactly the boundary they are meant to share.
+  return celsius >= MIN_REPORTED_TEMPERATURE_C && celsius <= MAX_REPORTED_TEMPERATURE_C
 }
 
 /** An enum protobufjs rendered as its symbolic name. */

@@ -31,21 +31,75 @@ module.exports = {
   collectCoverage: true,
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
+  // Per-area floors, each set just under the current figure so a regression
+  // fails the build.
+  //
+  // Two things to know before editing this. First, a path key REMOVES its
+  // matching files from the `global` pool — it does not add a second gate on top
+  // of it. So `global` here only covers what no path key matches (`index.ts`,
+  // `settings.ts`, `types/device.ts`), and every area that matters needs its own
+  // key or it is ungated. Second, every key must list all four metrics: a key
+  // that omits `statements` leaves statements unmeasured for those files
+  // entirely. Both mistakes were live here, and made the advertised gate far
+  // weaker than it looked.
   coverageThreshold: {
+    // Residual pool only: the files no path key below matches.
     global: {
-      branches: 80,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      branches: 95,
+      functions: 95,
+      lines: 95,
+      statements: 95,
+    },
+    './src/api/': {
+      branches: 79,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    './src/platform.ts': {
+      branches: 74,
+      functions: 81,
+      lines: 86,
+      statements: 86,
+    },
+    './src/accessories/': {
+      branches: 81,
+      functions: 99,
+      lines: 92,
+      statements: 92,
+    },
+    './src/state/': {
+      branches: 93,
+      functions: 99,
+      lines: 97,
+      statements: 97,
+    },
+    './src/utils/': {
+      branches: 92,
+      functions: 99,
+      lines: 97,
+      statements: 97,
+    },
+    './src/diagnostics/': {
+      branches: 89,
+      functions: 99,
+      lines: 96,
+      statements: 96,
+    },
+    './src/errors/': {
+      branches: 89,
+      functions: 99,
+      lines: 98,
+      statements: 98,
     },
   },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
-    // Only the entry point, not every index.ts. The glob form also catches
-    // `src/errors/index.ts`, which is the error hierarchy rather than a barrel.
-    '!src/index.ts',
-    '!src/settings.ts', // Constants only
+    // Type-only modules emit no runtime code, so they can never be covered.
+    '!src/types/config.ts',
+    '!src/types/nest.ts',
+    '!src/diagnostics/types.ts',
   ],
 
   testMatch: [

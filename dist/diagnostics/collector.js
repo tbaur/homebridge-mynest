@@ -174,6 +174,12 @@ class DiagnosticsCollector {
         if (!transport.isRestAlarmFeedAvailable) {
             reasons.push('restAlarmFeedUnavailable');
         }
+        // A schema change leaves the stream connected and the frame counter rising,
+        // so without this the single most likely way this plugin breaks reports
+        // perfect health while every reading is frozen.
+        if (transport.isDecodeDegraded) {
+            reasons.push('observeDecodeDegraded');
+        }
         const uptimeSec = readers.uptimeSec();
         // Only "stuck connecting" is Observe-down. A connected quiet stream is
         // healthy — Nest often sends no frames for long stretches on a calm home.
@@ -312,4 +318,3 @@ function redactConfig(config) {
         debug: config.debug,
     };
 }
-//# sourceMappingURL=collector.js.map

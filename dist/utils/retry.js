@@ -13,9 +13,33 @@ exports.computeBackoffMs = computeBackoffMs;
 exports.withRetry = withRetry;
 const errors_1 = require("../errors");
 const settings_1 = require("../settings");
-/** Awaitable delay. Exported so tests can substitute it and skip real waits. */
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Awaitable delay that a shutdown can cut short.
+ *
+ * `unref`'d and abort-aware because the reconnect backoff reaches five minutes:
+ * a plain timer would hold the Node event loop open for that long after
+ * Homebridge has already asked everything to stop, delaying a service restart
+ * and pushing containers into their SIGKILL grace period.
+ *
+ * Exported so tests can substitute it and skip real waits.
+ */
+function sleep(ms, signal) {
+    return new Promise((resolve) => {
+        if (signal?.aborted) {
+            resolve();
+            return;
+        }
+        const onAbort = () => {
+            clearTimeout(timer);
+            resolve();
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        timer.unref?.();
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
 }
 /**
  * Exponential backoff with full jitter.
@@ -52,16 +76,18 @@ async function withRetry(operation, options = {}) {
         }
         catch (error) {
             lastError = error;
-            if (!isRetryable(error) || attempt === maxAttempts) {
+            // On shutdown the in-flight request rejects with an abort. Retrying that
+            // only burns the attempt budget and the backoff after everything else
+            // has already been told to stop.
+            if (!isRetryable(error) || attempt === maxAttempts || options.signal?.aborted) {
                 throw error;
             }
             const serverDelay = error instanceof errors_1.RateLimitError ? error.retryAfterMs : undefined;
             const delayMs = serverDelay
                 ?? computeBackoffMs(attempt, options.baseDelayMs, options.maxDelayMs);
             options.onRetry?.(attempt, delayMs, error);
-            await sleep(delayMs);
+            await sleep(delayMs, options.signal);
         }
     }
     throw lastError;
 }
-//# sourceMappingURL=retry.js.map

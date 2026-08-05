@@ -22,6 +22,10 @@ const http_1 = require("./http");
  */
 async function postBatchUpdateState(options) {
     const url = `${options.endpoints.grpcOrigin}${options.endpoints.batchUpdatePath}`;
+    // Nest sees this id. Surfacing it in the failure message is the only way an
+    // operator (or a Nest support request) can tie a log line back to the exact
+    // request that produced it — generating one and discarding it buys nothing.
+    const requestId = (0, node_crypto_1.randomUUID)();
     const response = await (0, http_1.sendRequest)(url, {
         method: 'POST',
         headers: {
@@ -30,18 +34,17 @@ async function postBatchUpdateState(options) {
             'Content-Type': 'application/x-protobuf',
             'X-Accept-Content-Transfer-Encoding': 'binary',
             'X-Accept-Response-Streaming': 'true',
-            'request-id': (0, node_crypto_1.randomUUID)(),
+            'request-id': requestId,
             referer: `https://${options.endpoints.apiHostname}/`,
             origin: `https://${options.endpoints.apiHostname}`,
             'x-nl-webapp-version': settings_1.WEB_APP_VERSION,
         },
         body: options.body,
-        timeoutMs: options.timeoutMs ?? 30_000,
+        timeoutMs: options.timeoutMs ?? settings_1.BATCH_UPDATE_TIMEOUT_MS,
         signal: options.signal,
         fetchImpl: options.fetchImpl,
     });
     if (response.status >= 400) {
-        throw (0, errors_1.createApiError)(response.status, `${(0, sanitizers_1.sanitizeUrl)(url)} returned HTTP ${response.status}`, { retryAfterMs: (0, errors_1.parseRetryAfterMs)(response.headers.get('retry-after')) });
+        throw (0, errors_1.createApiError)(response.status, `${(0, sanitizers_1.sanitizeUrl)(url)} returned HTTP ${response.status} [request-id ${requestId}]`, { retryAfterMs: (0, errors_1.parseRetryAfterMs)(response.headers.get('retry-after')) });
     }
 }
-//# sourceMappingURL=batch-update.js.map

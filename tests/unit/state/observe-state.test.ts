@@ -13,7 +13,7 @@
  */
 
 import { decodeFrame } from '../../../src/api/protobuf'
-import { ObserveState } from '../../../src/state/observe-state'
+import { MAX_TRACKED_RESOURCES, ObserveState } from '../../../src/state/observe-state'
 import { buildFrame, heatingThermostatTraits } from '../../helpers/observe-fixtures'
 
 const traitsOf = (...args: Parameters<typeof buildFrame>) => decodeFrame(buildFrame(...args)).traits
@@ -139,5 +139,36 @@ describe('ObserveState', () => {
     expect(removed).toEqual(['DEVICE_GONE'])
     expect([...state.resourceIds].sort()).toEqual(['DEVICE_KEEP', 'STRUCTURE_1'])
     expect(state.deviceResourceCount).toBe(1)
+  })
+
+  it('stops tracking new resources past the cap, and says so once', () => {
+    // The key comes from Nest, and pruning only runs after a snapshot settles —
+    // whose timer is re-armed by every incoming trait. A stream that never goes
+    // quiet would otherwise grow this map without bound.
+    const warnings: number[] = []
+    const state = new ObserveState((cap) => warnings.push(cap))
+
+    const updates = Array.from({ length: MAX_TRACKED_RESOURCES + 50 }, (_, index) => ({
+      resourceId: `DEVICE_${index}`,
+      key: 'label',
+      typeUrl: 'type.nestlabs.com/weave.trait.description.LabelSettingsTrait',
+    }))
+    state.apply(updates)
+
+    expect(state.size).toBe(MAX_TRACKED_RESOURCES)
+    expect(warnings).toEqual([MAX_TRACKED_RESOURCES])
+
+    // Already-tracked resources keep updating; only new ones are refused.
+    const changed = state.apply([{
+      resourceId: 'DEVICE_0',
+      key: 'label',
+      typeUrl: 'type.nestlabs.com/weave.trait.description.LabelSettingsTrait',
+      value: Buffer.from([0x01]),
+    }])
+    expect([...changed]).toEqual(['DEVICE_0'])
+
+    // The warning is one-shot rather than once per dropped resource.
+    state.apply([{ resourceId: 'DEVICE_NEW', key: 'label' }])
+    expect(warnings).toHaveLength(1)
   })
 })

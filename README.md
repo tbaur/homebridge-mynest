@@ -3,8 +3,8 @@
 [![Tests](https://github.com/tbaur/homebridge-mynest/actions/workflows/test.yml/badge.svg)](https://github.com/tbaur/homebridge-mynest/actions/workflows/test.yml)
 [![npm version](https://img.shields.io/npm/v/homebridge-mynest?style=flat-square)](https://www.npmjs.com/package/homebridge-mynest)
 [![npm downloads](https://img.shields.io/npm/dt/homebridge-mynest?style=flat-square)](https://www.npmjs.com/package/homebridge-mynest)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
-[![Homebridge](https://img.shields.io/badge/homebridge-%3E%3D1.6.0%20%7C%7C%202.x-purple)](https://homebridge.io)
+[![Node.js](https://img.shields.io/badge/node-22%20%7C%7C%2024-green)](https://nodejs.org)
+[![Homebridge](https://img.shields.io/badge/homebridge-2.x-purple)](https://homebridge.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in Apple HomeKit through Homebridge, using a **Nest Account** access token only.
@@ -33,10 +33,10 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 ### Quality
 
 <!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->
-- **Homebridge 2 safe** — Live updates use stored getters + `updateValue(...)`, not removed `getValue()` or stale `.value` reads
-- **452 Tests** — Jest suite with an 80% coverage gate across statements, branches, functions, and lines
-- **Strict TypeScript** — `strict` mode with unused locals/params and no implicit returns
-- **Secret hygiene** — Access tokens are redacted from logs
+- **Built for Homebridge 2** — Live updates use stored getters + `updateValue(...)`, not the removed `getValue()` or stale `.value` reads
+- **576 tests** — Jest suite with a per-area coverage floor on every source directory (statements, branches, functions, and lines), and a CI step that fails if the suite leaks an open handle
+- **Strict TypeScript** — `strict` mode with unused locals/params and no implicit returns, plus type-aware linting (no floating promises)
+- **Secret hygiene** — Access tokens are redacted from logs, and untrusted Nest responses cannot reach `Object.prototype`
 - **No analytics** — Zero tracking or data collection
 
 ## Quick Start
@@ -53,7 +53,7 @@ npm install -g homebridge-mynest
 
 ### 2. Get a Nest Account token
 
-You need a Nest Account (not Google-only) access token from [home.nest.com/session](https://home.nest.com/session). Steps and threat model: [docs/AUTH.md](docs/AUTH.md).
+You need a Nest Account (not Google-only) access token from [home.nest.com/session](https://home.nest.com/session). Steps and threat model: [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).
 
 Prefer treating that token like a password; Nest Account sessions are account-scoped credentials.
 
@@ -75,7 +75,7 @@ Use the Homebridge UI, or add the platform to `config.json`:
 
 ### 4. Restart Homebridge
 
-Thermostats, Protects, and temperature sensors appear in the Home app as Nest reports them. The log should show `Connected to Nest`, then device adds, then `Platform ready`.
+Thermostats, Protects, and temperature sensors appear in the Home app as Nest reports them. The log should show `Connected to Nest (REST up; Observe connecting)`, then device adds, then `Platform ready`.
 
 Thermostat control (mode, setpoints, Eco) stays off until you enable **Allow thermostat control**. Optionally enable **Expose global Eco switch** for a house-wide Nest Eco Mode tile.
 
@@ -87,7 +87,7 @@ Thermostat control (mode, setpoints, Eco) stays off until you enable **Allow the
 | Nest Protect | Smoke + CO (+ optional occupancy / temp) | Smoke/CO require REST `topaz`; occupancy is ~10-minute presence |
 | Temperature Sensor | Temperature Sensor | Battery + temperature |
 
-Cameras, doorbells, locks, and Home/Away structure switches are out of scope.
+Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes are out of scope.
 
 ## Configuration Options
 
@@ -96,7 +96,7 @@ Cameras, doorbells, locks, and Home/Away structure switches are out of scope.
 | Option | Default | Description |
 | --- | --- | --- |
 | `name` | `MyNest` | Required. Plugin instance name shown in Homebridge logs. |
-| `accessToken` | — | Required. Nest Account `access_token` from [docs/AUTH.md](docs/AUTH.md). |
+| `accessToken` | — | Required. Nest Account `access_token` from [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md). |
 | `allowThermostatControl` | `false` | Opt in to send mode/setpoint/Eco changes to Nest via BatchUpdateState. |
 | `exposeGlobalEcoSwitch` | `false` | Publish a Nest Eco Mode switch that sets Eco on every thermostat. Writes require `allowThermostatControl`. |
 | `exposeProtectOccupancy` | `true` | Occupancy from REST `auto_away` when Nest computes it on a mains-powered Protect. |
@@ -113,9 +113,9 @@ Nest does not expose a reliable Protect motion event stream to third-party clien
 
 ## Not Working?
 
-1. **Authentication error** — Token missing, truncated, Google JWT/`ya29.`, or revoked. Capture a fresh Nest Account token ([docs/AUTH.md](docs/AUTH.md)).
-2. **Thermostat missing** — Modern thermostats are Observe-only on some accounts. With default logging the plugin warns within about a minute if Observe produced no frames; set `debug: true` for stream detail, or run `npm run verify`.
-3. **Thermostat in Settings but no room tile** — Remove and re-add the My Nest child bridge in the Home app, then assign rooms again. Same-UUID republish does not clear Apple Home's stuck presentation.
+1. **Authentication error** — Token missing, truncated, Google JWT/`ya29.`, or revoked. Capture a fresh Nest Account token ([docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md)).
+2. **Thermostat missing** — Modern thermostats are Observe-only on some accounts. With default logging the plugin warns within about a minute if Observe produced no frames, and again every five minutes if a connected stream goes quiet; set `debug: true` for stream detail. From a git checkout you can also run `npm run verify` against the live account — see [DEVELOPMENT.md](https://github.com/tbaur/homebridge-mynest/blob/main/DEVELOPMENT.md).
+3. **Thermostat in Settings but no room tile** — Remove and re-add the **MyNest** child bridge in the Home app (or whatever you set as **Name**), then assign rooms again. Same-UUID republish does not clear Apple Home's stuck presentation.
 4. **Eco / setpoint changes snap back** — Enable **Allow thermostat control**. With control off, HomeKit can still move the UI (required for tiles) but Nest ignores the write and the plugin reverts.
 5. **Protect without smoke/CO** — Likely Observe-only (missing from REST). The accessory still appears; alarm tiles wait for REST.
 6. **No occupancy** — Battery Protect, power unknown, Observe-only Protect, or `exposeProtectOccupancy` off.
@@ -124,24 +124,25 @@ Nest does not expose a reliable Protect motion event stream to third-party clien
 
 This plugin holds a Nest Account `access_token` in Homebridge's plaintext `config.json`. That token is account-scoped Nest credentials — anyone who can read the file can act as the Nest web app for the home. Secure the host, prefer rotating the token if it may have leaked, and never paste tokens into issues or logs.
 
-Details: [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
+Details: [SECURITY.md](https://github.com/tbaur/homebridge-mynest/blob/main/SECURITY.md) and [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).
 
 Nest publishes no consumer API and can change or revoke sessions without notice. This plugin uses Nest Account tokens only and rejects Google cookie / `ya29.` shapes on purpose.
 
 ## Requirements
 
-- Node.js 20 or newer
-- Homebridge 1.6 or newer, including Homebridge 2.x
+- **Homebridge 2.x** — Homebridge 1.x is not supported
+- **Node.js 22 or 24** — this mirrors Homebridge 2's own `engines` constraint, so newer Node versions are excluded until Homebridge supports them; CI tests both
 - A Nest Account (not Google-only) with an `access_token` from [home.nest.com/session](https://home.nest.com/session)
 
 ## More Info
 
-- [Authentication](docs/AUTH.md) — capturing the Nest Account token
-- [Protocol notes](docs/PROTOCOL.md) — reverse-engineered Nest behaviour
-- [Development](DEVELOPMENT.md) — architecture and local setup
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Changelog](CHANGELOG.md)
+- [Authentication](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md) — capturing the Nest Account token
+- [Protocol notes](https://github.com/tbaur/homebridge-mynest/blob/main/docs/PROTOCOL.md) — reverse-engineered Nest behaviour
+- [Development](https://github.com/tbaur/homebridge-mynest/blob/main/DEVELOPMENT.md) — architecture and local setup
+- [Contributing](https://github.com/tbaur/homebridge-mynest/blob/main/CONTRIBUTING.md)
+- [Code of conduct](https://github.com/tbaur/homebridge-mynest/blob/main/CODE_OF_CONDUCT.md)
+- [Security policy](https://github.com/tbaur/homebridge-mynest/blob/main/SECURITY.md)
+- [Changelog](https://github.com/tbaur/homebridge-mynest/blob/main/CHANGELOG.md)
 - [Report issues](https://github.com/tbaur/homebridge-mynest/issues)
 
 ## License

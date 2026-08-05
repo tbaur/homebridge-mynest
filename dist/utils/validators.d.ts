@@ -21,4 +21,3 @@ import type { ConfigValidationResult, MyNestPlatformConfig } from '../types/conf
  * @throws {ConfigurationError} When a required value is missing or unusable.
  */
 export declare function validateConfig(raw: MyNestPlatformConfig): ConfigValidationResult;
-//# sourceMappingURL=validators.d.ts.map

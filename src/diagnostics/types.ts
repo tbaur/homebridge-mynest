@@ -27,7 +27,7 @@ export interface DeviceGauges {
   ignored: number
 }
 
-/** Live Nest transport gauges from {@link NestTransport.status}. */
+/** Live Nest transport gauges from `NestTransport.status` (`api/transport.ts`). */
 export interface TransportGauges {
   hasSession: boolean
   observeState: string
@@ -39,6 +39,8 @@ export interface TransportGauges {
   lastRestSuccessAgeSec: number | null
   /** Whether Protect smoke/CO may be treated as live from cached REST topaz. */
   isRestAlarmFeedAvailable: boolean
+  /** Most recent Observe frames are failing to decode (likely a schema change). */
+  isDecodeDegraded: boolean
   /** Per-transport circuit breaker states (`CLOSED` / `OPEN` / `HALF_OPEN`). */
   circuitBreaker: {
     rest: string

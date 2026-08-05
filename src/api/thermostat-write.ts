@@ -8,21 +8,28 @@
  *
  * Modern Nest thermostats are Observe-only; REST `/v5/put` cannot reach them.
  * Writes go to `TraitBatchApi/BatchUpdateState` as a `nest.rpc.NestMessage`
- * whose `set` entries carry encoded trait bytes. The encode shape matches the
- * Nest web app / community protobuf path and probe 12 dry-runs; enable
- * `allowThermostatControl` only after a live `--confirm` on your account.
+ * whose `set` entries carry encoded trait bytes. The encode shape was
+ * established against a live account with a maintainer-only probe kit that is
+ * not part of this repository, so a change here cannot be validated by the unit
+ * tests alone. `allowThermostatControl` is off by default for that reason.
  */
 
 import { randomUUID } from 'node:crypto'
 import type { HvacMode, ThermostatState } from '../types/device'
-import { MAX_SETPOINT_C, MIN_SETPOINT_C } from '../settings'
+import {
+  DEFAULT_SETPOINT_C,
+  DEFAULT_SETPOINT_SPAN_C,
+  MAX_SETPOINT_C,
+  MIN_SETPOINT_C,
+  MIN_SETPOINT_SPAN_C,
+} from '../settings'
 import { loadSchemas } from './protobuf'
 
 /** Fully qualified type URL Nest expects inside google.protobuf.Any. */
 export const TARGET_TEMPERATURE_SETTINGS_TYPE_URL =
   'type.nestlabs.com/nest.trait.hvac.TargetTemperatureSettingsTrait'
 
-/** Eco clear uses the same BatchUpdateState NestMessage as setpoints. */
+/** Eco set and clear use the same BatchUpdateState NestMessage as setpoints. */
 export const ECO_MODE_STATE_TYPE_URL =
   'type.nestlabs.com/nest.trait.hvac.EcoModeStateTrait'
 
@@ -51,6 +58,11 @@ export interface ThermostatSetpointWrite {
  *
  * Always produces both heat and cool floats: Nest's trait carries the pair
  * even on heat-only equipment, and omitting one can bounce the other bound.
+ *
+ * The bound the user actually moved is authoritative. When honouring it would
+ * cross the other bound, the *untouched* one yields — sending a value the user
+ * did not ask for is worse than moving a bound they were not looking at, and
+ * the Home app shows their requested number either way.
  */
 export function buildThermostatSetpointWrite(
   resourceId: string,
@@ -64,42 +76,71 @@ export function buildThermostatSetpointWrite(
 ): ThermostatSetpointWrite {
   const mode = patch.mode ?? state.mode ?? 'heat'
   const standbyMode = resolveStandbyMode(state, patch.mode)
+  // Which bound a single-setpoint change lands on. When the unit is off, Nest
+  // keeps the real mode in `lastHvacMode`, so `off` must resolve through the
+  // standby mode or a cool-only thermostat's target would move its heat bound.
+  const effective: HvacMode = mode === 'off' ? standbyMode : mode
 
+  // A cool-mode thermostat reports its single setpoint as the *cool* bound.
+  // Seeding `heat` from it would make a request to cool harder read as a
+  // request to cross the bounds, and push the setpoint the wrong way.
   let heat = state.targetTemperatureLowC
-    ?? state.targetTemperatureC
-    ?? 20
+    ?? (state.mode === 'cool' ? undefined : state.targetTemperatureC)
+    ?? DEFAULT_SETPOINT_C
   let cool = state.targetTemperatureHighC
     ?? (state.mode === 'cool' ? state.targetTemperatureC : undefined)
-    ?? heat + 5
+    ?? heat + DEFAULT_SETPOINT_SPAN_C
+
+  let didSetHeat = false
+  let didSetCool = false
 
   if (patch.targetTemperatureLowC !== undefined) {
     heat = patch.targetTemperatureLowC
+    didSetHeat = true
   }
   if (patch.targetTemperatureHighC !== undefined) {
     cool = patch.targetTemperatureHighC
+    didSetCool = true
   }
   if (patch.targetTemperatureC !== undefined) {
-    const effective = patch.mode ?? state.mode ?? 'heat'
     if (effective === 'cool') {
       cool = patch.targetTemperatureC
+      didSetCool = true
     } else if (effective === 'range') {
-      const span = Math.max(cool - heat, 2)
+      const span = Math.max(cool - heat, MIN_SETPOINT_SPAN_C)
       heat = patch.targetTemperatureC - span / 2
       cool = patch.targetTemperatureC + span / 2
+      didSetHeat = true
+      didSetCool = true
     } else {
       heat = patch.targetTemperatureC
+      didSetHeat = true
     }
   }
 
-  if (cool < heat) {
-    cool = heat + 2
+  // Clamp before enforcing the span, not after. Clamping last could undo the
+  // repair: a heat bound at the ceiling pushed cool to ceiling + span, which
+  // clamped straight back to the ceiling and produced a zero gap — exactly what
+  // MIN_SETPOINT_SPAN_C exists to prevent.
+  heat = clampSetpoint(heat)
+  cool = clampSetpoint(cool)
+
+  if (cool - heat < MIN_SETPOINT_SPAN_C) {
+    if (didSetCool && !didSetHeat) {
+      heat = clampSetpoint(cool - MIN_SETPOINT_SPAN_C)
+      // The untouched bound hit a limit, so the touched one has to give.
+      cool = clampSetpoint(Math.max(cool, heat + MIN_SETPOINT_SPAN_C))
+    } else {
+      cool = clampSetpoint(heat + MIN_SETPOINT_SPAN_C)
+      heat = clampSetpoint(Math.min(heat, cool - MIN_SETPOINT_SPAN_C))
+    }
   }
 
   return {
     resourceId,
     mode,
-    targetTemperatureHeatC: clampSetpoint(heat),
-    targetTemperatureCoolC: clampSetpoint(cool),
+    targetTemperatureHeatC: heat,
+    targetTemperatureCoolC: cool,
     standbyMode,
     clearEco: state.isEcoActive === true,
   }

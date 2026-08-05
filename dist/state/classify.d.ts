@@ -62,4 +62,3 @@ export declare function resolveDeviceName(options: {
     /** Room name, already resolved from whichever transport supplied it. */
     roomName?: string;
 }): string;
-//# sourceMappingURL=classify.d.ts.map

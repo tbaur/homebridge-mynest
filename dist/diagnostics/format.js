@@ -34,10 +34,8 @@ function formatTransportState(state) {
             return 'live';
         case 'forbidden_dead':
             return 'auth-failed';
-        case 'connecting':
-        case 'stopped':
-            return state;
         default:
+            // `connecting` and `stopped` are already the words an operator wants.
             return state;
     }
 }
@@ -65,4 +63,3 @@ function formatDiagnosticLine(report) {
         + `${breakerText} | `
         + `api p50 ${api.p50Ms}ms p95 ${api.p95Ms}ms (req ${api.requests}, err ${api.errors})`);
 }
-//# sourceMappingURL=format.js.map

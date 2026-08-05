@@ -25,4 +25,3 @@ export interface BatchUpdateOptions {
  * about HTTP status, not a decoded payload.
  */
 export declare function postBatchUpdateState(options: BatchUpdateOptions): Promise<void>;
-//# sourceMappingURL=batch-update.d.ts.map

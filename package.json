@@ -2,7 +2,7 @@
   "name": "homebridge-mynest",
   "displayName": "Homebridge My Nest",
   "version": "1.1.0",
-  "description": "Homebridge plugin for Nest thermostats (with Eco Mode), Nest Protect, and Nest temperature sensors using a Nest Account access token",
+  "description": "Homebridge plugin for Nest thermostats (with Eco Mode), Nest Protect, and Nest Temperature Sensors using a Nest Account access token",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "keywords": [
@@ -20,16 +20,6 @@
     "name": "tbaur",
     "url": "https://github.com/tbaur"
   },
-  "maintainers": [
-    {
-      "name": "tbaur",
-      "url": "https://github.com/tbaur"
-    }
-  ],
-  "funding": {
-    "type": "github",
-    "url": "https://github.com/sponsors/tbaur"
-  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -40,12 +30,12 @@
   },
   "homepage": "https://github.com/tbaur/homebridge-mynest#readme",
   "dependencies": {
-    "protobufjs": "^7.5.4"
+    "protobufjs": "7.6.5"
   },
   "devDependencies": {
     "@homebridge/hap-nodejs": "^2.0.4",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.1.0",
+    "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "eslint": "^10.7.0",
@@ -54,42 +44,42 @@
     "jest": "^30.4.2",
     "nock": "^14.0.16",
     "ts-jest": "29.4.12",
-    "typescript": "^6.0.3"
+    "typescript": "6.0.3"
   },
   "engines": {
-    "homebridge": "^1.6.0 || ^2.0.0",
-    "node": ">=20.0.0"
+    "homebridge": "^2.0.0",
+    "node": "^22 || ^24"
   },
   "peerDependencies": {
-    "homebridge": "^1.6.0 || ^2.0.0"
+    "homebridge": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "homebridge": {
+      "optional": true
+    }
   },
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run clean && npm run build",
     "verify": "npm run build && node scripts/verify.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "NODE_ENV=test jest --coverage",
     "test:watch": "NODE_ENV=test jest --watch",
     "test:unit": "NODE_ENV=test jest --coverage --testPathPatterns=tests/unit",
     "test:integration": "NODE_ENV=test jest --testPathPatterns=tests/integration --collectCoverage=false",
-    "test:detect-handles": "NODE_ENV=test jest --detectOpenHandles --forceExit=false --testPathPatterns=tests/unit/api/transport.test.ts --collectCoverage=false",
-    "lint": "eslint . --ignore-pattern node_modules --ignore-pattern dist --ignore-pattern coverage",
-    "lint:fix": "eslint . --fix --ignore-pattern node_modules --ignore-pattern dist --ignore-pattern coverage"
+    "test:detect-handles": "NODE_ENV=test jest --detectOpenHandles --forceExit=false --collectCoverage=false",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "files": [
     "dist/**/*",
+    "!dist/**/*.map",
     "assets/**/*",
     "config.schema.json",
-    "docs/**/*",
-    "scripts/verify.mjs",
-    ".env.example",
     "CHANGELOG.md",
-    "LICENSE",
-    "README.md",
-    "SECURITY.md",
-    "CONTRIBUTING.md",
-    "DEVELOPMENT.md",
-    "RELEASING.md"
+    "SECURITY.md"
   ]
 }

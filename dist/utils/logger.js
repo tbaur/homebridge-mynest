@@ -40,4 +40,3 @@ function createScopedLogger(base, _scope, isDebugEnabled) {
         error: (message, ...parameters) => base.error(format(message), ...clean(parameters)),
     };
 }
-//# sourceMappingURL=logger.js.map

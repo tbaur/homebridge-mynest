@@ -68,7 +68,58 @@ describe('sleep', () => {
   })
 })
 
+describe('sleep', () => {
+  it('resolves immediately when the signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    const started = Date.now()
+    await sleep(60_000, controller.signal)
+
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('is cut short when the signal fires mid-wait', async () => {
+    // The reconnect backoff reaches five minutes. A plain timer would hold the
+    // Node event loop open for that long after shutdown, delaying a service
+    // restart and pushing containers into their SIGKILL grace period.
+    const controller = new AbortController()
+    const started = Date.now()
+    const waiting = sleep(60_000, controller.signal)
+
+    setTimeout(() => controller.abort(), 10)
+    await waiting
+
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('still resolves on its own when no signal is given', async () => {
+    const started = Date.now()
+    await sleep(5)
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1)
+  })
+})
+
 describe('withRetry', () => {
+  it('stops retrying once the signal is aborted', async () => {
+    const controller = new AbortController()
+    let attempts = 0
+
+    const operation = async (): Promise<never> => {
+      attempts++
+      controller.abort()
+      throw new NetworkError('connection reset')
+    }
+
+    await expect(withRetry(operation, { signal: controller.signal, maxAttempts: 5 }))
+      .rejects.toThrow(NetworkError)
+
+    // Without the signal check this would burn all five attempts plus backoff
+    // after everything else had already been told to stop.
+    expect(attempts).toBe(1)
+  })
+
   it('returns the first successful result', async () => {
     const operation = jest.fn().mockResolvedValue('ok')
 

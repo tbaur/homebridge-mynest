@@ -35,10 +35,8 @@ function formatTransportState(state: string): string {
       return 'live'
     case 'forbidden_dead':
       return 'auth-failed'
-    case 'connecting':
-    case 'stopped':
-      return state
     default:
+      // `connecting` and `stopped` are already the words an operator wants.
       return state
   }
 }

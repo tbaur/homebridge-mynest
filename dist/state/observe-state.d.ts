@@ -29,8 +29,21 @@ export type ResourceTraits = ReadonlyMap<string, TraitRecord>;
  *
  * Keyed by Nest resource id (`DEVICE_…`, `STRUCTURE_…`, `USER_…`).
  */
+/**
+ * Ceiling on distinct Observe resources held at once.
+ *
+ * Generous next to any real home — a large account is tens of resources — so
+ * reaching it means Nest is emitting identifiers this plugin does not model,
+ * which is a leak rather than a house.
+ */
+export declare const MAX_TRACKED_RESOURCES = 2000;
 export declare class ObserveState {
     #private;
+    /**
+     * @param onCapReached Called once if {@link MAX_TRACKED_RESOURCES} is hit, so
+     *   the platform can surface it rather than silently dropping resources.
+     */
+    constructor(onCapReached?: (cap: number) => void);
     /**
      * Merge a frame's traits into the accumulated state.
      *
@@ -57,8 +70,11 @@ export declare class ObserveState {
     /** How many `DEVICE_*` resources are currently held. */
     get deviceResourceCount(): number;
     get resourceIds(): readonly string[];
+    /**
+     * @internal Every resource held, devices and shared context alike. Tests
+     *   only — the platform counts devices via {@link deviceResourceCount}.
+     */
     get size(): number;
     /** Every protobuf type a resource has reported, for device classification. */
     typeUrls(resourceId: string): readonly string[];
 }
-//# sourceMappingURL=observe-state.d.ts.map

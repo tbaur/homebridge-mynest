@@ -105,7 +105,7 @@ const SENSITIVE_PATTERNS = [
     // costs nothing to withhold.
     { pattern: /\/user\/[^/\s"']+/gi, replacement: '/user/***' },
 ];
-/** Two or more `name=value` pairs joined by `;`, i.e. a serialized cookie header. */
+/** Two or more `name=value` pairs joined by `;`, i.e. a serialised cookie header. */
 const COOKIE_HEADER_SHAPE = /(?:^|\s)[\w.~$-]+=[^;\s]*;\s*[\w.~$-]+=/;
 const COOKIE_PAIR = /([\w.~$-]+)=([^;\s]+)/g;
 /**
@@ -187,9 +187,30 @@ function previewSecret(secret) {
     if (!secret) {
         return '(none)';
     }
+    const cached = previewCache.get(secret);
+    if (cached !== undefined) {
+        return cached;
+    }
     const fingerprint = (0, node_crypto_1.scryptSync)(secret, SECRET_PREVIEW_SALT, 4).toString('hex');
-    return `(${secret.length} chars, scrypt:${fingerprint})`;
+    const preview = `(${secret.length} chars, scrypt:${fingerprint})`;
+    // Bounded: keyed by the secret itself, and a plugin only ever sees a couple
+    // (the configured token and the session token it is exchanged for).
+    if (previewCache.size >= MAX_PREVIEW_CACHE) {
+        previewCache.clear();
+    }
+    previewCache.set(secret, preview);
+    return preview;
 }
+/**
+ * Memoised fingerprints.
+ *
+ * scrypt at default parameters allocates ~16 MB and blocks for tens of
+ * milliseconds. That is acceptable once per token but not once per session
+ * open, and a debug-enabled outage produces a burst of those — each one
+ * stalling the event loop and delaying every HomeKit response.
+ */
+const MAX_PREVIEW_CACHE = 8;
+const previewCache = new Map();
 /**
  * Strip the query string from a URL for logging.
  *
@@ -206,4 +227,3 @@ function sanitizeUrl(url) {
         return sanitizeString(url);
     }
 }
-//# sourceMappingURL=sanitizers.js.map

@@ -21,7 +21,6 @@ export declare abstract class NestError extends Error {
     constructor(message: string, options?: {
         cause?: Error;
     });
-    toJSON(): Record<string, unknown>;
 }
 /** Configuration is missing or invalid; not recoverable without user action. */
 export declare class ConfigurationError extends NestError {
@@ -149,7 +148,8 @@ export declare function isCircuitBreakerFailure(error: unknown): boolean;
  * Parse an HTTP `Retry-After` value into a millisecond delay.
  *
  * Accepts either a delay in seconds or an HTTP-date. Invalid values are ignored
- * so callers fall back to computed backoff.
+ * so callers fall back to computed backoff; valid ones are clamped, because the
+ * header is remote input and is fed straight to `setTimeout`.
  */
 export declare function parseRetryAfterMs(header: string | null | undefined): number | undefined;
 /**
@@ -165,4 +165,3 @@ export declare function createApiError(status: number, message: string, options?
 }): NestError;
 /** Recognise the several shapes an aborted or timed-out request arrives in. */
 export declare function isAbortError(error: unknown): boolean;
-//# sourceMappingURL=index.d.ts.map

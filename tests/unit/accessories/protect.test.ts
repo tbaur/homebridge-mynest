@@ -93,6 +93,41 @@ describe('ProtectAccessory', () => {
       .toBe(Characteristic.CarbonMonoxideDetected.CO_LEVELS_ABNORMAL)
   })
 
+  it('publishes only the sensor Nest actually reported', () => {
+    // Nest returns different topaz subsets per firmware. A bucket with
+    // smoke_status and no co_status must not grow a CO tile: nothing would ever
+    // write to it, so it would rest at HAP's default "levels normal" — a
+    // working-looking CO detector reporting all-clear on no evidence.
+    const { accessory, read } = build({
+      ...clear,
+      smoke: 'ok',
+      carbonMonoxide: undefined,
+    })
+
+    expect(hasService(accessory, Service.SmokeSensor)).toBe(true)
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(false)
+    expect(read(Service.SmokeSensor, Characteristic.SmokeDetected))
+      .toBe(Characteristic.SmokeDetected.SMOKE_NOT_DETECTED)
+  })
+
+  it('publishes only the CO sensor when Nest reported CO alone', () => {
+    const { accessory } = build({ ...clear, smoke: undefined, carbonMonoxide: 'ok' })
+
+    expect(hasService(accessory, Service.SmokeSensor)).toBe(false)
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
+  })
+
+  it('drops a sensor when Nest stops reporting that level', () => {
+    const { handler, accessory, device } = build(clear)
+
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
+
+    handler.update({ ...device, state: { ...clear, carbonMonoxide: undefined } })
+
+    expect(hasService(accessory, Service.SmokeSensor)).toBe(true)
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(false)
+  })
+
   it('publishes no smoke or CO sensor when alarm state is unknown', () => {
     // HAP's default for SmokeDetected is "not detected". Creating the service
     // would show a working all-clear on no evidence, so Observe-only Protects
@@ -342,6 +377,11 @@ describe('ProtectAccessory', () => {
   it('logs a state change once, then stays quiet', () => {
     const { handler, log, device } = build(clear)
 
+    // First summary is announced, so an operator can see the device reporting.
+    handler.update({ ...device, state: clear })
+    expect(log.infos.join('\n')).toContain('Smoke ok')
+
+    log.infos.length = 0
     handler.update({ ...device, state: clear })
     expect(log.infos.filter((line) => line.includes('Smoke'))).toEqual([])
 

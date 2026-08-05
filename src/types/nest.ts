@@ -21,6 +21,15 @@ export interface NestSession {
   readonly transportUrl: string
   /** When this session was opened, driving periodic refresh. */
   readonly openedAt: number
+  /**
+   * When Nest says this session expires, from `expires_in`.
+   *
+   * Absent when Nest omits it. Nest usually reports a window far longer than
+   * the plugin's own refresh cadence, but if it ever reports a shorter one the
+   * server's answer must win — otherwise the plugin runs on a dead session
+   * until the first refusal.
+   */
+  readonly expiresAt?: number
 }
 
 /**
@@ -48,12 +57,32 @@ export interface SubscribeResult {
   /** True when the long-poll was aborted by the client with no updates. */
   readonly isIdle: boolean
   readonly objects: readonly NestObject[]
+  /**
+   * Whether Nest actually answered, as opposed to the client deadline firing
+   * with nothing received.
+   *
+   * A quiet house and a blackholed route both produce a full-length timeout, so
+   * elapsed time cannot tell them apart — only the presence of a response can.
+   * Without this the transport counted "no bytes from Nest for two minutes" as a
+   * successful cycle, which refreshed the Protect alarm-feed freshness clock and
+   * reset the circuit breaker, leaving smoke/CO tiles showing a live frozen
+   * all-clear while diagnostics reported healthy.
+   */
+  readonly hadResponse: boolean
 }
 
 /** Buckets indexed as `{ bucketType: { id: value } }`. */
 export type BucketMap = Readonly<Record<string, Readonly<Record<string, unknown>>>>
 
-/** `structure.{id}` — one home. */
+/**
+ * `structure.{id}` — one home.
+ *
+ * Requested in `APP_LAUNCH_BUCKET_TYPES` (`settings.ts`) and recorded here as the shape
+ * Nest returns, but nothing reads it yet: room names come from `where` and the
+ * device list from the Observe ∪ REST union. `num_thermostats` in particular is
+ * deliberately not trusted — the account this plugin was built against reported
+ * `"5+"` while returning no thermostat buckets at all.
+ */
 export interface StructureBucket {
   name?: string
   country_code?: string
@@ -83,8 +112,9 @@ export interface TopazBucket {
   /**
    * Nest's own occupancy verdict, inverted: `true` means nobody has been seen.
    *
-   * Not motion. Nest sets this only after roughly
-   * {@link PROTECT_OCCUPANCY_HOLD_OFF_SEC} seconds without a detection.
+   * Not motion. Nest sets this only after roughly ten minutes without a
+   * detection — see `PROTECT_OCCUPANCY_HOLD_OFF_SEC` in `settings.ts`, which
+   * this file deliberately does not import so it stays free of dependencies.
    */
   auto_away?: boolean
   /** Length of the no-activity window, in seconds — not a timestamp. */

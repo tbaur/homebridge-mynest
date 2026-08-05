@@ -59,6 +59,22 @@ describe('toAlarmLevel', () => {
   it('says nothing when Nest reported no status', () => {
     expect(toAlarmLevel(undefined)).toBeUndefined()
   })
+
+  // The fail-safe "unknown means emergency" rule is right for a numeric code
+  // and catastrophic for a non-numeric one. `null` is how JSON spells "no
+  // reading", and treating it as an emergency fires a critical HomeKit smoke
+  // alarm — and every automation wired to it — on every Protect in the house.
+  it.each([
+    ['null', null],
+    ['a numeric string', '0'],
+    ['an empty object', {}],
+    ['an array', []],
+    ['NaN', Number.NaN],
+    ['a negative code', -1],
+    ['a fractional code', 1.5],
+  ])('publishes nothing rather than an alarm for %s', (_label, status) => {
+    expect(toAlarmLevel(status)).toBeUndefined()
+  })
 })
 
 describe('resolveOccupancy', () => {

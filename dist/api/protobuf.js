@@ -32,19 +32,26 @@ const protobufjs_1 = __importDefault(require("protobufjs"));
  * others exist so a misconfigured `files` list in package.json fails with a
  * clear message rather than an obscure protobufjs parse error.
  */
+let cachedSchemaDirectory = null;
 function resolveSchemaDirectory() {
-    const candidates = [
-        (0, node_path_1.resolve)(__dirname, '..', '..', 'assets', 'protobuf'),
-        (0, node_path_1.resolve)(__dirname, '..', '..', '..', 'assets', 'protobuf'),
-    ];
-    for (const candidate of candidates) {
-        if ((0, node_fs_1.existsSync)((0, node_path_1.join)(candidate, 'root.proto'))) {
-            return candidate;
-        }
+    if (cachedSchemaDirectory !== null) {
+        return cachedSchemaDirectory;
     }
-    throw new Error(`Could not find the bundled Nest protobuf schemas. Looked in: ${candidates.join(', ')}`);
+    // One candidate only. The path is the same two levels up from both `src/api`
+    // under ts-jest and `dist/api` in the published package. A `../../..` fallback
+    // resolves to `node_modules/assets/protobuf` for an installed package — outside
+    // this package entirely — so a broken install would silently load wire-format
+    // schemas that any other package's postinstall could have planted, and those
+    // schemas decide how remote bytes become device state.
+    const candidate = (0, node_path_1.resolve)(__dirname, '..', '..', 'assets', 'protobuf');
+    if ((0, node_fs_1.existsSync)((0, node_path_1.join)(candidate, 'root.proto'))) {
+        cachedSchemaDirectory = candidate;
+        return candidate;
+    }
+    throw new Error(`Could not find the bundled Nest protobuf schemas. Looked in: ${candidate}`);
 }
 let cachedRoot = null;
+let cachedTraitsRequest = null;
 /**
  * Load the protobuf schemas once per process.
  *
@@ -56,9 +63,16 @@ function loadSchemas() {
     cachedRoot ??= protobufjs_1.default.loadSync((0, node_path_1.join)(resolveSchemaDirectory(), 'root.proto'));
     return cachedRoot;
 }
-/** The opaque request body that tells Nest which traits to stream. */
+/**
+ * The opaque request body that tells Nest which traits to stream.
+ *
+ * Read once. This is called on every Observe connection, and reconnects can
+ * come every few seconds during an outage — synchronous filesystem IO on the
+ * event loop at that cadence stalls every plugin in the process.
+ */
 function readObserveTraitsRequest() {
-    return (0, node_fs_1.readFileSync)((0, node_path_1.join)(resolveSchemaDirectory(), 'ObserveTraits.protobuf'));
+    cachedTraitsRequest ??= (0, node_fs_1.readFileSync)((0, node_path_1.join)(resolveSchemaDirectory(), 'ObserveTraits.protobuf'));
+    return cachedTraitsRequest;
 }
 /**
  * Decode one framed Observe message.
@@ -72,14 +86,16 @@ function readObserveTraitsRequest() {
  * own handshake.
  */
 function decodeFrame(frame) {
-    const root = loadSchemas();
-    const streamBody = root.lookupType('nest.rpc.StreamBody');
+    const streamBody = lookupCachedType('nest.rpc.StreamBody');
+    if (!streamBody) {
+        return { traits: [], isUndecodable: true };
+    }
     let decoded;
     try {
         decoded = streamBody.decode(frame);
     }
     catch {
-        return { traits: [] };
+        return { traits: [], isUndecodable: true };
     }
     const traits = [];
     for (const message of decoded.message ?? []) {
@@ -116,8 +132,46 @@ function decodeFrame(frame) {
     }
     return { traits };
 }
-/** Trait type names already known to have no vendored schema. */
+/**
+ * Trait type names already known to have no vendored schema.
+ *
+ * Bounded: the names come from Nest, so an unbounded set is a slow leak driven
+ * by remote input. Past the cap the lookup simply repeats, which costs a little
+ * time rather than memory that is never reclaimed.
+ */
+const MAX_UNKNOWN_TYPES = 512;
 const unknownTypes = new Set();
+/**
+ * Resolved protobuf types, memoized.
+ *
+ * `lookupType` splits the name and walks the namespace on every call, and the
+ * opening snapshot alone is hundreds of traits — the negative results were
+ * already cached, but the successful ones were re-resolved per frame.
+ */
+const resolvedTypes = new Map();
+/** Resolve a protobuf type once, or `undefined` when no schema covers it. */
+function lookupCachedType(typeName) {
+    const cached = resolvedTypes.get(typeName);
+    if (cached) {
+        return cached;
+    }
+    if (unknownTypes.has(typeName)) {
+        return undefined;
+    }
+    try {
+        const type = loadSchemas().lookupType(typeName);
+        if (resolvedTypes.size < MAX_UNKNOWN_TYPES) {
+            resolvedTypes.set(typeName, type);
+        }
+        return type;
+    }
+    catch {
+        if (unknownTypes.size < MAX_UNKNOWN_TYPES) {
+            unknownTypes.add(typeName);
+        }
+        return undefined;
+    }
+}
 /**
  * Decode a trait payload into a plain object.
  *
@@ -130,18 +184,13 @@ function decodeTrait(update) {
         return undefined;
     }
     const typeName = update.typeUrl.split('/').pop();
-    if (!typeName || unknownTypes.has(typeName)) {
+    if (!typeName) {
         return undefined;
     }
-    const root = loadSchemas();
-    let type;
-    try {
-        type = root.lookupType(typeName);
-    }
-    catch {
-        // Cached so a trait streamed on every frame does not repeat the lookup and
-        // the exception it throws for the lifetime of the process.
-        unknownTypes.add(typeName);
+    // Memoized both ways: a trait streamed on every frame neither repeats the
+    // namespace walk nor repeats the exception it throws when no schema exists.
+    const type = lookupCachedType(typeName);
+    if (!type) {
         return undefined;
     }
     try {
@@ -155,4 +204,3 @@ function decodeTrait(update) {
         return undefined;
     }
 }
-//# sourceMappingURL=protobuf.js.map

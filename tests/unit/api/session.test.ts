@@ -83,6 +83,36 @@ describe('openSession', () => {
     expect((error as Error).message).toContain('attacker.example.com')
   })
 
+  it.each([
+    ['a non-default port', 'https://sub.nest.com:31337'],
+    ['embedded credentials', 'https://user:pass@sub.nest.com'],
+    ['plain http', 'http://sub.nest.com'],
+    ['a lookalike host', 'https://evilnest.com'],
+  ])('refuses a transport URL with %s', async (_label, transportUrl) => {
+    // Port and userinfo are part of where the credential actually goes; a
+    // hostname-only check passes all of these while the live session token
+    // ends up somewhere it should not.
+    const error = await open({
+      ...validSession,
+      urls: { transport_url: transportUrl },
+    }).promise.catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(AuthenticationError)
+  })
+
+  it('records the expiry Nest reports so it can beat the fixed refresh cadence', async () => {
+    const before = Date.now()
+    const session = await open({ ...validSession, expires_in: 3600 }).promise
+
+    expect(session.expiresAt).toBeGreaterThanOrEqual(before + 3_600_000)
+  })
+
+  it('leaves the expiry unset when Nest omits it', async () => {
+    const session = await open({ ...validSession, expires_in: undefined }).promise
+
+    expect(session.expiresAt).toBeUndefined()
+  })
+
   it('refuses a plaintext transport URL', async () => {
     await expect(open({
       ...validSession,

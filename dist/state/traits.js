@@ -70,6 +70,7 @@ function readIntFlag(source, ...path) {
  * stale HomeKit reading, whereas a spurious `0` shows freezing on a working
  * thermostat.
  */
+const settings_1 = require("../settings");
 function readIndirectFloat(source, ...path) {
     return readNumber(source, ...path, 'value');
 }
@@ -97,10 +98,12 @@ function readHumidity(trait) {
  * which throws rather than clamping.
  */
 function isPlausibleTemperature(celsius) {
-    return celsius > -50 && celsius < 100;
+    // Inclusive, and from the same constants the HAP characteristic props use —
+    // duplicating the bounds as literals let the reader and the published range
+    // disagree at exactly the boundary they are meant to share.
+    return celsius >= settings_1.MIN_REPORTED_TEMPERATURE_C && celsius <= settings_1.MAX_REPORTED_TEMPERATURE_C;
 }
 /** An enum protobufjs rendered as its symbolic name. */
 function readEnum(source, ...path) {
     return readString(source, ...path);
 }
-//# sourceMappingURL=traits.js.map

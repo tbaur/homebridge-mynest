@@ -35,4 +35,3 @@ export declare function readTemperatureSensorState(options: {
     resourceId: string;
     kryptonite: KryptoniteBucket | undefined;
 }): TemperatureSensorState;
-//# sourceMappingURL=sensor-state.d.ts.map

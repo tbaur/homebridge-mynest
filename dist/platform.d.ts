@@ -54,4 +54,3 @@ export declare class MyNestPlatform implements DynamicPlatformPlugin {
      */
     applyGlobalEcoWrite(ecoOn: boolean): Promise<boolean>;
 }
-//# sourceMappingURL=platform.d.ts.map

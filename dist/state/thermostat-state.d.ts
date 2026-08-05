@@ -49,4 +49,3 @@ export declare function readThermostatFromRest(shared: SharedBucket | undefined,
  * special case.
  */
 export declare function mergeThermostatState(observe: ThermostatState | undefined, rest: ThermostatState | undefined): ThermostatState;
-//# sourceMappingURL=thermostat-state.d.ts.map

@@ -94,9 +94,14 @@ export async function openSession(options: OpenSessionOptions): Promise<NestSess
   })
 
   const token = typeof body.access_token === 'string' ? body.access_token : undefined
-  const userId = body.userid === undefined || body.userid === null
-    ? undefined
-    : String(body.userid)
+  // Only a scalar. `String()` accepts anything, so an object would become
+  // `'[object Object]'` — truthy, so it passes the missing-field check below and
+  // then goes into the app_launch URL, sending the live token to a path Nest
+  // will 404. A shape change should raise SessionShapeError, which exists to say
+  // "Nest changed its session format; please report this".
+  const userId = typeof body.userid === 'string' || typeof body.userid === 'number'
+    ? String(body.userid)
+    : undefined
   const transportUrl = typeof body.urls?.transport_url === 'string'
     ? body.urls.transport_url
     : undefined
@@ -117,21 +122,31 @@ export async function openSession(options: OpenSessionOptions): Promise<NestSess
 
   // A session whose transport host is not a Nest host would send the token
   // wherever the response says. The value is server-controlled, so it is
-  // checked rather than trusted.
-  assertNestTransportUrl(transportUrl!)
+  // checked rather than trusted — and the *normalized* form is what gets used,
+  // because a query or fragment on the raw string would turn the subscribe path
+  // into query data and silently POST to `/` instead.
+  const normalizedTransportUrl = assertNestTransportUrl(transportUrl!)
+
+  const expiresInSec = typeof body.expires_in === 'number'
+    && Number.isFinite(body.expires_in)
+    && body.expires_in > 0
+    ? body.expires_in
+    : undefined
 
   if (log.debugEnabled) {
     log.debug(
       `Nest session established; the session token is ${previewSecret(token)}`
-      + `${typeof body.expires_in === 'number' ? ` and expires in ${body.expires_in}s` : ''}`,
+      + `${expiresInSec !== undefined ? ` and expires in ${expiresInSec}s` : ''}`,
     )
   }
 
+  const openedAt = Date.now()
   return {
     token: token!,
     userId: userId!,
-    transportUrl: transportUrl!.replace(/\/+$/, ''),
-    openedAt: Date.now(),
+    transportUrl: normalizedTransportUrl,
+    openedAt,
+    expiresAt: expiresInSec !== undefined ? openedAt + expiresInSec * 1_000 : undefined,
   }
 }
 
@@ -144,8 +159,12 @@ const ALLOWED_TRANSPORT_SUFFIXES = ['.nest.com', '.nestlabs.com'] as const
  * `transport_url` comes from the session response and is appended to on every
  * subscribe, so without this check the server response alone decides where a
  * live credential is delivered.
+ *
+ * @returns The normalized `origin + pathname` form, with any query, fragment,
+ *   and trailing slash removed, so callers cannot append a path onto something
+ *   that is not a path.
  */
-function assertNestTransportUrl(transportUrl: string): void {
+function assertNestTransportUrl(transportUrl: string): string {
   let parsed: URL
   try {
     parsed = new URL(transportUrl)
@@ -157,10 +176,17 @@ function assertNestTransportUrl(transportUrl: string): void {
 
   const isHttps = parsed.protocol === 'https:'
   const isNestHost = ALLOWED_TRANSPORT_SUFFIXES.some((suffix) => parsed.hostname.endsWith(suffix))
+  // Port and userinfo are part of where the credential actually goes. A
+  // response naming `https://user:pass@sub.nest.com:31337` passes a
+  // hostname-only check while redirecting the live session token elsewhere.
+  const isDefaultPort = parsed.port === '' || parsed.port === '443'
+  const hasUserInfo = parsed.username !== '' || parsed.password !== ''
 
-  if (!isHttps || !isNestHost) {
+  if (!isHttps || !isNestHost || !isDefaultPort || hasUserInfo) {
     throw new AuthenticationError(
-      `The Nest session returned an unexpected transport host (${parsed.protocol}//${parsed.hostname}); refusing to send the session token to it.`,
+      `The Nest session returned an unexpected transport host (${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}); refusing to send the session token to it.`,
     )
   }
+
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '')
 }

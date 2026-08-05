@@ -27,4 +27,3 @@ export declare class ThermostatAccessory extends NestAccessory<ThermostatState> 
     protected onServicesMayChange(): void;
     protected describeState(): string;
 }
-//# sourceMappingURL=thermostat.d.ts.map

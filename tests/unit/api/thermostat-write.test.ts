@@ -103,6 +103,74 @@ describe('buildThermostatSetpointWrite', () => {
     )
     expect(write.clearEco).toBe(true)
   })
+
+  // The deadband must never rewrite the bound the user actually moved. Nest's
+  // trait always carries both setpoints, so a cool-mode thermostat still holds
+  // a heating bound; lowering the cool target below it used to be silently
+  // replaced by `heat + 2` and the furnace was told the wrong number.
+  describe('setpoint deadband', () => {
+    const dualCool: ThermostatState = {
+      mode: 'cool',
+      targetTemperatureC: 26,
+      targetTemperatureLowC: 21,
+      targetTemperatureHighC: 26,
+      canHeat: true,
+      canCool: true,
+    }
+
+    it('honours a cool setpoint lowered past the heat bound', () => {
+      const write = buildThermostatSetpointWrite('DEVICE_ABC', dualCool, {
+        targetTemperatureC: 20,
+      })
+
+      expect(write.targetTemperatureCoolC).toBe(20)
+      expect(write.targetTemperatureHeatC).toBe(18)
+    })
+
+    it('honours the cooling threshold lowered past the heat bound', () => {
+      const write = buildThermostatSetpointWrite('DEVICE_ABC', dualCool, {
+        targetTemperatureHighC: 20,
+      })
+
+      expect(write.targetTemperatureCoolC).toBe(20)
+      expect(write.targetTemperatureHeatC).toBe(18)
+    })
+
+    it('yields the cool bound when the user raises heat past it', () => {
+      const write = buildThermostatSetpointWrite(
+        'DEVICE_ABC',
+        { ...dualCool, mode: 'heat' },
+        { targetTemperatureC: 28 },
+      )
+
+      expect(write.targetTemperatureHeatC).toBe(28)
+      expect(write.targetTemperatureCoolC).toBe(30)
+    })
+
+    it('lowers a REST-only cool setpoint instead of raising it', () => {
+      // Legacy REST accounts report a single setpoint and no bounds. Seeding
+      // the heat bound from it made "cool harder" move the setpoint upward.
+      const write = buildThermostatSetpointWrite(
+        'DEVICE_ABC',
+        { mode: 'cool', targetTemperatureC: 24 },
+        { targetTemperatureC: 22 },
+      )
+
+      expect(write.targetTemperatureCoolC).toBe(22)
+      expect(write.targetTemperatureHeatC).toBeLessThanOrEqual(22)
+    })
+
+    it('keeps both bounds when a range midpoint is moved', () => {
+      const write = buildThermostatSetpointWrite(
+        'DEVICE_ABC',
+        { ...dualCool, mode: 'range' },
+        { targetTemperatureC: 22 },
+      )
+
+      expect(write.targetTemperatureHeatC).toBe(19.5)
+      expect(write.targetTemperatureCoolC).toBe(24.5)
+    })
+  })
 })
 
 describe('encodeTargetTemperatureBatchUpdate', () => {

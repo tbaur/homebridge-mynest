@@ -58,6 +58,41 @@ describe('ThermostatAccessory', () => {
     expect(read(Characteristic.TargetTemperature)).toBe(21)
   })
 
+  // A reading is not a setpoint. Constraining CurrentTemperature to the
+  // setpoint range clamped an unheated room up to the floor and rounded every
+  // reading to the nearest half degree.
+  // `toBeCloseTo` because HAP quantizes with
+  // `step * Math.round((value - minValue) / step) + minValue`, which carries
+  // floating-point noise well below a millidegree.
+  it('reports a sub-zero reading without clamping it', () => {
+    expect(build({ ...heating, currentTemperatureC: -3.4 }).read(Characteristic.CurrentTemperature))
+      .toBeCloseTo(-3.4, 5)
+  })
+
+  it('keeps tenth-of-a-degree precision on the reading', () => {
+    expect(build({ ...heating, currentTemperatureC: 19.7 }).read(Characteristic.CurrentTemperature))
+      .toBeCloseTo(19.7, 5)
+  })
+
+  it('falls back to a mode the equipment actually supports', () => {
+    // The fallback is used before Nest reports a mode, and HAP rejects any
+    // value outside validValues. A cool-only unit publishes [OFF, COOL], so a
+    // HEAT fallback would be refused and warn on every push.
+    const { read, service } = build({
+      currentTemperatureC: 22,
+      canHeat: false,
+      canCool: true,
+    })
+
+    const target = read(Characteristic.TargetHeatingCoolingState)
+    const validValues = service
+      .getCharacteristic(Characteristic.TargetHeatingCoolingState as never)
+      .props.validValues
+
+    expect(target).toBe(Characteristic.TargetHeatingCoolingState.OFF)
+    expect(validValues).toContain(target)
+  })
+
   it('reports what the equipment is doing', () => {
     expect(build(heating).read(Characteristic.CurrentHeatingCoolingState))
       .toBe(Characteristic.CurrentHeatingCoolingState.HEAT)
@@ -281,6 +316,47 @@ describe('ThermostatAccessory', () => {
     expect(log.infos.join('\n')).toMatch(/Hallway Thermostat: Updating Heat to 22\.5°C/)
   })
 
+  it('routes a HomeKit mode change through the platform', async () => {
+    const { service, platform } = build({ ...heating, canHeat: true, canCool: true })
+    const spy = jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue({
+      resourceId: 'DEVICE_THERM01',
+      mode: 'cool',
+      targetTemperatureHeatC: 21,
+      targetTemperatureCoolC: 26,
+      standbyMode: 'cool',
+      clearEco: false,
+    })
+
+    await service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+      .handleSetRequest(Characteristic.TargetHeatingCoolingState.COOL)
+
+    expect(spy).toHaveBeenCalledWith(
+      'THERM01',
+      expect.anything(),
+      { mode: 'cool' },
+    )
+  })
+
+  it('routes both range threshold writes through the platform', async () => {
+    const { service, platform } = build({ ...heating, mode: 'range', canHeat: true, canCool: true })
+    const spy = jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue({
+      resourceId: 'DEVICE_THERM01',
+      mode: 'range',
+      targetTemperatureHeatC: 19,
+      targetTemperatureCoolC: 25,
+      standbyMode: 'range',
+      clearEco: false,
+    })
+
+    await service.getCharacteristic(Characteristic.HeatingThresholdTemperature)
+      .handleSetRequest(19)
+    expect(spy).toHaveBeenCalledWith('THERM01', expect.anything(), { targetTemperatureLowC: 19 })
+
+    await service.getCharacteristic(Characteristic.CoolingThresholdTemperature)
+      .handleSetRequest(25)
+    expect(spy).toHaveBeenCalledWith('THERM01', expect.anything(), { targetTemperatureHighC: 25 })
+  })
+
   it('does not reject onSet when a Nest write fails', async () => {
     // Throwing out of onSet makes Home sticky "No Response".
     const { service, platform, read } = build(heating)
@@ -329,9 +405,15 @@ describe('ThermostatAccessory', () => {
     expect(information.getCharacteristic(Characteristic.FirmwareRevision).value).toBe('6.4-1')
   })
 
-  it('logs a change but not a repeat', () => {
+  it('announces the first reading, then logs changes but not repeats', () => {
     const { handler, log, device } = build(heating)
 
+    // The first summary is info: it is the only default-visible confirmation
+    // that a newly published device is actually reporting anything.
+    handler.update({ ...device, state: heating })
+    expect(log.infos.join('\n')).toContain('19.5')
+
+    log.infos.length = 0
     handler.update({ ...device, state: heating })
     expect(log.infos).toEqual([])
 
@@ -344,6 +426,6 @@ describe('ThermostatAccessory', () => {
 
     handler.update({ ...device, state: {} })
 
-    expect(log.debugs.join('\n')).toContain('No readings yet')
+    expect(log.infos.join('\n')).toContain('No readings yet')
   })
 })

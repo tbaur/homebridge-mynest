@@ -8,4 +8,3 @@
  * @fileoverview Platform configuration, as written by the user and as resolved.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-//# sourceMappingURL=config.js.map

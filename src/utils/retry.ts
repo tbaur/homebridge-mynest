@@ -10,9 +10,36 @@
 import { NestError, RateLimitError } from '../errors'
 import { MAX_REQUEST_ATTEMPTS, RECONNECT_BASE_MS, RECONNECT_MAX_MS } from '../settings'
 
-/** Awaitable delay. Exported so tests can substitute it and skip real waits. */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Awaitable delay that a shutdown can cut short.
+ *
+ * `unref`'d and abort-aware because the reconnect backoff reaches five minutes:
+ * a plain timer would hold the Node event loop open for that long after
+ * Homebridge has already asked everything to stop, delaying a service restart
+ * and pushing containers into their SIGKILL grace period.
+ *
+ * Exported so tests can substitute it and skip real waits.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve()
+      return
+    }
+
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve()
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    timer.unref?.()
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**
@@ -46,6 +73,8 @@ export interface RetryOptions {
   /** Decides whether a given failure is worth another attempt. */
   isRetryable?: (error: unknown) => boolean
   onRetry?: (attempt: number, delayMs: number, error: unknown) => void
+  /** Shutdown signal. Stops retrying rather than burning the attempt budget. */
+  signal?: AbortSignal
 }
 
 const defaultIsRetryable = (error: unknown): boolean =>
@@ -71,7 +100,10 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error
 
-      if (!isRetryable(error) || attempt === maxAttempts) {
+      // On shutdown the in-flight request rejects with an abort. Retrying that
+      // only burns the attempt budget and the backoff after everything else
+      // has already been told to stop.
+      if (!isRetryable(error) || attempt === maxAttempts || options.signal?.aborted) {
         throw error
       }
 
@@ -80,7 +112,7 @@ export async function withRetry<T>(
         ?? computeBackoffMs(attempt, options.baseDelayMs, options.maxDelayMs)
 
       options.onRetry?.(attempt, delayMs, error)
-      await sleep(delayMs)
+      await sleep(delayMs, options.signal)
     }
   }
 

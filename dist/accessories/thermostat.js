@@ -43,7 +43,11 @@ class ThermostatAccessory extends base_1.NestAccessory {
         // HomeKit marks the accessory "No Response" and hides room tiles.
         this.#bindRequired(Characteristic.CurrentTemperature, () => this.state.currentTemperatureC, 20);
         this.#bindRequired(Characteristic.CurrentHeatingCoolingState, () => this.#currentHeatingCoolingState(), Characteristic.CurrentHeatingCoolingState.OFF);
-        this.#bindRequired(Characteristic.TargetHeatingCoolingState, () => this.#targetHeatingCoolingState(), Characteristic.TargetHeatingCoolingState.HEAT, {
+        // OFF, not HEAT: the fallback is used before Nest reports a mode, and it
+        // must be a member of every set #supportedTargetStates() can return. A
+        // cool-only unit publishes [OFF, COOL], and HAP rejects (and warns about) a
+        // value outside validValues.
+        this.#bindRequired(Characteristic.TargetHeatingCoolingState, () => this.#targetHeatingCoolingState(), Characteristic.TargetHeatingCoolingState.OFF, {
             write: async (value) => {
                 await this.#write({ mode: this.#modeFromHomeKit(value) });
             },
@@ -94,25 +98,20 @@ class ThermostatAccessory extends base_1.NestAccessory {
      */
     #applyCharacteristicProps() {
         const { Characteristic } = this.platform;
+        // A reading is not a setpoint. Constraining it to the setpoint range would
+        // clamp an unheated room's sub-zero reading up to the floor (and log a HAP
+        // warning on every push), and the setpoint's half-degree step would round
+        // away precision the sensor actually has.
         this.#service.getCharacteristic(Characteristic.CurrentTemperature).setProps({
-            minValue: 0,
-            maxValue: 100,
-            minStep: settings_1.SETPOINT_STEP_C,
+            minValue: settings_1.MIN_REPORTED_TEMPERATURE_C,
+            maxValue: settings_1.MAX_REPORTED_TEMPERATURE_C,
+            minStep: settings_1.REPORTED_TEMPERATURE_STEP_C,
         });
         this.#service.getCharacteristic(Characteristic.TargetHeatingCoolingState).setProps({
             validValues: this.#supportedTargetStates(),
         });
-        for (const type of [
-            Characteristic.TargetTemperature,
-            Characteristic.HeatingThresholdTemperature,
-            Characteristic.CoolingThresholdTemperature,
-        ]) {
-            this.#service.getCharacteristic(type).setProps({
-                minValue: settings_1.MIN_SETPOINT_C,
-                maxValue: settings_1.MAX_SETPOINT_C,
-                minStep: settings_1.SETPOINT_STEP_C,
-            });
-        }
+        // Setpoint ranges are owned by #bindSetpoint, which applies them at bind
+        // time; repeating them here would be a second place to keep in step.
         this.#service.getCharacteristic(Characteristic.TemperatureDisplayUnits).setProps({
             perms: this.#readOnlyPerms(),
         });
@@ -318,8 +317,13 @@ class ThermostatAccessory extends base_1.NestAccessory {
             case Characteristic.TargetHeatingCoolingState.AUTO:
                 return 'range';
             case Characteristic.TargetHeatingCoolingState.HEAT:
-            default:
                 return 'heat';
+            default:
+                // HAP validates against validValues before calling onSet, but
+                // #supportedTargetStates mutates that set as capabilities arrive. Off is
+                // the safe landing for a value delivered inside that window; heat was
+                // the most consequential of the four.
+                return 'off';
         }
     }
     /**
@@ -363,4 +367,3 @@ class ThermostatAccessory extends base_1.NestAccessory {
     }
 }
 exports.ThermostatAccessory = ThermostatAccessory;
-//# sourceMappingURL=thermostat.js.map

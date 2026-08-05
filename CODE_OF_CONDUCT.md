@@ -27,7 +27,7 @@ Maintainers have the right to remove, edit, or reject comments, commits, code, i
 
 ## Reporting
 
-Report issues to the project maintainers via GitHub issues or direct contact.
+Do not use the public issue tracker to report a Code of Conduct concern — it is visible to everyone, including the person being reported. Instead, contact the maintainer privately through [their GitHub profile](https://github.com/tbaur). Reports are handled confidentially.
 
 ## Attribution
 

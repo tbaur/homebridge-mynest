@@ -16,7 +16,10 @@ import { CircuitBreaker, CircuitState } from '../../../src/api/circuit-breaker'
 import { NestTransport } from '../../../src/api/transport'
 import {
   FORBIDDEN_FATAL_THRESHOLD,
+  FRAME_DECODE_WINDOW,
+  OBSERVE_IDLE_TIMEOUT_MS,
   REST_ALARM_FEED_STALE_MS,
+  REST_RESPONSE_STALE_MS,
   resolveEndpoints,
 } from '../../../src/settings'
 import { AuthenticationError } from '../../../src/errors'
@@ -95,6 +98,19 @@ function createNestFetch(options: {
   return { fetch, calls }
 }
 
+/**
+ * Poll a condition instead of sleeping a fixed span.
+ *
+ * The `sleep` mock resolves via `setImmediate`, so a loop whose request fails
+ * instantly can starve a `setTimeout`. Yielding through a timer each round
+ * keeps the timers phase reachable.
+ */
+async function waitUntil(condition: () => boolean, attempts = 200): Promise<void> {
+  for (let i = 0; i < attempts && !condition(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+}
+
 function createTransport(overrides: Partial<ConstructorParameters<typeof NestTransport>[0]> = {}) {
   const http2 = createFakeHttp2()
   const log = createRecordingLogger()
@@ -120,6 +136,328 @@ function createTransport(overrides: Partial<ConstructorParameters<typeof NestTra
 }
 
 describe('NestTransport', () => {
+  it('shares one session open across concurrent callers', async () => {
+    // Four call sites can race for a session: both run loops, app_launch, and
+    // every write. Each caller that arrived during an in-flight open used to
+    // start its own, so a five-thermostat global Eco press against a stale
+    // session became fifteen authentication requests.
+    const base = createNestFetch()
+    let sessionCalls = 0
+    const fetch = (async (url: unknown, init?: RequestInit) => {
+      const target = String(url)
+      if (target.includes('/session')) {
+        sessionCalls++
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      if (target.includes('BatchUpdateState')) {
+        return new Response(new Uint8Array(), { status: 200 })
+      }
+      return base.fetch(target, init)
+    }) as unknown as FetchLike
+
+    const { transport } = createTransport({ fetchImpl: fetch })
+    await transport.start()
+
+    const opensAfterStart = sessionCalls
+
+    await Promise.all(Array.from({ length: 5 }, () =>
+      transport.updateEcoMode('DEVICE_ABC', true)))
+
+    // The session from start() is still fresh, so none of the five should have
+    // re-opened it — and even if one had, the other four would share it.
+    expect(sessionCalls).toBe(opensAfterStart)
+
+    transport.stop()
+  })
+
+  it('does not re-open the session for an ordinary network failure', async () => {
+    // Forcing a refresh on every retryable error turned one failed request into
+    // four (the open itself retries), did it on both loops at once during any
+    // shared outage, and answered an HTTP 429 by issuing more requests. A DNS
+    // blip says nothing about whether the session is still valid.
+    //
+    // The transport is stopped from inside the fetch once enough subscribe
+    // attempts have been observed: a 500 returns instantly, so letting the loop
+    // run against a wall-clock timeout would spin.
+    let sessionCalls = 0
+    let subscribeCalls = 0
+    let stop = (): void => undefined
+
+    const fetch = (async (url: unknown) => {
+      const target = String(url)
+      if (target.includes('/session')) {
+        sessionCalls++
+        return new Response(JSON.stringify(SESSION_BODY), { status: 200 })
+      }
+      if (target.includes('app_launch')) {
+        return new Response(JSON.stringify({ updated_buckets: [TOPAZ] }), { status: 200 })
+      }
+      subscribeCalls++
+      if (subscribeCalls >= 4) {
+        stop()
+      }
+      return new Response('upstream boom', { status: 500 })
+    }) as unknown as FetchLike
+
+    const { transport } = createTransport({ fetchImpl: fetch })
+    stop = () => transport.stop()
+
+    await transport.start()
+    const opensAfterStart = sessionCalls
+
+    await waitUntil(() => subscribeCalls >= 4)
+    transport.stop()
+
+    expect(subscribeCalls).toBeGreaterThanOrEqual(4)
+    expect(sessionCalls).toBe(opensAfterStart)
+  })
+
+  it('treats a 401 on subscribe as fatal rather than retrying it forever', async () => {
+    // 401 is the one shape that actually implicates the session, so unlike an
+    // ordinary network failure it must not be retried indefinitely.
+    let subscribeCalls = 0
+    let stop = (): void => undefined
+
+    const fetch = (async (url: unknown) => {
+      const target = String(url)
+      if (target.includes('/session')) {
+        return new Response(JSON.stringify(SESSION_BODY), { status: 200 })
+      }
+      if (target.includes('app_launch')) {
+        return new Response(JSON.stringify({ updated_buckets: [TOPAZ] }), { status: 200 })
+      }
+      subscribeCalls++
+      if (subscribeCalls >= 2) {
+        stop()
+      }
+      return new Response('nope', { status: 401 })
+    }) as unknown as FetchLike
+
+    const { transport, fatals } = createTransport({ fetchImpl: fetch })
+    stop = () => transport.stop()
+
+    await transport.start()
+    await waitUntil(() => fatals.length > 0 || subscribeCalls >= 2)
+    transport.stop()
+
+    // 401 is AuthenticationError, which is fatal rather than retried forever.
+    expect(fatals.length).toBeGreaterThan(0)
+  })
+
+  it('warns when Nest frames stop decoding altogether', async () => {
+    // A pinned web-app version against an unversioned API means a Nest schema
+    // change is the likeliest way this breaks, and its signature is every frame
+    // decoding to nothing while the frame counter climbs and health stays green.
+    const { transport, log, http2 } = createTransport()
+    await transport.start()
+    const connection = await http2.session()
+
+    // Correctly framed but not a StreamBody: a length-prefixed run of 0xff.
+    const garbage = Buffer.concat([
+      Buffer.from([0x00, 0x05]),
+      Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff]),
+    ])
+    for (let i = 0; i < FRAME_DECODE_WINDOW + 5; i++) {
+      connection.push(garbage)
+    }
+    transport.stop()
+
+    expect(log.warns.join('\n')).toContain('could not be')
+    expect(log.warns.join('\n')).toContain('decoded')
+  })
+
+  it('merges and publishes buckets when subscribe reports a change', async () => {
+    // The happy path of the REST loop: a subscribe that actually returns data,
+    // rather than parking until the client gives up.
+    const changed = {
+      object_key: 'topaz.ABC123',
+      object_revision: 2,
+      object_timestamp: 2,
+      value: { smoke_status: 1 },
+    }
+    let subscribeCalls = 0
+    let stop = (): void => undefined
+
+    const fetch = (async (url: unknown) => {
+      const target = String(url)
+      if (target.includes('/session')) {
+        return new Response(JSON.stringify(SESSION_BODY), { status: 200 })
+      }
+      if (target.includes('app_launch')) {
+        return new Response(JSON.stringify({ updated_buckets: [TOPAZ] }), { status: 200 })
+      }
+      subscribeCalls++
+      if (subscribeCalls >= 2) {
+        stop()
+      }
+      return new Response(JSON.stringify({ objects: [changed] }), { status: 200 })
+    }) as unknown as FetchLike
+
+    const { transport, buckets } = createTransport({ fetchImpl: fetch })
+    stop = () => transport.stop()
+
+    await transport.start()
+    await waitUntil(() => buckets.length >= 2)
+    transport.stop()
+
+    // The revision the subscribe returned replaced the app_launch one.
+    const latest = buckets[buckets.length - 1]!
+    expect((latest.topaz as Record<string, { smoke_status?: number }>).ABC123.smoke_status).toBe(1)
+    expect(transport.status.restCycles).toBeGreaterThan(0)
+  })
+
+  it('reports deltas and ages on the periodic status line', async () => {
+    const { transport, log } = createTransport({ statusHeartbeatMs: 5 })
+    await transport.start()
+
+    await waitUntil(() => log.infos.some((line) => line.includes('Nest transport:')))
+    transport.stop()
+
+    const line = log.infos.find((entry) => entry.includes('Nest transport:'))!
+    // Deltas rather than cumulative totals, plus the ages and states an
+    // operator would otherwise have to diff across two lines to recover.
+    expect(line).toMatch(/\+\d+ Observe frame\(s\)/)
+    expect(line).toMatch(/\+\d+ REST cycle\(s\)/)
+    expect(line).toMatch(/last Observe .* ago/)
+    expect(line).toMatch(/alarm feed (live|STALE)/)
+    expect(line).toMatch(/breaker rest=\w+ obs=\w+/)
+  })
+
+  it('keeps warning while a connected Observe stream stays silent', async () => {
+    // The startup warning is one-shot, so a stream healthy at 60s and dead at
+    // hour five produced nothing at all — despite Observe being the only source
+    // of thermostat state. Rather than waiting out the ten-minute deadline, the
+    // clock is advanced once a frame has landed.
+    const realNow = Date.now
+    const { transport, log, http2 } = createTransport({ observeSilenceCheckMs: 5 })
+
+    try {
+      await transport.start()
+      const connection = await http2.session()
+      connection.push(buildFrame(heatingThermostatTraits()))
+      await waitUntil(() => transport.status.observeFrames > 0)
+
+      let offset = 0
+      jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offset)
+      offset = OBSERVE_IDLE_TIMEOUT_MS + 60_000
+
+      await waitUntil(() => log.warns.some((line) => line.includes('no frames for')))
+
+      expect(log.warns.join('\n')).toMatch(/Observe has delivered no frames for \d+s/)
+    } finally {
+      jest.restoreAllMocks()
+      transport.stop()
+    }
+  })
+
+  it('does not treat a timed-out subscribe as proof Nest is reachable', async () => {
+    // A blackholed route and a quiet house both produce a full-length client
+    // timeout, so elapsed time cannot separate them. Counting silence as a
+    // successful cycle refreshed the Protect alarm-feed clock and reset the
+    // breaker, leaving smoke/CO tiles on a live frozen all-clear while
+    // diagnostics reported healthy.
+    const { transport } = createTransport()
+    await transport.start()
+
+    // start() ran app_launch, which is a real response.
+    expect(transport.status.isRestAlarmFeedAvailable).toBe(true)
+
+    const realNow = Date.now
+    let offset = 0
+    jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offset)
+    try {
+      // Push past the window in which a response is still recent enough to
+      // vouch for the feed, without any new response arriving.
+      offset = REST_RESPONSE_STALE_MS + 60_000
+      expect(transport.status.isRestAlarmFeedAvailable).toBe(false)
+    } finally {
+      jest.restoreAllMocks()
+      transport.stop()
+    }
+  })
+
+  it('re-probes a transport that exhausted its HTTP 403 budget', async () => {
+    // Three 403s land inside ~15s, and this codebase's own position is that a
+    // 403 is most likely a WAF blip — which is sustained for minutes. Never
+    // re-probing froze every thermostat (Observe) or faulted every Protect
+    // (REST) until someone restarted Homebridge.
+    const { fetch } = createNestFetch({ subscribeStatus: 403 })
+    const { transport, log } = createTransport({ fetchImpl: fetch })
+    await transport.start()
+
+    await waitUntil(() => transport.status.restState === 'forbidden_dead')
+    expect(transport.status.restState).toBe('forbidden_dead')
+    expect(log.errors.join('\n')).toMatch(/giving up after 3 HTTP 403s/)
+    expect(log.errors.join('\n')).toMatch(/retrying in \d+ min/)
+
+    transport.stop()
+  })
+
+  it('brings a 403-dead transport back when the cooldown elapses', async () => {
+    const { fetch } = createNestFetch({ subscribeStatus: 403 })
+    const { transport, log } = createTransport({
+      fetchImpl: fetch,
+      forbiddenReprobeMs: 5,
+    })
+    await transport.start()
+
+    await waitUntil(() => transport.status.restState === 'forbidden_dead')
+    // The cooldown fires and the loop restarts rather than staying dead for the
+    // lifetime of the process.
+    await waitUntil(() => log.infos.some((line) => line.includes('Re-probing REST')))
+
+    expect(log.infos.join('\n')).toMatch(/Re-probing REST after HTTP 403 cooldown/)
+    transport.stop()
+  })
+
+  it('brings a 403-dead Observe stream back when the cooldown elapses', async () => {
+    // Observe is the only source of thermostat state on modern accounts, so
+    // leaving it dead for the process lifetime froze every thermostat.
+    const { transport, http2, log } = createTransport({ forbiddenReprobeMs: 5 })
+    await transport.start()
+
+    for (let attempt = 0; attempt < FORBIDDEN_FATAL_THRESHOLD; attempt++) {
+      const connection = await http2.session()
+      connection.respond(403)
+      await waitUntil(() => log.warns.some((line) => line.includes(`(${attempt + 1}/`)))
+    }
+
+    await waitUntil(() => log.infos.some((line) => line.includes('Re-probing Observe')))
+    expect(log.infos.join('\n')).toMatch(/Re-probing Observe after HTTP 403 cooldown/)
+
+    transport.stop()
+  })
+
+  it('reports decode degradation through status so health can see it', async () => {
+    const { transport, http2, log } = createTransport()
+    await transport.start()
+    const connection = await http2.session()
+
+    expect(transport.status.isDecodeDegraded).toBe(false)
+
+    const garbage = Buffer.concat([
+      Buffer.from([0x00, 0x05]),
+      Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff]),
+    ])
+    for (let i = 0; i < FRAME_DECODE_WINDOW + 5; i++) {
+      connection.push(garbage)
+    }
+
+    // A one-shot log line scrolls away; the flag is what reaches the health
+    // rollup, which is the only thing that keeps reporting the condition.
+    expect(transport.status.isDecodeDegraded).toBe(true)
+    expect(log.warns.join('\n')).toContain('could not be')
+
+    // Recovery is announced and clears the flag.
+    for (let i = 0; i < FRAME_DECODE_WINDOW + 5; i++) {
+      connection.push(buildFrame(heatingThermostatTraits()))
+    }
+    expect(transport.status.isDecodeDegraded).toBe(false)
+    expect(log.infos.join('\n')).toContain('decoding again')
+
+    transport.stop()
+  })
+
   it('POSTs BatchUpdateState when updating thermostat settings', async () => {
     const batchCalls: string[] = []
     const base = createNestFetch()
@@ -281,7 +619,9 @@ describe('NestTransport', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     transport.stop()
 
-    expect(log.debugs.join('\n')).toContain('Observe stream failed')
+    // The first failure of a streak warns: logging these at debug meant a
+    // persistently broken transport was invisible with the default config.
+    expect(log.warns.join('\n')).toContain('Observe stream failed')
     expect(fatals).toHaveLength(0)
   })
 

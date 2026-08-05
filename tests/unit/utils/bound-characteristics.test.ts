@@ -101,6 +101,25 @@ describe('CharacteristicBinder', () => {
     binder.refresh()
 
     expect(service.getCharacteristic(Characteristic.TargetTemperature).value).toBe(22)
+    // Warned, not hidden at debug: a broken mapping throws on every refresh
+    // forever, and the scoped logger drops debug unless the operator opted in —
+    // so at debug only, the accessory silently stopped updating.
+    expect(log.warns.join('\n')).toContain('bad mapping')
+  })
+
+  it('stops warning about a persistently failing reader after a few refreshes', () => {
+    const { service, log, binder } = setup()
+
+    binder.bind(service as never, Characteristic.CurrentTemperature as never, () => {
+      throw new Error('bad mapping')
+    })
+
+    for (let i = 0; i < 6; i++) {
+      binder.refresh()
+    }
+
+    // Visible, but it cannot flood the log of an otherwise healthy install.
+    expect(log.warns).toHaveLength(3)
     expect(log.debugs.join('\n')).toContain('bad mapping')
   })
 

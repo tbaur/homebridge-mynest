@@ -57,6 +57,7 @@ const makeReaders = (): MutableReaders => {
       lastObserveFrameAgeSec: lastObserveFrameAgeSec.value,
       lastRestSuccessAgeSec: 2,
       isRestAlarmFeedAvailable: true,
+  isDecodeDegraded: false,
       circuitBreaker: {
         rest: restBreaker.value,
         observe: observeBreaker.value,
@@ -207,6 +208,7 @@ describe('DiagnosticsCollector', () => {
       transport: () => ({
         ...m.readers.transport(),
         isRestAlarmFeedAvailable: false,
+  isDecodeDegraded: false,
       }),
     }
 

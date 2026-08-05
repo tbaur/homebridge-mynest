@@ -36,7 +36,13 @@ type CharacteristicType = WithUUID<new () => Characteristic>;
  */
 export declare class CharacteristicBinder {
     #private;
-    constructor(log: Logger);
+    /**
+     * @param label Device name written into failure messages. `createScopedLogger`
+     *   deliberately does not prefix lines, so without it
+     *   `Could not compute Smoke Detected` names no device — unactionable in a
+     *   house with a dozen Protects.
+     */
+    constructor(log: Logger, label?: string);
     /**
      * Publish a characteristic and record how to compute its value.
      *
@@ -72,4 +78,3 @@ export declare class CharacteristicBinder {
     get size(): number;
 }
 export {};
-//# sourceMappingURL=bound-characteristics.d.ts.map

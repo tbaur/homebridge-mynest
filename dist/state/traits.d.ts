@@ -28,15 +28,6 @@ export declare function readString(source: unknown, ...path: readonly string[]):
  * heat" would hide the heating controls on a thermostat that has them.
  */
 export declare function readIntFlag(source: unknown, ...path: readonly string[]): boolean | undefined;
-/**
- * Read a `Float_Indirect`-wrapped number.
- *
- * The wrapper is present with an absent inner `value` whenever the reading is
- * exactly zero *or* was not sent. Distinguishing them is impossible on the
- * wire, so this returns `undefined` for both: a spurious `undefined` costs one
- * stale HomeKit reading, whereas a spurious `0` shows freezing on a working
- * thermostat.
- */
 export declare function readIndirectFloat(source: unknown, ...path: readonly string[]): number | undefined;
 /**
  * Read a Nest temperature trait, in Celsius.
@@ -58,4 +49,3 @@ export declare function readHumidity(trait: unknown): number | undefined;
 export declare function isPlausibleTemperature(celsius: number): boolean;
 /** An enum protobufjs rendered as its symbolic name. */
 export declare function readEnum(source: unknown, ...path: readonly string[]): string | undefined;
-//# sourceMappingURL=traits.d.ts.map

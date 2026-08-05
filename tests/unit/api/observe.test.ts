@@ -15,7 +15,7 @@ import { runObserveSession } from '../../../src/api/observe'
 import { AuthenticationError, ForbiddenError, ObserveStreamError } from '../../../src/errors'
 import { resolveEndpoints } from '../../../src/settings'
 import type { NestSession } from '../../../src/types/nest'
-import { createFakeHttp2 } from '../../helpers/http2'
+import { FakeHttp2Session, createFakeHttp2 } from '../../helpers/http2'
 import { createRecordingLogger } from '../../helpers/logger'
 import { buildFrame, heatingThermostatTraits } from '../../helpers/observe-fixtures'
 
@@ -235,7 +235,63 @@ describe('runObserveSession', () => {
     const result = await promise
 
     expect(result.frameCount).toBe(1)
-    expect(log.debugs.join('\n')).toContain('handler exploded')
+    // Warned, not swallowed at debug: this is the catch that would otherwise
+    // hide a state-layer bug throwing on every single frame.
+    expect(log.warns.join('\n')).toContain('handler exploded')
+  })
+
+  it('destroys the session when opening the stream throws', async () => {
+    // `client.request()` can throw synchronously (GOAWAY, invalid session).
+    // That happens before any cleanup is wired up, so without an explicit
+    // destroy the socket and its TLS state leak on every reconnect attempt —
+    // and the loop reconnects indefinitely.
+    const failing = new FakeHttp2Session()
+    failing.shouldFailRequest = true
+
+    const promise = runObserveSession({
+      session,
+      endpoints,
+      log: createRecordingLogger(),
+      connect: (() => failing) as never,
+      onFrame: () => undefined,
+    })
+
+    await expect(promise).rejects.toThrow(ObserveStreamError)
+    expect(failing.destroyed).toBe(true)
+  })
+
+  it('gives up when the gateway never sends response headers', async () => {
+    // The idle deadline is ten minutes, which is far too long for a connection
+    // that never establishes — and Observe is the only source of thermostat
+    // state, so a blackholed route would stall it silently.
+    const { http2, promise } = start({ connectTimeoutMs: 20 })
+    await http2.session()
+
+    await expect(promise).rejects.toThrow(/did not respond within 20ms/)
+  })
+
+  it('clears the connect deadline once headers arrive', async () => {
+    const { http2, promise } = start({ connectTimeoutMs: 30 })
+    const connection = await http2.session()
+
+    connection.respond(200)
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    connection.end()
+
+    // The deadline must not fire after a successful response.
+    await expect(promise).resolves.toMatchObject({ reason: 'ended' })
+  })
+
+  it('includes the request id it sent to Nest in a failure', async () => {
+    const { http2, promise } = start()
+    const connection = await http2.session()
+    const sent = String(connection.requestHeaders['request-id'])
+
+    connection.failStream('gateway unavailable')
+
+    const error = await promise.catch((caught: unknown) => caught)
+    expect(sent).toMatch(/^[0-9a-f-]{36}$/)
+    expect((error as Error).message).toContain(sent)
   })
 
   it('fails cleanly when the stream sends unusable framing', async () => {

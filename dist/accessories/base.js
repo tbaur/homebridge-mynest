@@ -17,6 +17,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NestAccessory = void 0;
 const settings_1 = require("../settings");
 const bound_characteristics_1 = require("../utils/bound-characteristics");
+/** Whether any field published as Accessory Information differs. */
+function hasIdentityChanged(previous, next) {
+    return previous.name !== next.name
+        || previous.model !== next.model
+        || previous.serialNumber !== next.serialNumber
+        || previous.firmwareVersion !== next.firmwareVersion
+        || previous.id !== next.id;
+}
 /** One HomeKit accessory backed by one Nest device. */
 class NestAccessory {
     platform;
@@ -35,7 +43,7 @@ class NestAccessory {
         this.config = platform.resolvedConfig;
         this.identity = device.identity;
         this.state = device.state;
-        this.binder = new bound_characteristics_1.CharacteristicBinder(log);
+        this.binder = new bound_characteristics_1.CharacteristicBinder(log, device.identity.name);
         this.#applyAccessoryInformation();
     }
     get deviceId() {
@@ -49,9 +57,15 @@ class NestAccessory {
      * unconditionally is cheaper than diffing here.
      */
     update(device) {
+        const previousIdentity = this.identity;
         this.identity = device.identity;
         this.state = device.state;
-        this.#applyAccessoryInformation();
+        // Only when it actually changed. These four values essentially never do, and
+        // re-applying them ran HAP's full value-validation path four times per
+        // device per refresh on the hot update path.
+        if (hasIdentityChanged(previousIdentity, device.identity)) {
+            this.#applyAccessoryInformation();
+        }
         this.onServicesMayChange();
         this.binder.refresh();
         this.#logSummary();
@@ -93,6 +107,21 @@ class NestAccessory {
         this.binder.unbindService(existing);
         this.accessory.removeService(existing);
     }
+    /**
+     * Map a low-battery verdict onto HomeKit's enum.
+     *
+     * `undefined` when Nest has said nothing, so the binder leaves the last known
+     * value in place rather than publishing "normal" on no evidence.
+     */
+    toLowBatteryValue(isBatteryLow) {
+        const { StatusLowBattery } = this.platform.Characteristic;
+        if (isBatteryLow === undefined) {
+            return undefined;
+        }
+        return isBatteryLow
+            ? StatusLowBattery.BATTERY_LEVEL_LOW
+            : StatusLowBattery.BATTERY_LEVEL_NORMAL;
+    }
     #applyAccessoryInformation() {
         const { Characteristic, Service: HapService } = this.platform;
         const service = this.accessory.getService(HapService.AccessoryInformation)
@@ -106,10 +135,18 @@ class NestAccessory {
             service.setCharacteristic(Characteristic.FirmwareRevision, this.identity.firmwareVersion);
         }
     }
-    /** Info on a change, debug otherwise, so the log follows the house. */
+    /**
+     * Info on a change, debug otherwise, so the log follows the house.
+     *
+     * The first summary is also info: it is the only default-visible confirmation
+     * that a newly published device is actually reporting data. The "Added …"
+     * line carries no readings, so folding the first summary into the debug
+     * branch left an operator unable to tell a live device from a silent one.
+     */
     #logSummary() {
         const summary = this.describeState();
-        if (this.#lastSummary === null || this.#lastSummary === summary) {
+        const isFirst = this.#lastSummary === null;
+        if (!isFirst && this.#lastSummary === summary) {
             this.log.debug(`${this.identity.name}: ${summary}`);
         }
         else {
@@ -119,4 +156,3 @@ class NestAccessory {
     }
 }
 exports.NestAccessory = NestAccessory;
-//# sourceMappingURL=base.js.map

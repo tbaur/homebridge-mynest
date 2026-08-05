@@ -62,11 +62,18 @@ describe('decodeFrame', () => {
     expect(status).toEqual({ code: 7, message: 'permission denied' })
   })
 
-  it('returns no traits for a frame it cannot parse', () => {
+  it('returns no traits for a frame it cannot parse, and says so', () => {
     // Every Observe connection opens with a resource catalogue in a shape
     // StreamBody does not describe. Throwing here would mean no stream ever
-    // gets past its own first frame.
-    expect(decodeFrame(Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff]))).toEqual({ traits: [] })
+    // gets past its own first frame — but the failure is still reported, so a
+    // Nest schema change (every frame undecodable) can be told apart from the
+    // one routine catalogue frame per connection.
+    expect(decodeFrame(Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff])))
+      .toEqual({ traits: [], isUndecodable: true })
+  })
+
+  it('does not flag a frame that parsed as undecodable', () => {
+    expect(decodeFrame(buildFrame(heatingThermostatTraits())).isUndecodable).toBeUndefined()
   })
 
   it('returns no traits for an empty frame', () => {

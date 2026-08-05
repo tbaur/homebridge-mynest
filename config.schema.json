@@ -28,7 +28,7 @@
         "title": "Allow thermostat control",
         "type": "boolean",
         "default": false,
-        "description": "Opt in to let HomeKit change thermostat mode, setpoints, and Eco via Nest BatchUpdateState. Off by default so upgrades stay read-only until you enable control. Confirm setpoints with nest-probe probe 12 (--confirm) first; Eco Mode uses the same gateway but has no separate probe confirm yet."
+        "description": "Opt in to let HomeKit change thermostat mode, setpoints, and Eco via Nest BatchUpdateState. Off by default so upgrades stay read-only until you enable control. Nest publishes no supported write API, so leave this off unless you want HomeKit driving your HVAC."
       },
       "exposeGlobalEcoSwitch": {
         "title": "Expose global Eco switch",
@@ -51,6 +51,7 @@
       "ignoredDeviceIds": {
         "title": "Ignored device IDs",
         "type": "array",
+        "default": [],
         "required": false,
         "description": "Nest device IDs or serial numbers to leave out of HomeKit. IDs appear in the Homebridge log when devices are added.",
         "items": {

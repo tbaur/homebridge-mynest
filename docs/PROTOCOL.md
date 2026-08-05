@@ -28,7 +28,9 @@ HomeKit accessories are unregistered only when Nest has confirmed a device is go
 | Device absent from the Observe ∪ REST inventory after the above | Unregister from HomeKit |
 | Expired / revoked access token (or both transports exhausted on HTTP 403) | Stop updates; **keep** accessories — Nest Account auth is a manually pasted session token, so unregistering would bounce rooms/automations until the user pastes a fresh one and restarts |
 
-Unusable plugin config at startup (missing/invalid token shape, etc.) still clears the cache: there is no session to refresh and no honest last-known feed to keep serving.
+Unusable plugin config at startup (missing/invalid token shape, etc.) **keeps** the cached accessories, for the same reason an expired token does. A typo, a half-edited `config.json`, or a truncated token would otherwise destroy every room assignment, scene membership, and automation target in the Home app — and fixing the config does not bring them back, because HomeKit treats the re-registered accessories as new devices. A config error cannot warrant a more destructive response than a revoked token. The plugin logs why and publishes nothing until it is restarted with a usable config.
+
+A transient failure at startup (DNS, TLS, a timeout, a 5xx) is **not** fatal: it is retried with backoff, because `didFinishLaunching` fires only once and a host that boots before its network is up would otherwise stay idle for the lifetime of the process.
 
 ## Session
 
@@ -78,7 +80,9 @@ HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_co
 
 `off` is `active=0` with a standby `HEAT`/`COOL` left in `hvacMode` — Nest does not store an OFF enum there. REST `/v5/put` cannot reach Observe-only thermostats.
 
-Probe kit: `xtmp/nest-probe` probe 12 dry-runs the setpoint encode; `--confirm` POSTs a live bump. Plugin flag: `allowThermostatControl` (default **off** — opt in after a live confirm on your account). Manual HomeKit setpoint/mode writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
+Plugin flag: `allowThermostatControl` (default **off**). Manual HomeKit setpoint/mode writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
+
+> The encode shape was confirmed against a live account with a maintainer-only probe kit (`nest-probe`), which is **not part of this repository** and is not something a user or contributor can run. Treat references to it as provenance for where these findings came from, not as a step to reproduce.
 
 ### Eco Mode (on / off)
 
@@ -88,7 +92,7 @@ HomeKit has no Eco thermostat mode, so the plugin exposes Eco as a Switch (per t
 2. Wrap in `nest.rpc.NestMessage` `{ set: [{ object: { id: DEVICE_…, key: eco_mode_state, uuid }, property: Any }] }` (`encodeEcoModeBatchUpdate`).
 3. Same `TraitBatchApi/BatchUpdateState` endpoint and auth as setpoint writes.
 
-There is no nest-probe confirm path for Eco-only writes yet; enable `allowThermostatControl` only after you are comfortable with live Nest writes on your account.
+Eco-only writes were never confirmed against a live account the way setpoints were; enable `allowThermostatControl` only if you are comfortable with live Nest writes on your account.
 
 The optional house-wide switch (`exposeGlobalEcoSwitch`) posts Eco to every live thermostat accessory. It reports success only when every write succeeds; HomeKit stays optimistic until Nest's all-Eco aggregate matches (or 45s elapses and Nest truth wins).
 

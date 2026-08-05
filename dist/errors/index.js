@@ -13,6 +13,7 @@ exports.isCircuitBreakerFailure = isCircuitBreakerFailure;
 exports.parseRetryAfterMs = parseRetryAfterMs;
 exports.createApiError = createApiError;
 exports.isAbortError = isAbortError;
+const settings_1 = require("../settings");
 /**
  * Base class for all plugin errors.
  *
@@ -30,16 +31,6 @@ class NestError extends Error {
         if (Error.captureStackTrace) {
             Error.captureStackTrace(this, this.constructor);
         }
-    }
-    toJSON() {
-        return {
-            name: this.name,
-            code: this.code,
-            message: this.message,
-            isRetryable: this.isRetryable,
-            httpStatus: this.httpStatus,
-            timestamp: this.timestamp.toISOString(),
-        };
     }
 }
 exports.NestError = NestError;
@@ -204,10 +195,27 @@ function isCircuitBreakerFailure(error) {
     return false;
 }
 /**
+ * Clamp an untrusted delay to something `setTimeout` can actually honour.
+ *
+ * Node collapses any delay above 2^31-1 ms to 1 ms, so an absurd server value
+ * would turn "wait a very long time" into "retry immediately" — the exact
+ * opposite of what a rate-limited endpoint is asking for.
+ *
+ * Floored at {@link MIN_RETRY_AFTER_MS} rather than at zero. Consumers select
+ * the server's value with `??`, which does not treat `0` as absent, so
+ * `Retry-After: 0` (or any already-past HTTP-date) previously produced
+ * `sleep(0)` — an unthrottled loop against a service that had just asked the
+ * client to slow down, with the breaker deliberately not counting 429s.
+ */
+function clampRetryAfterMs(ms) {
+    return Math.min(settings_1.MAX_RETRY_AFTER_MS, Math.max(settings_1.MIN_RETRY_AFTER_MS, Math.round(ms)));
+}
+/**
  * Parse an HTTP `Retry-After` value into a millisecond delay.
  *
  * Accepts either a delay in seconds or an HTTP-date. Invalid values are ignored
- * so callers fall back to computed backoff.
+ * so callers fall back to computed backoff; valid ones are clamped, because the
+ * header is remote input and is fed straight to `setTimeout`.
  */
 function parseRetryAfterMs(header) {
     if (!header) {
@@ -222,11 +230,11 @@ function parseRetryAfterMs(header) {
     // delay into "retry immediately".
     const asSeconds = Number(trimmed);
     if (Number.isFinite(asSeconds)) {
-        return asSeconds >= 0 ? Math.round(asSeconds * 1_000) : undefined;
+        return asSeconds >= 0 ? clampRetryAfterMs(asSeconds * 1_000) : undefined;
     }
     const asDate = Date.parse(trimmed);
     if (!Number.isNaN(asDate)) {
-        return Math.max(0, asDate - Date.now());
+        return clampRetryAfterMs(asDate - Date.now());
     }
     return undefined;
 }
@@ -262,4 +270,3 @@ function isAbortError(error) {
     const code = 'code' in error ? String(error.code) : '';
     return name === 'AbortError' || name === 'TimeoutError' || code === 'ABORT_ERR';
 }
-//# sourceMappingURL=index.js.map

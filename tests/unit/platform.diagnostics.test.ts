@@ -45,6 +45,7 @@ jest.mock('../../src/api/transport', () => {
           lastObserveFrameAgeSec: 1,
           lastRestSuccessAgeSec: 1,
           isRestAlarmFeedAvailable: true,
+  isDecodeDegraded: false,
           circuitBreaker: {
             rest: { ...closedBreaker },
             observe: { ...closedBreaker },

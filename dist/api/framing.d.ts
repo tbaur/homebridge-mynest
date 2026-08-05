@@ -53,4 +53,3 @@ export declare class FrameSplitter {
     /** Bytes held for a frame that is not yet complete. */
     get pendingBytes(): number;
 }
-//# sourceMappingURL=framing.d.ts.map

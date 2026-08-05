@@ -11,9 +11,21 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "moduleResolution": "node",
+    // No `.map` output: the published tarball ships neither the maps nor the
+    // `.ts` sources they point at, so emitting them only puts sourceMappingURL
+    // comments in dist that resolve to nothing in an installed plugin. It also
+    // roughly halves the tarball. Debug against the repo, where tests run
+    // straight off the TypeScript.
+    "declarationMap": false,
+    "sourceMap": false,
+    // `node10` is the current spelling of the classic resolver, and TypeScript
+    // 6 deprecates it — hence `ignoreDeprecations`. Migrating to `node16` is
+    // blocked upstream, not by choice: it requires `module: node16`, under
+    // which every `import type … from 'homebridge'` fails with TS1541 because
+    // Homebridge is ESM-only and this package is CommonJS. Those imports erase
+    // at compile time, so annotating eight of them with `resolution-mode` would
+    // buy nothing. Revisit when the plugin can emit ESM.
+    "moduleResolution": "node10",
     "types": ["node"],
     "ignoreDeprecations": "6.0",
     "allowSyntheticDefaultImports": true,

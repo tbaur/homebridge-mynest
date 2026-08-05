@@ -28,4 +28,3 @@ exports.isDeviceOfKind = isDeviceOfKind;
 function isDeviceOfKind(device, kind) {
     return device.identity.kind === kind;
 }
-//# sourceMappingURL=device.js.map

@@ -36,7 +36,10 @@ Thumbs.db
 # Build
 build/
 *.tsbuildinfo
-# Note: dist/ is NOT ignored - it's committed to git for git installs to work
+# Note: dist/ is NOT ignored - it's committed so `npm install <git-url>` works
+# even if the `prepare` script is skipped (e.g. --ignore-scripts). `prepare`
+# compiles from source on install, so the committed output is a fallback rather
+# than the thing consumers are trusted to run; CI fails the build if it drifts.
 
 # Environment
 .env

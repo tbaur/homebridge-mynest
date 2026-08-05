@@ -52,6 +52,7 @@ export interface ObserveSessionOptions {
     sessionMs?: number;
     idleTimeoutMs?: number;
     pingIntervalMs?: number;
+    connectTimeoutMs?: number;
 }
 /**
  * Open one Observe connection and pump frames until it ends.
@@ -60,4 +61,3 @@ export interface ObserveSessionOptions {
  * @throws {ObserveStreamError} On a transport or protocol failure.
  */
 export declare function runObserveSession(options: ObserveSessionOptions): Promise<ObserveSessionResult>;
-//# sourceMappingURL=observe.d.ts.map

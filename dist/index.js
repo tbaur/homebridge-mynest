@@ -13,4 +13,3 @@ const settings_1 = require("./settings");
 exports.default = (api) => {
     api.registerPlatform(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, platform_1.MyNestPlatform);
 };
-//# sourceMappingURL=index.js.map
