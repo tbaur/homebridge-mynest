@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.0.0](https://github.com/tbaur/homebridge-mynest/compare/v1.1.0...v2.0.0) (2026-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* Homebridge 1.x is no longer supported. Requires Homebridge 2.x and Node.js 22 or newer, which is what Homebridge 2 itself requires.
+
+### Features
+
+* harden for Homebridge 2 — breaking release to 2.0.0 ([#29](https://github.com/tbaur/homebridge-mynest/issues/29)) ([02a2b7d](https://github.com/tbaur/homebridge-mynest/commit/02a2b7de0da39db36a4884f010534ab9a095daa5))
+
 ## [1.1.0](https://github.com/tbaur/homebridge-mynest/compare/v1.0.0...v1.1.0) (2026-08-01)
 
 
