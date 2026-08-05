@@ -7,6 +7,8 @@
  * @fileoverview Structured error hierarchy for predictable error handling.
  */
 
+import { MAX_RETRY_AFTER_MS } from '../settings'
+
 /**
  * Base class for all plugin errors.
  *
@@ -26,17 +28,6 @@ export abstract class NestError extends Error {
     this.timestamp = new Date()
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, this.constructor)
-    }
-  }
-
-  toJSON(): Record<string, unknown> {
-    return {
-      name: this.name,
-      code: this.code,
-      message: this.message,
-      isRetryable: this.isRetryable,
-      httpStatus: this.httpStatus,
-      timestamp: this.timestamp.toISOString(),
     }
   }
 }
@@ -220,10 +211,22 @@ export function isCircuitBreakerFailure(error: unknown): boolean {
 }
 
 /**
+ * Clamp an untrusted delay to something `setTimeout` can actually honour.
+ *
+ * Node collapses any delay above 2^31-1 ms to 1 ms, so an absurd server value
+ * would turn "wait a very long time" into "retry immediately" — the exact
+ * opposite of what a rate-limited endpoint is asking for.
+ */
+function clampRetryAfterMs(ms: number): number {
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, Math.round(ms)))
+}
+
+/**
  * Parse an HTTP `Retry-After` value into a millisecond delay.
  *
  * Accepts either a delay in seconds or an HTTP-date. Invalid values are ignored
- * so callers fall back to computed backoff.
+ * so callers fall back to computed backoff; valid ones are clamped, because the
+ * header is remote input and is fed straight to `setTimeout`.
  */
 export function parseRetryAfterMs(header: string | null | undefined): number | undefined {
   if (!header) {
@@ -240,12 +243,12 @@ export function parseRetryAfterMs(header: string | null | undefined): number | u
   // delay into "retry immediately".
   const asSeconds = Number(trimmed)
   if (Number.isFinite(asSeconds)) {
-    return asSeconds >= 0 ? Math.round(asSeconds * 1_000) : undefined
+    return asSeconds >= 0 ? clampRetryAfterMs(asSeconds * 1_000) : undefined
   }
 
   const asDate = Date.parse(trimmed)
   if (!Number.isNaN(asDate)) {
-    return Math.max(0, asDate - Date.now())
+    return clampRetryAfterMs(asDate - Date.now())
   }
 
   return undefined

@@ -65,7 +65,17 @@ module.exports = [
       sourceType: 'module',
       parser: tsParser,
       parserOptions: {
-        project: null, // Don't require tsconfig for basic linting
+        // Type-aware linting. This plugin is built on promises that are
+        // deliberately not awaited (the two transport run loops, the
+        // didFinishLaunching hook, the post-onSet revert paths), which is
+        // exactly the shape `no-floating-promises` exists to police — and an
+        // unhandled rejection here terminates the whole Homebridge process.
+        //
+        // `tsconfig.test.json` rather than `tsconfig.json`: it is the only one
+        // that covers both `src/` and `tests/`, and the build config
+        // deliberately excludes tests.
+        project: ['./tsconfig.test.json'],
+        tsconfigRootDir: __dirname,
       },
       globals: {
         ...globals.node,
@@ -77,10 +87,13 @@ module.exports = [
     },
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
       'no-var': 'error',
       'prefer-const': 'error',
       'curly': ['error', 'all'],

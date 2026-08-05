@@ -11,13 +11,15 @@
  */
 
 import type { PlatformAccessory, Service } from 'homebridge'
-import { MANUFACTURER } from '../settings'
+import {
+  GLOBAL_ECO_DEVICE_ID,
+  GLOBAL_ECO_DISPLAY_NAME as DISPLAY_NAME,
+  MANUFACTURER,
+} from '../settings'
 import type { Logger } from '../utils/logger'
 import { CharacteristicBinder } from '../utils/bound-characteristics'
 import { sanitizeError } from '../utils/sanitizers'
 import type { MyNestPlatform } from '../platform'
-
-const DISPLAY_NAME = 'Nest Eco Mode'
 
 /**
  * How long a successful HomeKit Eco write may ignore Nest aggregates that have
@@ -39,12 +41,20 @@ export class GlobalEcoAccessory {
    */
   #pendingAllEco: boolean | null = null
   #pendingSinceMs: number | null = null
+  /**
+   * Backstop for {@link PENDING_ECO_MAX_MS}.
+   *
+   * The age check in {@link updateAllEco} only runs when Nest sends another
+   * update. If Observe dies right after a successful write, nothing would ever
+   * clear the optimistic value and the switch would hold it indefinitely.
+   */
+  #pendingTimer: NodeJS.Timeout | null = null
 
   constructor(platform: MyNestPlatform, accessory: PlatformAccessory, log: Logger) {
     this.#platform = platform
     this.#accessory = accessory
     this.#log = log
-    this.#binder = new CharacteristicBinder(log)
+    this.#binder = new CharacteristicBinder(log, DISPLAY_NAME)
 
     this.#applyAccessoryInformation()
     this.#bindSwitch()
@@ -66,10 +76,7 @@ export class GlobalEcoAccessory {
         this.#pendingSinceMs !== null
         && Date.now() - this.#pendingSinceMs >= PENDING_ECO_MAX_MS
       ) {
-        this.#log.warn(
-          `${DISPLAY_NAME}: Nest did not confirm Eco change within ${PENDING_ECO_MAX_MS / 1000}s — following Nest`,
-        )
-        this.#clearPending()
+        this.#expirePending()
       } else {
         return
       }
@@ -81,6 +88,35 @@ export class GlobalEcoAccessory {
   #clearPending(): void {
     this.#pendingAllEco = null
     this.#pendingSinceMs = null
+    if (this.#pendingTimer) {
+      clearTimeout(this.#pendingTimer)
+      this.#pendingTimer = null
+    }
+  }
+
+  /** Give up on an unconfirmed write and let Nest's own value stand. */
+  #expirePending(): void {
+    this.#log.warn(
+      `${DISPLAY_NAME}: Nest did not confirm Eco change within ${PENDING_ECO_MAX_MS / 1000}s — following Nest`,
+    )
+    this.#clearPending()
+  }
+
+  /** Start the backstop that gives Nest the last word even if it goes quiet. */
+  #armPending(ecoOn: boolean): void {
+    this.#clearPending()
+    this.#pendingAllEco = ecoOn
+    this.#pendingSinceMs = Date.now()
+    this.#pendingTimer = setTimeout(() => {
+      this.#pendingTimer = null
+      if (this.#pendingAllEco === null) {
+        return
+      }
+      this.#expirePending()
+      this.#binder.refresh()
+    }, PENDING_ECO_MAX_MS)
+    // Homebridge owns the process lifetime; this must not hold Node open.
+    this.#pendingTimer.unref?.()
   }
 
   #bindSwitch(): void {
@@ -123,8 +159,7 @@ export class GlobalEcoAccessory {
       )
       // Optimistic until Nest's all-Eco aggregate matches; do not refresh here
       // or HAP's post-onSet value is overwritten by a stale read.
-      this.#pendingAllEco = ecoOn
-      this.#pendingSinceMs = Date.now()
+      this.#armPending(ecoOn)
       this.#allEco = ecoOn
     } catch (error) {
       this.#clearPending()
@@ -142,6 +177,6 @@ export class GlobalEcoAccessory {
       .setCharacteristic(Characteristic.Manufacturer, MANUFACTURER)
       .setCharacteristic(Characteristic.Name, DISPLAY_NAME)
       .setCharacteristic(Characteristic.Model, 'Eco Mode')
-      .setCharacteristic(Characteristic.SerialNumber, 'GLOBAL_ECO')
+      .setCharacteristic(Characteristic.SerialNumber, GLOBAL_ECO_DEVICE_ID)
   }
 }

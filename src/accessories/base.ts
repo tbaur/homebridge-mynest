@@ -13,7 +13,7 @@
  * obvious alternatives silently stop updating.
  */
 
-import type { PlatformAccessory, Service } from 'homebridge'
+import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 import { MANUFACTURER } from '../settings'
 import type { DeviceIdentity, DeviceKind, NestDevice } from '../types/device'
 import type { ResolvedConfig } from '../types/config'
@@ -59,7 +59,7 @@ export abstract class NestAccessory<TState> {
     this.config = platform.resolvedConfig
     this.identity = device.identity
     this.state = device.state
-    this.binder = new CharacteristicBinder(log)
+    this.binder = new CharacteristicBinder(log, device.identity.name)
 
     this.#applyAccessoryInformation()
   }
@@ -131,6 +131,22 @@ export abstract class NestAccessory<TState> {
     this.accessory.removeService(existing)
   }
 
+  /**
+   * Map a low-battery verdict onto HomeKit's enum.
+   *
+   * `undefined` when Nest has said nothing, so the binder leaves the last known
+   * value in place rather than publishing "normal" on no evidence.
+   */
+  protected toLowBatteryValue(isBatteryLow: boolean | undefined): CharacteristicValue | undefined {
+    const { StatusLowBattery } = this.platform.Characteristic
+    if (isBatteryLow === undefined) {
+      return undefined
+    }
+    return isBatteryLow
+      ? StatusLowBattery.BATTERY_LEVEL_LOW
+      : StatusLowBattery.BATTERY_LEVEL_NORMAL
+  }
+
   #applyAccessoryInformation(): void {
     const { Characteristic, Service: HapService } = this.platform
     const service = this.accessory.getService(HapService.AccessoryInformation)
@@ -147,11 +163,19 @@ export abstract class NestAccessory<TState> {
     }
   }
 
-  /** Info on a change, debug otherwise, so the log follows the house. */
+  /**
+   * Info on a change, debug otherwise, so the log follows the house.
+   *
+   * The first summary is also info: it is the only default-visible confirmation
+   * that a newly published device is actually reporting data. The "Added …"
+   * line carries no readings, so folding the first summary into the debug
+   * branch left an operator unable to tell a live device from a silent one.
+   */
   #logSummary(): void {
     const summary = this.describeState()
+    const isFirst = this.#lastSummary === null
 
-    if (this.#lastSummary === null || this.#lastSummary === summary) {
+    if (!isFirst && this.#lastSummary === summary) {
       this.log.debug(`${this.identity.name}: ${summary}`)
     } else {
       this.log.info(`${this.identity.name}: ${summary}`)

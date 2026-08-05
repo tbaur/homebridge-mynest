@@ -34,9 +34,10 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 
 ```bash
 npm install
-npm test
+npm test        # jest + coverage gates
+npm run typecheck  # type-checks tests as well as src
 npm run build
-npm run lint
+npm run lint    # type-aware; needs a successful install
 ```
 
 Live read-only check (requires `.env` with `NEST_ACCESS_TOKEN` — never commit it):

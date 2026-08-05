@@ -86,8 +86,6 @@ All notable changes to this project are documented here. From the first release 
 
 * show Ignored Device IDs input in Homebridge UI ([#3](https://github.com/tbaur/homebridge-mynest/issues/3)) ([0e7d966](https://github.com/tbaur/homebridge-mynest/commit/0e7d9668ae1e9dc01da5fd5e04c8aceeae361fe6))
 
-## [Unreleased]
-
 ## 0.1.0
 
 Initial public release of **homebridge-mynest**.

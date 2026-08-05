@@ -15,22 +15,34 @@
 
 import {
   APP_LAUNCH_BUCKET_TYPES,
+  BATCH_UPDATE_MAX_ATTEMPTS,
   FORBIDDEN_FATAL_THRESHOLD,
+  FRAME_DECODE_FAILURE_RATIO,
+  FRAME_DECODE_WINDOW,
+  LOOP_FAILURE_WARN_EVERY,
   MIN_SUBSCRIBE_CYCLE_MS,
+  OBSERVE_IDLE_TIMEOUT_MS,
+  OBSERVE_PRODUCTIVE_SESSION_MS,
+  OBSERVE_SILENCE_CHECK_MS,
   OBSERVE_STARTUP_WARN_MS,
   RECONNECT_BASE_MS,
   REDISCOVERY_INTERVAL_MS,
   REST_ALARM_FEED_STALE_MS,
+  SESSION_EXPIRY_MARGIN_MS,
   SESSION_REFRESH_MS,
+  STATUS_HEARTBEAT_MS,
   type NestEndpoints,
 } from '../settings'
 import {
+  ApiResponseError,
   AuthenticationError,
   CircuitBreakerError,
   ConfigurationError,
   ForbiddenError,
   NestError,
+  NetworkError,
   RateLimitError,
+  TimeoutError,
   isCircuitBreakerFailure,
 } from '../errors'
 import type { BucketMap, NestSession } from '../types/nest'
@@ -93,6 +105,15 @@ export interface NestTransportOptions {
    * owns operator visibility instead). Defaults to true.
    */
   statusHeartbeatEnabled?: boolean
+  /**
+   * Overridable for tests; production uses the module constants.
+   *
+   * Both of these are quarter-hour and five-minute intervals, which no test can
+   * wait out — and they are the only two operator signals that are on by
+   * default, so leaving them unexercised is not an option either.
+   */
+  statusHeartbeatMs?: number
+  observeSilenceCheckMs?: number
   /** Injected REST breaker (tests); defaults to a fresh instance. */
   restCircuitBreaker?: CircuitBreaker
   /** Injected Observe breaker (tests); defaults to a fresh instance. */
@@ -150,7 +171,18 @@ export class NestTransport {
   readonly #observeBreaker: CircuitBreaker
 
   #session: NestSession | null = null
+  /** In-flight session open, shared so concurrent callers cannot stampede. */
+  #sessionRefresh: Promise<NestSession> | null = null
   #isStopped = false
+  /** Consecutive failures per transport, for log escalation. */
+  #observeFailureStreak = 0
+  #restFailureStreak = 0
+  /** Most recent failure per transport, so a breaker trip can name its cause. */
+  #lastObserveError: string | null = null
+  #lastRestError: string | null = null
+  /** Rolling window of frame decode outcomes; `true` means undecodable. */
+  readonly #recentFrameOutcomes: boolean[] = []
+  #didWarnDecodeRate = false
   #observeFrames = 0
   #restCycles = 0
   #lastAppLaunchAt = 0
@@ -164,6 +196,7 @@ export class NestTransport {
   #restForbiddenDead = false
   #didWarnObserveSilent = false
   #statusTimer: NodeJS.Timeout | null = null
+  #observeSilenceTimer: NodeJS.Timeout | null = null
   #observeStartupWarnTimer: NodeJS.Timeout | null = null
   #lastObserveFrameAt: number | null = null
   #observeSessionOpen = false
@@ -186,7 +219,14 @@ export class NestTransport {
     breaker.attachOnStateChange((from, to) => {
       const message = `Circuit breaker (${label}) ${from} -> ${to}`
       if (to === CircuitState.OPEN) {
-        this.#options.log.warn(message)
+        // The trip is often the first default-visible sign of trouble, so it
+        // has to name what actually broke and how long the cooldown is —
+        // otherwise the operator learns only that "something failed five times".
+        const last = transport === 'observe' ? this.#lastObserveError : this.#lastRestError
+        const cause = last ? ` (last: ${last})` : ''
+        const cooldown = breaker.getStatus().remainingResetTimeMs
+        const retry = cooldown !== null ? `; retrying in ${Math.round(cooldown / 1000)}s` : ''
+        this.#options.log.warn(`${message}${cause}${retry}`)
       } else {
         this.#options.log.info(message)
       }
@@ -287,11 +327,12 @@ export class NestTransport {
       return
     }
     this.#wasRestAlarmFeedAvailable = available
-    this.#options.log.warn(
-      available
-        ? 'REST alarm feed restored — Protect Smoke/CO live again.'
-        : 'REST alarm feed unavailable — Protect Smoke/CO kept, marked inactive.',
-    )
+    // A return to normal is not a warning — operators page on those.
+    if (available) {
+      this.#options.log.info('REST alarm feed restored — Protect Smoke/CO live again.')
+    } else {
+      this.#options.log.warn('REST alarm feed unavailable — Protect Smoke/CO kept, marked inactive.')
+    }
     this.#options.onRestAlarmFeedChange?.(available)
   }
 
@@ -333,12 +374,23 @@ export class NestTransport {
     this.#session = await this.#openSession()
     await this.#runAppLaunch()
 
-    void this.#runObserveLoop()
-    void this.#runSubscribeLoop()
+    // Both loops run for the life of the plugin and are never awaited. Their
+    // bodies are guarded, but their catch handlers are not, so an unhandled
+    // rejection here would terminate the whole Homebridge process under Node's
+    // default `--unhandled-rejections=throw` — taking every other plugin down.
+    this.#runObserveLoop().catch((error: unknown) => {
+      this.#options.log.error(`Observe loop stopped unexpectedly: ${sanitizeError(error)}`)
+    })
+    this.#runSubscribeLoop().catch((error: unknown) => {
+      this.#restLoopRunning = false
+      this.#options.log.error(`REST loop stopped unexpectedly: ${sanitizeError(error)}`)
+    })
+
     if (this.#options.statusHeartbeatEnabled !== false) {
       this.#startStatusHeartbeat()
     }
     this.#scheduleObserveStartupWarn()
+    this.#startObserveSilenceWatch()
   }
 
   /**
@@ -372,13 +424,30 @@ export class NestTransport {
     const started = Date.now()
 
     try {
-      await postBatchUpdateState({
-        session,
-        endpoints: this.#options.endpoints,
-        body,
-        signal: this.#abort.signal,
-        fetchImpl: this.#options.fetchImpl,
-      })
+      // Retried on transport-level failures only. BatchUpdateState setpoint and
+      // Eco writes carry absolute values rather than deltas, so replaying one
+      // is safe — and without a retry a single dropped packet silently reverts
+      // the user's thermostat change.
+      await withRetry(
+        () => postBatchUpdateState({
+          session,
+          endpoints: this.#options.endpoints,
+          body,
+          signal: this.#abort.signal,
+          fetchImpl: this.#options.fetchImpl,
+        }),
+        {
+          maxAttempts: BATCH_UPDATE_MAX_ATTEMPTS,
+          signal: this.#abort.signal,
+          isRetryable: (error) => error instanceof NetworkError || error instanceof TimeoutError,
+          onRetry: (attempt, delayMs, error) => {
+            this.#options.metrics?.retry?.()
+            this.#options.log.debug(
+              `BatchUpdateState attempt ${attempt} failed (${sanitizeError(error)}); retrying in ${delayMs}ms`,
+            )
+          },
+        },
+      )
       this.#options.metrics?.apiRequest?.(Date.now() - started, true, { networked: true })
       // Success is logged by the accessory with the HomeKit display name.
     } catch (error) {
@@ -398,6 +467,10 @@ export class NestTransport {
     if (this.#statusTimer) {
       clearInterval(this.#statusTimer)
       this.#statusTimer = null
+    }
+    if (this.#observeSilenceTimer) {
+      clearInterval(this.#observeSilenceTimer)
+      this.#observeSilenceTimer = null
     }
     if (this.#observeStartupWarnTimer) {
       clearTimeout(this.#observeStartupWarnTimer)
@@ -419,6 +492,7 @@ export class NestTransport {
           signal: this.#abort.signal,
         }),
         {
+          signal: this.#abort.signal,
           onRetry: (attempt, delayMs, error) => {
             this.#options.metrics?.retry?.()
             this.#options.log.debug(
@@ -441,18 +515,41 @@ export class NestTransport {
    *
    * Nest reports a long `expires_in`, but a token revoked server-side keeps
    * being accepted until the first refusal, so age alone is not a reliable
-   * signal and both triggers are needed.
+   * signal and both triggers are needed. When Nest does report an expiry
+   * sooner than the fixed cadence, that wins.
+   *
+   * Concurrent callers share one refresh. Four call sites can race — both run
+   * loops, `app_launch`, and every BatchUpdateState write — and each caller
+   * that arrives during an in-flight open would otherwise start its own, with
+   * up to {@link MAX_REQUEST_ATTEMPTS} retries behind it. A five-thermostat
+   * global Eco press against a stale session was fifteen session opens.
    */
   async #ensureSession(options: { force?: boolean } = {}): Promise<NestSession> {
-    const isStale = this.#session !== null
-      && Date.now() - this.#session.openedAt > SESSION_REFRESH_MS
-
-    if (!this.#session || isStale || options.force) {
-      this.#options.log.debug('Refreshing the Nest session')
-      this.#session = await this.#openSession()
+    if (this.#session && !options.force && !this.#isSessionStale(this.#session)) {
+      return this.#session
     }
 
-    return this.#session
+    this.#sessionRefresh ??= (async () => {
+      this.#options.log.debug('Refreshing the Nest session')
+      try {
+        const session = await this.#openSession()
+        this.#session = session
+        return session
+      } finally {
+        this.#sessionRefresh = null
+      }
+    })()
+
+    return this.#sessionRefresh
+  }
+
+  /** Whether a session has aged out, by Nest's own expiry or the fixed cadence. */
+  #isSessionStale(session: NestSession): boolean {
+    const now = Date.now()
+    if (session.expiresAt !== undefined && now >= session.expiresAt - SESSION_EXPIRY_MARGIN_MS) {
+      return true
+    }
+    return now - session.openedAt > SESSION_REFRESH_MS
   }
 
   /** Pull the whole account and publish it. */
@@ -471,6 +568,7 @@ export class NestTransport {
             signal: this.#abort.signal,
           }),
           {
+            signal: this.#abort.signal,
             onRetry: (attempt, delayMs, error) => {
               this.#options.metrics?.retry?.()
               this.#options.log.debug(
@@ -493,7 +591,7 @@ export class NestTransport {
           `REST dropped ${snapshot.dropped.length} object(s) from inventory`,
         )
       }
-      this.#options.onBuckets(this.#objects.toBuckets())
+      this.#publishBuckets()
       this.#options.metrics?.apiRequest?.(Date.now() - startedAt, true)
       this.#options.metrics?.restCycle?.(true, Date.now() - startedAt)
       this.#noteRestSuccess()
@@ -546,11 +644,19 @@ export class NestTransport {
           return
         }
 
-        // Any frame at all means the credentials and framing are sound, so a
-        // later reconnect should not inherit the previous backoff.
-        if (result.frameCount > 0) {
+        // Only a stream that did real work clears the backoff. Nest sends a
+        // resource catalogue as frame 0 on every connection, so `frameCount > 0`
+        // alone is also true of a gateway that accepts, emits that one frame,
+        // and immediately drops — which would pin the reconnect delay at the
+        // 5s base forever with no escalation.
+        const wasProductive = result.frameCount > 1
+          || result.durationMs >= OBSERVE_PRODUCTIVE_SESSION_MS
+        if (wasProductive) {
           consecutiveFailures = 0
           this.#observeForbidden = 0
+          this.#noteLoopSuccess('observe')
+        } else {
+          consecutiveFailures++
         }
 
         this.#options.log.debug(
@@ -579,11 +685,64 @@ export class NestTransport {
     }
   }
 
+  /**
+   * Track how many recent frames failed to parse, and say so if most of them do.
+   *
+   * A pinned `WEB_APP_VERSION` against an unversioned private API means a Nest
+   * schema change is the most likely way this plugin breaks. Its signature is
+   * every frame decoding to nothing while `observeFrames` climbs and health
+   * stays healthy — completely silent without this.
+   */
+  #noteFrameDecode(isUndecodable: boolean): void {
+    this.#recentFrameOutcomes.push(isUndecodable)
+    if (this.#recentFrameOutcomes.length > FRAME_DECODE_WINDOW) {
+      this.#recentFrameOutcomes.shift()
+    }
+
+    if (this.#recentFrameOutcomes.length < FRAME_DECODE_WINDOW || this.#didWarnDecodeRate) {
+      return
+    }
+
+    const failed = this.#recentFrameOutcomes.filter(Boolean).length
+    if (failed / this.#recentFrameOutcomes.length > FRAME_DECODE_FAILURE_RATIO) {
+      this.#didWarnDecodeRate = true
+      this.#options.log.warn(
+        `${failed} of the last ${this.#recentFrameOutcomes.length} Observe frames could not be `
+        + 'decoded — Nest may have changed its trait schema, so readings will be stale.',
+      )
+    }
+  }
+
+  /**
+   * Hand the merged bucket map to the platform.
+   *
+   * Kept outside the callers' network try/catch. A throw from platform-side
+   * state merging is not a Nest failure, and counting it as one drove the
+   * circuit breaker, forced a session refresh, and reported a local bug to the
+   * operator as a connectivity problem — while never naming the real fault.
+   */
+  #publishBuckets(): void {
+    let buckets
+    try {
+      buckets = this.#objects.toBuckets()
+    } catch (error) {
+      this.#options.log.error(`Could not index Nest REST buckets: ${sanitizeError(error)}`)
+      return
+    }
+
+    try {
+      this.#options.onBuckets(buckets)
+    } catch (error) {
+      this.#options.log.error(`Could not apply Nest REST buckets: ${sanitizeError(error)}`)
+    }
+  }
+
   #handleObserveFrame(frame: Buffer): void {
     this.#observeFrames++
     this.#lastObserveFrameAt = Date.now()
 
-    const { traits, status } = decodeFrame(frame)
+    const { traits, status, isUndecodable } = decodeFrame(frame)
+    this.#noteFrameDecode(isUndecodable === true)
 
     // The first frame of every connection is a resource catalogue in a shape
     // `StreamBody` does not describe, so an empty decode is routine rather
@@ -626,7 +785,7 @@ export class NestTransport {
           () => subscribeOnce({
             session,
             endpoints: this.#options.endpoints,
-            objects: this.#objects.objects,
+            revisions: this.#objects.revisions,
             fetchImpl: this.#options.fetchImpl,
             signal: this.#abort.signal,
           }),
@@ -636,6 +795,7 @@ export class NestTransport {
         this.#restCycles++
         consecutiveFailures = 0
         this.#restForbidden = 0
+        this.#noteLoopSuccess('rest')
         // Subscribe is a long-poll by design (idle or not). Never fold its wait
         // into API latency percentiles — session/app_launch remain the samples.
         this.#options.metrics?.apiRequest?.(Date.now() - cycleStartedAt, true, {
@@ -646,7 +806,7 @@ export class NestTransport {
 
         if (!result.isIdle) {
           this.#objects.merge(result.objects)
-          this.#options.onBuckets(this.#objects.toBuckets())
+          this.#publishBuckets()
         }
       } catch (error) {
         if (this.#isStopped) {
@@ -681,7 +841,7 @@ export class NestTransport {
       // unthrottled request loop.
       const elapsed = Date.now() - cycleStartedAt
       if (elapsed < MIN_SUBSCRIBE_CYCLE_MS) {
-        await sleep(MIN_SUBSCRIBE_CYCLE_MS - elapsed)
+        await sleep(MIN_SUBSCRIBE_CYCLE_MS - elapsed, this.#abort.signal)
       }
     }
   }
@@ -743,14 +903,15 @@ export class NestTransport {
         return false
       }
     } else {
-      this.#options.log.debug(`${context} failed: ${sanitizeError(error)}`)
+      this.#reportLoopFailure(context, error, transport)
     }
 
-    // A rejected session shows up as an ordinary HTTP failure on these
-    // endpoints, so a forced refresh is attempted before giving up on the
-    // request. If the token really is dead, the refresh raises
-    // AuthenticationError on the next pass and the loop stops there.
-    if (error instanceof NestError && error.isRetryable) {
+    // Only an auth-shaped failure justifies re-opening the session. Forcing a
+    // refresh on every retryable error turned one failed request into up to
+    // four (the open itself retries), did it on both loops at once during any
+    // shared outage, and — worst — responded to an HTTP 429 by issuing more
+    // requests. A DNS blip says nothing about whether the session is valid.
+    if (this.#isSessionSuspect(error)) {
       try {
         await this.#ensureSession({ force: true })
       } catch (refreshError) {
@@ -765,6 +926,57 @@ export class NestTransport {
     return true
   }
 
+  /** Whether a failure is plausibly the session being rejected. */
+  #isSessionSuspect(error: unknown): boolean {
+    if (error instanceof ForbiddenError) {
+      return true
+    }
+    return error instanceof ApiResponseError && error.httpStatus === 401
+  }
+
+  /**
+   * Report a transport failure at a level an operator will actually see.
+   *
+   * Logging every non-403 failure at debug meant a persistently broken plugin
+   * was silent by default: a sub-500 status neither trips the breaker nor
+   * counts toward the 403 budget, so nothing else surfaced it either. The first
+   * failure and every tenth after it are warnings; the rest stay at debug so a
+   * flapping connection cannot flood the log.
+   */
+  #reportLoopFailure(context: string, error: unknown, transport: 'observe' | 'rest'): void {
+    const streak = transport === 'observe'
+      ? ++this.#observeFailureStreak
+      : ++this.#restFailureStreak
+
+    const status = error instanceof NestError && error.httpStatus !== undefined
+      ? ` HTTP ${error.httpStatus}`
+      : ''
+    const code = error instanceof NestError ? ` ${error.code}` : ''
+    const line = `${context} failed (${streak} in a row,${code}${status}): ${sanitizeError(error)}`
+
+    const summary = error instanceof NestError ? error.code : 'UNKNOWN'
+    if (transport === 'observe') {
+      this.#lastObserveError = summary
+    } else {
+      this.#lastRestError = summary
+    }
+
+    if (streak === 1 || streak % LOOP_FAILURE_WARN_EVERY === 0) {
+      this.#options.log.warn(line)
+    } else {
+      this.#options.log.debug(line)
+    }
+  }
+
+  /** Clear a transport's failure streak after a good cycle. */
+  #noteLoopSuccess(transport: 'observe' | 'rest'): void {
+    if (transport === 'observe') {
+      this.#observeFailureStreak = 0
+    } else {
+      this.#restFailureStreak = 0
+    }
+  }
+
   /** @returns `false` when the wait was cut short by shutdown. */
   async #waitBeforeReconnect(consecutiveFailures: number, error?: unknown): Promise<boolean> {
     if (this.#isStopped) {
@@ -773,7 +985,7 @@ export class NestTransport {
 
     // Honour the breaker's cooldown so loops do not spin while open.
     if (error instanceof CircuitBreakerError) {
-      await sleep(error.retryAfterMs || RECONNECT_BASE_MS)
+      await sleep(error.retryAfterMs || RECONNECT_BASE_MS, this.#abort.signal)
       return !this.#isStopped
     }
 
@@ -785,20 +997,62 @@ export class NestTransport {
       ? RECONNECT_BASE_MS
       : serverDelay ?? computeBackoffMs(consecutiveFailures)
 
-    await sleep(delayMs)
+    await sleep(delayMs, this.#abort.signal)
     return !this.#isStopped
   }
 
-  /** Periodic operator-visible status so a dead Observe loop is not silent. */
+  /**
+   * Periodic operator-visible status so a dead Observe loop is not silent.
+   *
+   * Reports deltas and ages rather than cumulative totals: a running count
+   * requires the reader to diff two lines fifteen minutes apart to learn
+   * anything, and this is the only signal that is on by default.
+   */
   #startStatusHeartbeat(): void {
-    const intervalMs = 15 * 60_000
+    let previousFrames = this.#observeFrames
+    let previousCycles = this.#restCycles
+
     this.#statusTimer = setInterval(() => {
-      const { observeFrames, restCycles, knownObjects } = this.status
+      const status = this.status
+      const frameDelta = status.observeFrames - previousFrames
+      const cycleDelta = status.restCycles - previousCycles
+      previousFrames = status.observeFrames
+      previousCycles = status.restCycles
+
+      const observeAge = status.lastObserveFrameAgeSec ?? '-'
+      const restAge = status.lastRestSuccessAgeSec ?? '-'
+      const breakers = `rest=${status.circuitBreaker.rest.state} obs=${status.circuitBreaker.observe.state}`
+
       this.#options.log.info(
-        `Nest transport: ${observeFrames} Observe frame(s), ${restCycles} REST cycle(s), ${knownObjects} known object(s)`,
+        `Nest transport: +${frameDelta} Observe frame(s), +${cycleDelta} REST cycle(s), `
+        + `${status.knownObjects} known object(s); last Observe ${observeAge}s ago, `
+        + `last REST ${restAge}s ago; alarm feed `
+        + `${status.isRestAlarmFeedAvailable ? 'live' : 'STALE'}; breaker ${breakers}`,
       )
-    }, intervalMs)
+    }, this.#options.statusHeartbeatMs ?? STATUS_HEARTBEAT_MS)
     this.#statusTimer.unref?.()
+  }
+
+  /**
+   * Standing alarm for an Observe stream that stopped delivering.
+   *
+   * The startup warning is one-shot, so a stream that is healthy at 60s and
+   * dies at hour five produced no warning at all — despite Observe being the
+   * only source of thermostat state on modern accounts.
+   */
+  #startObserveSilenceWatch(): void {
+    this.#observeSilenceTimer = setInterval(() => {
+      if (this.#isStopped || this.#observeForbiddenDead) {
+        return
+      }
+      const ageSec = this.status.lastObserveFrameAgeSec
+      if (ageSec !== null && ageSec * 1_000 > OBSERVE_IDLE_TIMEOUT_MS) {
+        this.#options.log.warn(
+          `Observe has delivered no frames for ${ageSec}s — thermostat readings are stale.`,
+        )
+      }
+    }, this.#options.observeSilenceCheckMs ?? OBSERVE_SILENCE_CHECK_MS)
+    this.#observeSilenceTimer.unref?.()
   }
 
   #scheduleObserveStartupWarn(): void {

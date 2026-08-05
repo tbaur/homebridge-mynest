@@ -62,13 +62,7 @@ export class TemperatureSensorAccessory extends NestAccessory<TemperatureSensorS
   }
 
   #toLowBatteryValue(): CharacteristicValue | undefined {
-    const { Characteristic } = this.platform
-    if (this.state.isBatteryLow === undefined) {
-      return undefined
-    }
-    return this.state.isBatteryLow
-      ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-      : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+    return this.toLowBatteryValue(this.state.isBatteryLow)
   }
 
   protected describeState(): string {

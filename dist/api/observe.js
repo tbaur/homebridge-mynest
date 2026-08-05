@@ -27,6 +27,15 @@ exports.runObserveSession = runObserveSession;
 const node_crypto_1 = require("node:crypto");
 const node_http2_1 = __importDefault(require("node:http2"));
 const settings_1 = require("../settings");
+/** Grace period between a graceful `close()` and a forced `destroy()`. */
+const CLIENT_DESTROY_GRACE_MS = 5_000;
+/**
+ * Frame-handler failures warned about per connection before dropping to debug.
+ *
+ * A consumer bug throws on every frame, so this must be visible without
+ * flooding the log.
+ */
+const MAX_HANDLER_FAILURE_WARNINGS = 3;
 const errors_1 = require("../errors");
 const framing_1 = require("./framing");
 const protobuf_1 = require("./protobuf");
@@ -38,7 +47,7 @@ const protobuf_1 = require("./protobuf");
  * is the Nest web app's private backend and rejects callers that do not look
  * like it.
  */
-function observeHeaders(session, endpoints) {
+function observeHeaders(session, endpoints, requestId) {
     return {
         ':method': 'POST',
         ':path': endpoints.observePath,
@@ -47,7 +56,7 @@ function observeHeaders(session, endpoints) {
         'X-Accept-Content-Transfer-Encoding': 'binary',
         'X-Accept-Response-Streaming': 'true',
         Authorization: `Basic ${session.token}`,
-        'request-id': (0, node_crypto_1.randomUUID)(),
+        'request-id': requestId,
         // Must match the configured Nest environment. Field-test gRPC rejects a
         // production origin/referer the same way production rejects an FT one.
         referer: `https://${endpoints.apiHostname}/`,
@@ -66,16 +75,38 @@ function runObserveSession(options) {
     const sessionMs = options.sessionMs ?? settings_1.OBSERVE_SESSION_MS;
     const idleTimeoutMs = options.idleTimeoutMs ?? settings_1.OBSERVE_IDLE_TIMEOUT_MS;
     const pingIntervalMs = options.pingIntervalMs ?? settings_1.OBSERVE_PING_INTERVAL_MS;
+    const connectTimeoutMs = options.connectTimeoutMs ?? settings_1.OBSERVE_CONNECT_TIMEOUT_MS;
     const traitsRequest = (0, protobuf_1.readObserveTraitsRequest)();
     const startedAt = Date.now();
+    // Sent to Nest and echoed into every failure from this connection, so a log
+    // line can be tied back to the stream that produced it.
+    const requestId = (0, node_crypto_1.randomUUID)();
     return new Promise((resolve, reject) => {
         const splitter = new framing_1.FrameSplitter();
         let frameCount = 0;
+        let handlerFailures = 0;
         let isSettled = false;
         const client = connect(options.endpoints.grpcOrigin, { maxOutstandingPings: 2 });
-        const request = client.request(observeHeaders(options.session, options.endpoints));
+        // Registered before anything can throw: an unhandled `error` on an
+        // Http2Session is a hard process crash.
+        client.on('error', (error) => settle({
+            error: new errors_1.ObserveStreamError(`Observe connection failed [request-id ${requestId}]: ${error.message}`, { cause: error }),
+        }));
+        let request;
+        try {
+            request = client.request(observeHeaders(options.session, options.endpoints, requestId));
+        }
+        catch (error) {
+            // Nothing has been wired up yet, so `settle` cannot clean up for us —
+            // and leaving the session open leaks a socket and its TLS state on every
+            // reconnect attempt, indefinitely.
+            client.destroy();
+            reject(new errors_1.ObserveStreamError(`Could not open the Observe stream [request-id ${requestId}]: ${error instanceof Error ? error.message : String(error)}`, { cause: error instanceof Error ? error : undefined }));
+            return;
+        }
         const timers = [];
         let idleTimer;
+        let connectTimer;
         /**
          * Tear everything down exactly once.
          *
@@ -96,9 +127,22 @@ function runObserveSession(options) {
             if (idleTimer) {
                 clearTimeout(idleTimer);
             }
+            if (connectTimer) {
+                clearTimeout(connectTimer);
+            }
             options.signal?.removeEventListener('abort', onAbort);
             request.close();
             client.close();
+            // `close()` is graceful and waits for streams to settle, which a stream
+            // that went silent may never do — and the `idle` outcome exists
+            // precisely for a socket that is up but not delivering. Force the
+            // teardown shortly after so a half-dead session cannot linger.
+            const destroyTimer = setTimeout(() => {
+                if (!client.destroyed) {
+                    client.destroy();
+                }
+            }, CLIENT_DESTROY_GRACE_MS);
+            destroyTimer.unref?.();
             if ('error' in outcome) {
                 reject(outcome.error);
                 return;
@@ -118,6 +162,23 @@ function runObserveSession(options) {
             // The idle deadline must not be a reason to keep Node alive; Homebridge
             // owns the process lifetime.
             idleTimer.unref?.();
+        };
+        // The idle deadline is ten minutes, which is right for a connected stream
+        // that goes quiet but far too long for one that never connects at all.
+        // A blackholed route would otherwise stall the only source of thermostat
+        // state for ten minutes per attempt.
+        connectTimer = setTimeout(() => {
+            connectTimer = undefined;
+            settle({
+                error: new errors_1.ObserveStreamError(`Observe gateway did not respond within ${connectTimeoutMs}ms [request-id ${requestId}]`),
+            });
+        }, connectTimeoutMs);
+        connectTimer.unref?.();
+        const clearConnectDeadline = () => {
+            if (connectTimer) {
+                clearTimeout(connectTimer);
+                connectTimer = undefined;
+            }
         };
         timers.push(setTimeout(() => settle({ reason: 'recycled' }), sessionMs));
         timers.push(setInterval(() => {
@@ -139,27 +200,29 @@ function runObserveSession(options) {
         // without this handler a rejected token looks like Nest recycling a healthy
         // stream (reason `ended`, frameCount 0) and the loop reconnects forever.
         request.on('response', (headers) => {
+            clearConnectDeadline();
             const status = Number(headers[':status']);
             if (!Number.isFinite(status) || status < 400) {
                 return;
             }
             if (status === 401) {
                 settle({
-                    error: new errors_1.AuthenticationError(`Observe gateway returned HTTP ${status}`),
+                    error: new errors_1.AuthenticationError(`Observe gateway returned HTTP ${status} [request-id ${requestId}]`),
                 });
                 return;
             }
             if (status === 403) {
                 settle({
-                    error: new errors_1.ForbiddenError(`Observe gateway returned HTTP ${status}`),
+                    error: new errors_1.ForbiddenError(`Observe gateway returned HTTP ${status} [request-id ${requestId}]`),
                 });
                 return;
             }
             settle({
-                error: new errors_1.ObserveStreamError(`Observe gateway returned HTTP ${status}`),
+                error: new errors_1.ObserveStreamError(`Observe gateway returned HTTP ${status} [request-id ${requestId}]`),
             });
         });
         request.on('data', (chunk) => {
+            clearConnectDeadline();
             resetIdleTimer();
             let frames;
             try {
@@ -167,7 +230,7 @@ function runObserveSession(options) {
             }
             catch (error) {
                 settle({
-                    error: new errors_1.ObserveStreamError(`Could not parse the Observe stream: ${error instanceof Error ? error.message : String(error)}`, { cause: error instanceof Error ? error : undefined }),
+                    error: new errors_1.ObserveStreamError(`Could not parse the Observe stream [request-id ${requestId}]: ${error instanceof Error ? error.message : String(error)}`, { cause: error instanceof Error ? error : undefined }),
                 });
                 return;
             }
@@ -179,16 +242,24 @@ function runObserveSession(options) {
                 catch (error) {
                     // A consumer that throws must not kill the transport; the next frame
                     // is very likely fine and dropping the stream costs live updates.
-                    options.log.debug(`Observe frame handler threw: ${error instanceof Error ? error.message : String(error)}`);
+                    // But it must not be invisible either: this is the catch that would
+                    // otherwise swallow a state-layer bug on every single frame.
+                    handlerFailures++;
+                    const message = `Observe frame ${frameCount} handler failed `
+                        + `(${handlerFailures} total): `
+                        + `${error instanceof Error ? error.message : String(error)}`;
+                    if (handlerFailures <= MAX_HANDLER_FAILURE_WARNINGS) {
+                        options.log.warn(message);
+                    }
+                    else {
+                        options.log.debug(message);
+                    }
                 }
             }
         });
         request.on('end', () => settle({ reason: 'ended' }));
         request.on('error', (error) => settle({
-            error: new errors_1.ObserveStreamError(`Observe stream failed: ${error.message}`, { cause: error }),
-        }));
-        client.on('error', (error) => settle({
-            error: new errors_1.ObserveStreamError(`Observe connection failed: ${error.message}`, { cause: error }),
+            error: new errors_1.ObserveStreamError(`Observe stream failed [request-id ${requestId}]: ${error.message}`, { cause: error }),
         }));
         client.on('close', () => settle({ reason: 'ended' }));
         resetIdleTimer();

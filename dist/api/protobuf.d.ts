@@ -32,6 +32,16 @@ export interface DecodedFrame {
         code?: number;
         message?: string;
     };
+    /**
+     * True when the frame did not parse as a `StreamBody` at all.
+     *
+     * Reported rather than swallowed because it is the difference between the
+     * routine case (frame 0 of every connection is a catalogue in another shape)
+     * and the catastrophic one (Nest changed the trait schema, so *every* frame
+     * decodes to nothing while the frame counter keeps climbing and health stays
+     * green). Callers watch the ratio.
+     */
+    readonly isUndecodable?: boolean;
 }
 /**
  * Load the protobuf schemas once per process.
@@ -41,7 +51,13 @@ export interface DecodedFrame {
  * a module-loading crash.
  */
 export declare function loadSchemas(): protobuf.Root;
-/** The opaque request body that tells Nest which traits to stream. */
+/**
+ * The opaque request body that tells Nest which traits to stream.
+ *
+ * Read once. This is called on every Observe connection, and reconnects can
+ * come every few seconds during an outage — synchronous filesystem IO on the
+ * event loop at that cadence stalls every plugin in the process.
+ */
 export declare function readObserveTraitsRequest(): Buffer;
 /**
  * Decode one framed Observe message.

@@ -34,6 +34,16 @@ export interface DecodedFrame {
   readonly traits: readonly TraitUpdate[]
   /** Set when Nest reported a stream-level status instead of trait data. */
   readonly status?: { code?: number, message?: string }
+  /**
+   * True when the frame did not parse as a `StreamBody` at all.
+   *
+   * Reported rather than swallowed because it is the difference between the
+   * routine case (frame 0 of every connection is a catalogue in another shape)
+   * and the catastrophic one (Nest changed the trait schema, so *every* frame
+   * decodes to nothing while the frame counter keeps climbing and health stays
+   * green). Callers watch the ratio.
+   */
+  readonly isUndecodable?: boolean
 }
 
 /**
@@ -44,7 +54,13 @@ export interface DecodedFrame {
  * others exist so a misconfigured `files` list in package.json fails with a
  * clear message rather than an obscure protobufjs parse error.
  */
+let cachedSchemaDirectory: string | null = null
+
 function resolveSchemaDirectory(): string {
+  if (cachedSchemaDirectory !== null) {
+    return cachedSchemaDirectory
+  }
+
   const candidates = [
     resolve(__dirname, '..', '..', 'assets', 'protobuf'),
     resolve(__dirname, '..', '..', '..', 'assets', 'protobuf'),
@@ -52,6 +68,7 @@ function resolveSchemaDirectory(): string {
 
   for (const candidate of candidates) {
     if (existsSync(join(candidate, 'root.proto'))) {
+      cachedSchemaDirectory = candidate
       return candidate
     }
   }
@@ -62,6 +79,7 @@ function resolveSchemaDirectory(): string {
 }
 
 let cachedRoot: protobuf.Root | null = null
+let cachedTraitsRequest: Buffer | null = null
 
 /**
  * Load the protobuf schemas once per process.
@@ -75,9 +93,16 @@ export function loadSchemas(): protobuf.Root {
   return cachedRoot
 }
 
-/** The opaque request body that tells Nest which traits to stream. */
+/**
+ * The opaque request body that tells Nest which traits to stream.
+ *
+ * Read once. This is called on every Observe connection, and reconnects can
+ * come every few seconds during an outage — synchronous filesystem IO on the
+ * event loop at that cadence stalls every plugin in the process.
+ */
 export function readObserveTraitsRequest(): Buffer {
-  return readFileSync(join(resolveSchemaDirectory(), 'ObserveTraits.protobuf'))
+  cachedTraitsRequest ??= readFileSync(join(resolveSchemaDirectory(), 'ObserveTraits.protobuf'))
+  return cachedTraitsRequest
 }
 
 /** protobufjs renders `google.protobuf.Any` fields under either spelling. */
@@ -116,7 +141,7 @@ export function decodeFrame(frame: Buffer): DecodedFrame {
   try {
     decoded = streamBody.decode(frame) as unknown as RawStreamBody
   } catch {
-    return { traits: [] }
+    return { traits: [], isUndecodable: true }
   }
 
   const traits: TraitUpdate[] = []
@@ -160,7 +185,14 @@ export function decodeFrame(frame: Buffer): DecodedFrame {
   return { traits }
 }
 
-/** Trait type names already known to have no vendored schema. */
+/**
+ * Trait type names already known to have no vendored schema.
+ *
+ * Bounded: the names come from Nest, so an unbounded set is a slow leak driven
+ * by remote input. Past the cap the lookup simply repeats, which costs a little
+ * time rather than memory that is never reclaimed.
+ */
+const MAX_UNKNOWN_TYPES = 512
 const unknownTypes = new Set<string>()
 
 /**
@@ -188,7 +220,9 @@ export function decodeTrait(update: TraitUpdate): Record<string, unknown> | unde
   } catch {
     // Cached so a trait streamed on every frame does not repeat the lookup and
     // the exception it throws for the lifetime of the process.
-    unknownTypes.add(typeName)
+    if (unknownTypes.size < MAX_UNKNOWN_TYPES) {
+      unknownTypes.add(typeName)
+    }
     return undefined
   }
 

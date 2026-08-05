@@ -54,6 +54,31 @@ const PLUGIN_VERSION = readPluginVersion();
  * one pass while staying far below the point a person would notice.
  */
 const UPDATE_COALESCE_MS = 250;
+/**
+ * How often to repeat the "authentication is still failing" line.
+ *
+ * A fatal stops both transports and every other periodic log, so this is the
+ * only remaining signal that HomeKit's values are frozen.
+ */
+const FATAL_REMINDER_MS = 60 * 60_000;
+/**
+ * Concurrent Nest writes allowed when setting Eco across the whole house.
+ *
+ * Unbounded fan-out sent one BatchUpdateState POST per thermostat at once, with
+ * no breaker in front of them; a single 429 or WAF 403 from that burst fails
+ * the batch and the user retries, feeding the loop.
+ */
+const ECO_WRITE_CONCURRENCY = 2;
+/** Whether a redacted structured-log line is still valid JSON. */
+function isParseableJson(value) {
+    try {
+        JSON.parse(value);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 class MyNestPlatform {
     Service;
     Characteristic;
@@ -90,12 +115,27 @@ class MyNestPlatform {
      */
     #hasSettledObserveSnapshot = false;
     /**
-     * Observe `DEVICE_*` ids missing from the previous complete snapshot.
-     * A device is removed only after a second consecutive complete snapshot omits it,
-     * so a truncated reconnect cannot wipe half the house.
+     * Observe `DEVICE_*` ids missing from a complete snapshot, and which snapshot
+     * they were missing from.
+     *
+     * A device is removed only when two *consecutive* complete snapshots omit it,
+     * so neither a truncated reconnect nor two unrelated absences weeks apart can
+     * wipe part of the house. The value is the sequence number of the snapshot
+     * that recorded the strike; a non-adjacent absence starts the count over.
      */
-    #observeRemovalCandidates = new Set();
+    #observeRemovalCandidates = new Map();
+    /** Complete, non-truncated Observe snapshots seen this session. */
+    #observeSnapshotSequence = 0;
+    /**
+     * Inventory from the most recent sync, reused by the diagnostics gauges.
+     *
+     * Keeps the reported per-kind counts consistent with the handlers the same
+     * pass published, and avoids rebuilding the whole merged view — every trait
+     * re-read, every thermostat's comfort source re-resolved — for a heartbeat.
+     */
+    #lastInventory = null;
     #diagnosticsTimer = null;
+    #fatalReminderTimer = null;
     #lastDiagnosticsHealth = null;
     /** One-shot startup line after the first HomeKit inventory sync. */
     #hasLoggedPlatformReady = false;
@@ -124,7 +164,14 @@ class MyNestPlatform {
                 ? error.message
                 : `Configuration is not usable: ${(0, sanitizers_1.sanitizeError)(error)}`);
         }
-        this.api.on('didFinishLaunching', () => void this.#start());
+        // Never let a rejection escape: Homebridge invokes this listener with no
+        // handler, and an unhandled rejection terminates the whole process under
+        // Node's default `--unhandled-rejections=throw`.
+        this.api.on('didFinishLaunching', () => {
+            this.#start().catch((error) => {
+                this.#log.error(`Could not start: ${(0, sanitizers_1.sanitizeError)(error)}`);
+            });
+        });
         this.api.on('shutdown', () => this.#stop());
     }
     get resolvedConfig() {
@@ -140,9 +187,15 @@ class MyNestPlatform {
     }
     async #start() {
         if (!this.#config) {
-            // Cached tiles from a previous good run would otherwise sit stale forever
-            // with no handlers updating them.
-            this.#unregisterAllCached('configuration is not usable');
+            // Accessories are kept, for the same reason #handleFatal keeps them: a
+            // typo, a half-edited config.json, or a truncated token would otherwise
+            // destroy every room assignment, scene membership, and automation target
+            // in the Home app — and fixing the config does not bring them back,
+            // because HomeKit treats the re-registered accessories as new devices.
+            // A config error is less severe than a revoked token, so it cannot
+            // warrant a more destructive response.
+            this.#log.error('Configuration is not usable — accessories were kept but will not update. '
+                + 'Fix the configuration and restart Homebridge.');
             return;
         }
         this.#startedAt = Date.now();
@@ -202,6 +255,10 @@ class MyNestPlatform {
             clearInterval(this.#diagnosticsTimer);
             this.#diagnosticsTimer = null;
         }
+        if (this.#fatalReminderTimer) {
+            clearInterval(this.#fatalReminderTimer);
+            this.#fatalReminderTimer = null;
+        }
         if (this.#pendingUpdate) {
             clearTimeout(this.#pendingUpdate);
             this.#pendingUpdate = null;
@@ -248,6 +305,16 @@ class MyNestPlatform {
             this.#log.debug(`Could not mark Protect alarm feeds stale after auth failure: ${(0, sanitizers_1.sanitizeError)(syncError)}`);
         }
         this.#stop();
+        // Armed after #stop(), which clears it — that is what makes a real
+        // Homebridge shutdown cancel the reminder. #stop() has just torn down the
+        // transport heartbeat and the diagnostics timer, so without this the plugin
+        // emits nothing ever again while HomeKit keeps serving frozen readings, and
+        // the single error line above scrolls out of the log within hours.
+        this.#fatalReminderTimer = setInterval(() => {
+            this.#log.error('Nest authentication is still failing — readings are frozen. '
+                + 'Paste a fresh token from https://home.nest.com/session and restart Homebridge.');
+        }, FATAL_REMINDER_MS);
+        this.#fatalReminderTimer.unref?.();
     }
     #applyTraits(traits) {
         const changed = this.#observe.apply(traits);
@@ -266,16 +333,22 @@ class MyNestPlatform {
         }
         this.#scheduleUpdate();
     }
-    /** Start collecting the device set Nest sends on a fresh Observe connection. */
+    /**
+     * Start collecting the device set Nest sends on a fresh Observe connection.
+     *
+     * The settle timer is armed immediately rather than waiting for the first
+     * trait. A session that delivers none — a breaker-open attempt, or a stream
+     * that drops before any data — would otherwise leave `#observeSnapshotIds`
+     * non-null forever, and `#removeStaleAccessories` returns early while a
+     * burst is in flight. HomeKit pruning would then never run again.
+     * `#finalizeObserveSnapshot` already no-ops on an empty set.
+     */
     #beginObserveSnapshot() {
         if (this.#isShuttingDown) {
             return;
         }
         this.#observeSnapshotIds = new Set();
-        if (this.#observeSnapshotSettleTimer) {
-            clearTimeout(this.#observeSnapshotSettleTimer);
-            this.#observeSnapshotSettleTimer = null;
-        }
+        this.#armObserveSnapshotSettle();
     }
     /** After the opening burst goes quiet, drop Observe devices Nest omitted. */
     #armObserveSnapshotSettle() {
@@ -313,6 +386,7 @@ class MyNestPlatform {
         // A non-empty, non-truncated burst is enough to allow HomeKit prune — even
         // when Nest named zero removals this round.
         this.#hasSettledObserveSnapshot = true;
+        this.#observeSnapshotSequence++;
         const knownDeviceIds = this.#observe.resourceIds.filter((id) => id.startsWith('DEVICE_'));
         const missing = knownDeviceIds.filter((id) => !snapshotIds.has(id));
         for (const id of snapshotIds) {
@@ -320,12 +394,19 @@ class MyNestPlatform {
         }
         const toRemove = new Set();
         for (const id of missing) {
-            if (this.#observeRemovalCandidates.has(id)) {
+            // The two strikes have to be *consecutive*. Recording only "has a strike"
+            // meant a device legitimately absent from one snapshot on Monday and
+            // another on Friday was removed, despite appearing in every snapshot in
+            // between — because a strike was only cleared when that specific id
+            // showed up in a complete snapshot. Comparing sequence numbers makes a
+            // gap reset the count.
+            const struckAt = this.#observeRemovalCandidates.get(id);
+            if (struckAt === this.#observeSnapshotSequence - 1) {
                 toRemove.add(id);
                 this.#observeRemovalCandidates.delete(id);
             }
             else {
-                this.#observeRemovalCandidates.add(id);
+                this.#observeRemovalCandidates.set(id, this.#observeSnapshotSequence);
             }
         }
         if (toRemove.size > 0) {
@@ -371,6 +452,11 @@ class MyNestPlatform {
         if (!this.#config) {
             return;
         }
+        // Nothing to do — checked before building the inventory, which re-reads
+        // every trait and re-resolves every thermostat's comfort source.
+        if (!options.bucketsChanged && options.changedIds && options.changedIds.size === 0) {
+            return;
+        }
         const inventory = (0, registry_1.buildInventory)({
             observe: this.#observe,
             buckets: this.#buckets,
@@ -379,13 +465,11 @@ class MyNestPlatform {
                 ?? this.#transport?.status.isRestAlarmFeedAvailable
                 ?? false,
         });
+        this.#lastInventory = inventory;
         // A reconnect snapshot names every device; a typical patch names one.
         // Refresh only the affected accessories unless REST buckets changed (which
         // can add/remove devices) or the change set is large.
         const devices = (0, registry_1.listDevices)(inventory);
-        if (!options.bucketsChanged && options.changedIds && options.changedIds.size === 0) {
-            return;
-        }
         const refreshAll = options.bucketsChanged
             || !options.changedIds
             || options.changedIds.size >= Math.max(8, Math.ceil(devices.length / 2));
@@ -406,7 +490,6 @@ class MyNestPlatform {
         if (pushedUpdates > 0) {
             this.#diagnostics?.externalChange();
         }
-        this.#pruneStaleState(inventory);
         this.#removeStaleAccessories(inventory);
         this.#syncGlobalEco(inventory);
         if (!this.#hasLoggedPlatformReady) {
@@ -414,12 +497,20 @@ class MyNestPlatform {
             this.#log.info('Platform ready');
         }
     }
-    /** Drop Observe DEVICE_* trait maps Nest no longer reports in inventory. */
-    #pruneStaleState(inventory) {
-        const liveDeviceIds = new Set((0, registry_1.listDevices)(inventory).map((device) => device.identity.id));
-        const liveResourceIds = new Set([...liveDeviceIds].map((id) => (0, classify_1.toResourceId)(id)));
-        this.#observe.retainDeviceResources(liveResourceIds);
-    }
+    // Observe trait maps are dropped only by `#finalizeObserveSnapshot`, on the
+    // two-strike evidence that Nest stopped reporting a device.
+    //
+    // Absence from `inventory` is deliberately *not* treated as that evidence.
+    // Three kinds of resource are missing from inventory while Nest is still
+    // streaming them: a device whose classifying trait has not arrived yet
+    // (`classifyResource` needs a Protect/HVAC/temperature type, which can land
+    // frames after `device_identity`), an unsupported product such as a camera or
+    // lock, and a device the user put in `ignoredDeviceIds`. Pruning on inventory
+    // absence discarded identity traits from earlier frames — so the device was
+    // later republished unnamed and with no model or serial — and wiped the
+    // Temperature Sensor state that `readComfortTemperatures` reads, which made a
+    // thermostat's reported temperature flap between its paired sensor and its
+    // own backplate.
     /** Create or adopt the HomeKit accessory for a device seen for the first time. */
     #publish(device) {
         const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${device.identity.id}`);
@@ -532,9 +623,12 @@ class MyNestPlatform {
             throw new errors_1.ConfigurationError('Nest transport is not running');
         }
         // Live handlers only — cached ghosts awaiting prune must not fail the batch.
+        // `context` is optional-chained because Homebridge assigns it verbatim from
+        // the persisted cache, so an accessory stored without one restores with
+        // `undefined` and would otherwise throw here and fail every Eco press.
         const deviceIds = [...this.#cachedAccessories.values()]
             .map((accessory) => accessory.context)
-            .filter((context) => (context.kind === 'thermostat'
+            .filter((context) => (context?.kind === 'thermostat'
             && context.synthetic !== 'global_eco'
             && this.#handlers.has(context.deviceId)))
             .map((context) => context.deviceId);
@@ -542,9 +636,14 @@ class MyNestPlatform {
             this.#log.warn('Nest Eco Mode: no thermostats to update');
             return false;
         }
-        const results = await Promise.allSettled(deviceIds.map(async (deviceId) => {
-            await transport.updateEcoMode((0, classify_1.toResourceId)(deviceId), ecoOn);
-        }));
+        // Bounded fan-out: these are unguarded writes to a private Nest gateway.
+        const results = [];
+        for (let index = 0; index < deviceIds.length; index += ECO_WRITE_CONCURRENCY) {
+            const batch = deviceIds.slice(index, index + ECO_WRITE_CONCURRENCY);
+            results.push(...await Promise.allSettled(batch.map(async (deviceId) => {
+                await transport.updateEcoMode((0, classify_1.toResourceId)(deviceId), ecoOn);
+            })));
+        }
         let failed = 0;
         for (const [index, result] of results.entries()) {
             if (result.status === 'rejected') {
@@ -631,7 +730,7 @@ class MyNestPlatform {
     #publishGlobalEco() {
         const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${settings_1.GLOBAL_ECO_DEVICE_ID}`);
         const category = 8 /* this.api.hap.Categories.SWITCH */;
-        const displayName = 'Nest Eco Mode';
+        const displayName = settings_1.GLOBAL_ECO_DISPLAY_NAME;
         const context = {
             deviceId: settings_1.GLOBAL_ECO_DEVICE_ID,
             kind: 'thermostat',
@@ -665,16 +764,6 @@ class MyNestPlatform {
             this.#cachedAccessories.delete(uuid);
         }
         this.#globalEco = null;
-    }
-    #unregisterAllCached(reason) {
-        if (this.#cachedAccessories.size === 0) {
-            return;
-        }
-        const accessories = [...this.#cachedAccessories.values()];
-        this.#log.warn(`Unregistering ${accessories.length} cached accessory(ies) — ${reason}`);
-        this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, accessories);
-        this.#cachedAccessories.clear();
-        this.#handlers.clear();
     }
     #diagnosticsIntervalMs() {
         const seconds = this.#config?.diagnosticsInterval ?? 0;
@@ -766,13 +855,17 @@ class MyNestPlatform {
         let observeOnly = 0;
         let restOnly = 0;
         let both = 0;
-        if (this.#config) {
-            const inventory = (0, registry_1.buildInventory)({
+        // Every state change schedules a sync, so the cached inventory is current
+        // whenever one exists; a fresh build is only needed before the first sync.
+        const inventory = this.#lastInventory ?? (this.#config
+            ? (0, registry_1.buildInventory)({
                 observe: this.#observe,
                 buckets: this.#buckets,
                 ignoredDeviceIds: this.#config.ignoredDeviceIds,
                 restAlarmFeedAvailable: this.#transport?.status.isRestAlarmFeedAvailable ?? false,
-            });
+            })
+            : null);
+        if (inventory) {
             for (const device of (0, registry_1.listDevices)(inventory)) {
                 byKind[device.identity.kind]++;
                 const { observe, rest } = device.identity.sources;
@@ -806,7 +899,18 @@ class MyNestPlatform {
     #emitDiagnostic(level, report) {
         this.#log[level]((0, format_1.formatDiagnosticLine)(report));
         if (this.#config?.structuredLogs) {
-            this.#log[level](JSON.stringify(report));
+            // The scoped logger runs the string through the redactor, whose header
+            // rules match on substrings and would truncate the rest of the line. The
+            // report carries no secrets, but "machine-readable" has to mean it: fall
+            // back rather than ship a log pipeline something that will not parse.
+            const line = JSON.stringify(report);
+            const redacted = (0, sanitizers_1.sanitizeString)(line);
+            if (isParseableJson(redacted)) {
+                this.#log[level](redacted);
+            }
+            else {
+                this.#log.debug('Diagnostics snapshot omitted: redaction made the JSON unparseable');
+            }
             return;
         }
         const { lifecycle, msg, ...groups } = report;

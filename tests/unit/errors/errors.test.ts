@@ -29,6 +29,7 @@ import {
   isCircuitBreakerFailure,
   parseRetryAfterMs,
 } from '../../../src/errors'
+import { MAX_RETRY_AFTER_MS } from '../../../src/settings'
 
 describe('the error hierarchy', () => {
   it('derives every error from NestError with a usable name', () => {
@@ -155,6 +156,23 @@ describe('parseRetryAfterMs', () => {
     expect(parseRetryAfterMs('')).toBeUndefined()
     expect(parseRetryAfterMs('soon')).toBeUndefined()
     expect(parseRetryAfterMs('-5')).toBeUndefined()
+  })
+
+  // The header is remote input and is handed straight to setTimeout, which
+  // collapses any delay above 2^31-1 ms to 1 ms — turning "wait a very long
+  // time" into an immediate retry against an endpoint that just rate-limited us.
+  it('clamps an absurd delay instead of overflowing setTimeout', () => {
+    const clamped = parseRetryAfterMs('99999999')
+
+    expect(clamped).toBeLessThanOrEqual(MAX_RETRY_AFTER_MS)
+    expect(clamped).toBeGreaterThan(0)
+    expect(clamped).toBeLessThan(2 ** 31 - 1)
+  })
+
+  it('clamps a far-future HTTP date the same way', () => {
+    const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60_000).toUTCString()
+
+    expect(parseRetryAfterMs(farFuture)).toBe(MAX_RETRY_AFTER_MS)
   })
 })
 

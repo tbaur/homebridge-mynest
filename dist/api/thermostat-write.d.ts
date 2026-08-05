@@ -15,7 +15,7 @@
 import type { HvacMode, ThermostatState } from '../types/device';
 /** Fully qualified type URL Nest expects inside google.protobuf.Any. */
 export declare const TARGET_TEMPERATURE_SETTINGS_TYPE_URL = "type.nestlabs.com/nest.trait.hvac.TargetTemperatureSettingsTrait";
-/** Eco clear uses the same BatchUpdateState NestMessage as setpoints. */
+/** Eco set and clear use the same BatchUpdateState NestMessage as setpoints. */
 export declare const ECO_MODE_STATE_TYPE_URL = "type.nestlabs.com/nest.trait.hvac.EcoModeStateTrait";
 /** One setpoint / mode change ready to encode. */
 export interface ThermostatSetpointWrite {
@@ -41,6 +41,11 @@ export interface ThermostatSetpointWrite {
  *
  * Always produces both heat and cool floats: Nest's trait carries the pair
  * even on heat-only equipment, and omitting one can bounce the other bound.
+ *
+ * The bound the user actually moved is authoritative. When honouring it would
+ * cross the other bound, the *untouched* one yields — sending a value the user
+ * did not ask for is worse than moving a bound they were not looking at, and
+ * the Home app shows their requested number either way.
  */
 export declare function buildThermostatSetpointWrite(resourceId: string, state: ThermostatState, patch: Partial<{
     mode: HvacMode;

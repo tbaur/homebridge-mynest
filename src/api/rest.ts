@@ -20,6 +20,7 @@
 import { ApiParseError, createApiError, parseRetryAfterMs } from '../errors'
 import {
   APP_LAUNCH_TIMEOUT_MS,
+  SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO,
   SUBSCRIBE_TIMEOUT_MS,
   appLaunchUrl,
   type NestEndpoints,
@@ -39,6 +40,13 @@ export interface RestRequestOptions {
   endpoints: NestEndpoints
   fetchImpl?: FetchLike
   signal?: AbortSignal
+}
+
+/** What the subscribe long-poll echoes back so Nest knows what the client has. */
+export interface ObjectRevision {
+  readonly object_key: string
+  readonly object_revision?: number
+  readonly object_timestamp?: number
 }
 
 /**
@@ -82,7 +90,14 @@ export async function appLaunch(
  */
 export async function subscribeOnce(
   options: RestRequestOptions & {
-    objects: readonly NestObject[]
+    /**
+     * Bucket identifiers and revisions the client has already seen.
+     *
+     * Typed as the subset actually sent rather than as whole objects: the values
+     * are never echoed back, and taking `NestObject[]` invited callers to
+     * materialise the entire bucket map twice per cycle just to build this.
+     */
+    revisions: readonly ObjectRevision[]
     timeoutMs?: number
   },
 ): Promise<SubscribeResult> {
@@ -92,13 +107,21 @@ export async function subscribeOnce(
   // Only the identifiers are echoed back, never the values. Sending the whole
   // bucket contents makes the request enormous on a home with many devices and
   // changes nothing about what Nest returns.
+  //
+  // Still stripped explicitly even though `ObjectRevision` declares only these
+  // three fields: TypeScript's structural typing lets a richer object through,
+  // and the request-size guarantee is worth more than one array allocation per
+  // two-minute cycle. What {@link ObjectList.revisions} removed was the *second*
+  // copy — it no longer materialises every whole bucket first.
   const payload = {
-    objects: options.objects.map(({ object_key, object_revision, object_timestamp }) => ({
+    objects: options.revisions.map(({ object_key, object_revision, object_timestamp }) => ({
       object_key,
       object_revision,
       object_timestamp,
     })),
   }
+
+  const startedAt = Date.now()
 
   let response
   try {
@@ -122,9 +145,20 @@ export async function subscribeOnce(
 
   // Nest answers a long-poll that expires server-side with 502 or 504 rather
   // than an empty 200. That is the same "nothing happened" outcome and must
-  // not be retried as a failure.
+  // not be retried as a failure — but only when the request actually waited.
+  // A 502 that comes back immediately is a failing edge, and reporting it as a
+  // successful idle cycle keeps Protect smoke/CO looking live while removing
+  // the backoff that would otherwise throttle the retry.
   if (response.status === 502 || response.status === 504) {
-    return { isIdle: true, objects: [] }
+    const elapsedMs = Date.now() - startedAt
+    if (elapsedMs >= timeoutMs * SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO) {
+      return { isIdle: true, objects: [] }
+    }
+    throw createApiError(
+      response.status,
+      `subscribe returned HTTP ${response.status} after ${elapsedMs}ms, too fast to be an expired long-poll`,
+      { retryAfterMs: parseRetryAfterMs(response.headers.get('retry-after')) },
+    )
   }
 
   if (response.status >= 400) {
@@ -154,16 +188,45 @@ function isIdleTimeout(error: unknown, signal: AbortSignal | undefined): boolean
 }
 
 /**
+ * Property names that must never be used as a bucket type or id.
+ *
+ * `object_key` is server-controlled and is split into two object keys by
+ * {@link ObjectList.toBuckets}. Without this guard a response naming
+ * `__proto__.x` writes onto `Object.prototype` — corrupting every object in
+ * the Homebridge process, not just this plugin — and `constructor.prototype`
+ * throws a `TypeError` that recurs on every cycle because the poisoned entry
+ * is already stored.
+ */
+const UNSAFE_KEY_SEGMENTS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** Whether an `object_key` is safe to use as `{ type: { id: value } }` keys. */
+function isSafeObjectKey(objectKey: string): boolean {
+  const separator = objectKey.indexOf('.')
+  if (separator <= 0 || separator === objectKey.length - 1) {
+    // Unsplittable keys are dropped later by `toBuckets`; accept them here so
+    // revision tracking for the long-poll stays complete.
+    return !UNSAFE_KEY_SEGMENTS.has(objectKey)
+  }
+  return !UNSAFE_KEY_SEGMENTS.has(objectKey.slice(0, separator))
+    && !UNSAFE_KEY_SEGMENTS.has(objectKey.slice(separator + 1))
+}
+
+/**
  * Read the object list out of a response.
  *
  * Nest uses `updated_buckets` on some responses and `objects` on others for
- * the same payload, so both are accepted.
+ * the same payload, so both are accepted. An empty `updated_buckets` falls
+ * through to `objects`: `??` would stop at the empty array and report a
+ * response that did carry updates as idle, discarding them.
  */
 function readObjects(body: NestObjectResponse): NestObject[] {
-  const raw = body.updated_buckets ?? body.objects ?? []
+  const raw = body.updated_buckets?.length ? body.updated_buckets : (body.objects ?? [])
   return Array.isArray(raw)
     ? raw.filter((entry): entry is NestObject =>
-      Boolean(entry) && typeof entry === 'object' && typeof entry.object_key === 'string')
+      Boolean(entry)
+      && typeof entry === 'object'
+      && typeof entry.object_key === 'string'
+      && isSafeObjectKey(entry.object_key))
     : []
 }
 
@@ -251,8 +314,9 @@ export class ObjectList {
   /**
    * Replace the list wholesale without outage guards.
    *
-   * Prefer {@link applyAppLaunchSnapshot} for live Nest reads. Kept for tests
-   * that need an immediate reset of the bucket map.
+   * @internal Tests only. Live Nest reads must go through
+   *   {@link applyAppLaunchSnapshot}, whose truncation and two-strike guards
+   *   are what stop a Nest blip from unregistering every accessory.
    */
   replace(updates: readonly NestObject[]): void {
     this.#byKey.clear()
@@ -260,8 +324,23 @@ export class ObjectList {
     this.merge(updates)
   }
 
+  /** @internal Tests only; the subscribe loop uses {@link revisions}. */
   get objects(): readonly NestObject[] {
     return [...this.#byKey.values()]
+  }
+
+  /**
+   * The identifiers the subscribe long-poll needs, built in one pass.
+   *
+   * Getting this from `objects` copied every tracked bucket and then mapped it
+   * again — two full allocations of the whole bucket map per cycle.
+   */
+  get revisions(): readonly ObjectRevision[] {
+    const revisions: ObjectRevision[] = []
+    for (const { object_key, object_revision, object_timestamp } of this.#byKey.values()) {
+      revisions.push({ object_key, object_revision, object_timestamp })
+    }
+    return revisions
   }
 
   get size(): number {
@@ -276,7 +355,12 @@ export class ObjectList {
    * those buckets.
    */
   toBuckets(): BucketMap {
-    const buckets: Record<string, Record<string, unknown>> = {}
+    // Null-prototype maps: these keys come from Nest, and a plain object would
+    // resolve `__proto__` to `Object.prototype` (so `??=` skips assignment and
+    // the write lands on the prototype) or `constructor` to a frozen function.
+    // `readObjects` already rejects those keys; this is the second layer, so a
+    // future caller that bypasses the boundary cannot reintroduce the hole.
+    const buckets: Record<string, Record<string, unknown>> = Object.create(null)
 
     for (const object of this.#byKey.values()) {
       const separator = object.object_key.indexOf('.')
@@ -286,9 +370,12 @@ export class ObjectList {
 
       const type = object.object_key.slice(0, separator)
       const id = object.object_key.slice(separator + 1)
+      if (UNSAFE_KEY_SEGMENTS.has(type) || UNSAFE_KEY_SEGMENTS.has(id)) {
+        continue
+      }
 
-      buckets[type] ??= {}
-      buckets[type][id] = object.value ?? null
+      buckets[type] ??= Object.create(null) as Record<string, unknown>
+      buckets[type]![id] = object.value ?? null
     }
 
     return buckets

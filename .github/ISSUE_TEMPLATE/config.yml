@@ -1,0 +1,11 @@
+# Steers vulnerability reports away from public issues, which SECURITY.md
+# explicitly forbids. Blank issues stay off so reports arrive via the bug or
+# feature template rather than as unstructured prose.
+#
+# No Discussions link here on purpose: it would 404 unless Discussions is
+# enabled on the repository. Add one if you turn that tab on.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/tbaur/homebridge-mynest/security/advisories/new
+    about: Report privately. The access token this plugin holds is an account-scoped Nest credential — never post it, or a log containing it, in a public issue.

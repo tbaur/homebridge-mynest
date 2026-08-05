@@ -78,7 +78,9 @@ HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_co
 
 `off` is `active=0` with a standby `HEAT`/`COOL` left in `hvacMode` — Nest does not store an OFF enum there. REST `/v5/put` cannot reach Observe-only thermostats.
 
-Probe kit: `xtmp/nest-probe` probe 12 dry-runs the setpoint encode; `--confirm` POSTs a live bump. Plugin flag: `allowThermostatControl` (default **off** — opt in after a live confirm on your account). Manual HomeKit setpoint/mode writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
+Plugin flag: `allowThermostatControl` (default **off**). Manual HomeKit setpoint/mode writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
+
+> The encode shape was confirmed against a live account with a maintainer-only probe kit (`nest-probe`), which is **not part of this repository** and is not something a user or contributor can run. Treat references to it as provenance for where these findings came from, not as a step to reproduce.
 
 ### Eco Mode (on / off)
 
@@ -88,7 +90,7 @@ HomeKit has no Eco thermostat mode, so the plugin exposes Eco as a Switch (per t
 2. Wrap in `nest.rpc.NestMessage` `{ set: [{ object: { id: DEVICE_…, key: eco_mode_state, uuid }, property: Any }] }` (`encodeEcoModeBatchUpdate`).
 3. Same `TraitBatchApi/BatchUpdateState` endpoint and auth as setpoint writes.
 
-There is no nest-probe confirm path for Eco-only writes yet; enable `allowThermostatControl` only after you are comfortable with live Nest writes on your account.
+Eco-only writes were never confirmed against a live account the way setpoints were; enable `allowThermostatControl` only if you are comfortable with live Nest writes on your account.
 
 The optional house-wide switch (`exposeGlobalEcoSwitch`) posts Eco to every live thermostat accessory. It reports success only when every write succeeds; HomeKit stays optimistic until Nest's all-Eco aggregate matches (or 45s elapses and Nest truth wins).
 

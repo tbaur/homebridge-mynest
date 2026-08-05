@@ -15,6 +15,7 @@
  * Usage:
  *   node scripts/verify.mjs              discover + listen ~30s
  *   node scripts/verify.mjs --listen 90  listen longer
+ *   node scripts/verify.mjs --verbose    include per-trait stream detail
  *
  * Requires `NEST_ACCESS_TOKEN` in the environment or in a gitignored `.env`.
  * Read-only. Does not write setpoints or modes.

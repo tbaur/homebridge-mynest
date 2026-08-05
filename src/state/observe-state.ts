@@ -54,13 +54,29 @@ export class ObserveState {
         changed.add(update.resourceId)
       }
 
+      // Digest before decode. `decodeTrait` does a schema lookup and builds a
+      // fresh object graph, and every Observe recycle replays the full ~300 KB
+      // snapshot — hundreds of traits, almost all unchanged. Comparing the
+      // cheap fingerprint of the wire bytes first skips that work entirely for
+      // the traits that did not move.
+      const digest = digestValue(update.value)
+      const previous = traits.get(update.key)
+      const isUnchanged = previous !== undefined
+        && digest !== undefined
+        && previous.valueDigest === digest
+        && previous.typeUrl === update.typeUrl
+
+      if (isUnchanged) {
+        continue
+      }
+
       const record: TraitRecord = {
         typeUrl: update.typeUrl,
         data: decodeTrait(update),
-        valueDigest: digestValue(update.value),
+        valueDigest: digest,
       }
 
-      if (hasChanged(traits.get(update.key), record)) {
+      if (hasChanged(previous, record)) {
         changed.add(update.resourceId)
       }
 
@@ -122,6 +138,10 @@ export class ObserveState {
     return [...this.#byResource.keys()]
   }
 
+  /**
+   * @internal Every resource held, devices and shared context alike. Tests
+   *   only — the platform counts devices via {@link deviceResourceCount}.
+   */
   get size(): number {
     return this.#byResource.size
   }
@@ -148,7 +168,7 @@ export class ObserveState {
  *
  * Prefer a digest of the undecoded wire bytes — every frame produces freshly
  * decoded objects, and JSON.stringify of Buffer-bearing payloads is O(bytes).
- * Fall back to serialized decoded data when neither side has raw bytes.
+ * Fall back to serialised decoded data when neither side has raw bytes.
  */
 function hasChanged(previous: TraitRecord | undefined, next: TraitRecord): boolean {
   if (!previous) {

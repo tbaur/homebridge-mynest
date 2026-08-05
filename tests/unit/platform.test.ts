@@ -278,6 +278,60 @@ describe('MyNestPlatform', () => {
     expect(harness.updateEcoMode).toHaveBeenCalledWith(`DEVICE_${THERMOSTAT_ID}`, true)
   })
 
+  it('writes Eco to one thermostat when control is enabled', async () => {
+    const platform = await launch({ allowThermostatControl: true })
+
+    await expect(platform.applyEcoWrite(THERMOSTAT_ID, true)).resolves.toBe(true)
+    expect(harness.updateEcoMode).toHaveBeenCalledWith(`DEVICE_${THERMOSTAT_ID}`, true)
+  })
+
+  it('does not write Eco when control is disabled', async () => {
+    const platform = await launch({ allowThermostatControl: false })
+
+    await expect(platform.applyEcoWrite(THERMOSTAT_ID, true)).resolves.toBe(false)
+    expect(harness.updateEcoMode).not.toHaveBeenCalled()
+  })
+
+  it('survives a cached accessory restored without a context', async () => {
+    // Homebridge assigns `context` verbatim from the persisted cache, so an
+    // accessory stored without one restores as undefined. Dereferencing it
+    // threw, and the throw surfaced as "Eco update failed" on every press
+    // while no thermostat was ever written to.
+    const platform = await launch({
+      allowThermostatControl: true,
+      exposeGlobalEcoSwitch: true,
+    })
+    const orphan = new Accessory(
+      'Orphan',
+      uuid.generate(`${UUID_PREFIX}ORPHAN`),
+    ) as unknown as PlatformAccessory
+    ;(orphan as { context?: unknown }).context = undefined
+    platform.configureAccessory(orphan)
+
+    harness.options.onTraits(thermostatTraits())
+    setTransportStatus({ observeFrames: 1, restCycles: 1, knownObjects: 1 })
+    flushSync()
+
+    await expect(platform.applyGlobalEcoWrite(true)).resolves.toBe(true)
+    expect(harness.updateEcoMode).toHaveBeenCalledWith(`DEVICE_${THERMOSTAT_ID}`, true)
+  })
+
+  it('keeps reminding the operator after a fatal authentication failure', async () => {
+    // #stop() tears down the transport heartbeat and the diagnostics timer, so
+    // without a standing reminder the plugin goes silent forever while HomeKit
+    // keeps serving frozen readings.
+    await launch()
+    flushSync()
+
+    harness.options.onFatal(new Error('Nest rejected the token.'))
+    const initialErrors = log.errors.length
+
+    jest.advanceTimersByTime(60 * 60_000)
+
+    expect(log.errors.length).toBeGreaterThan(initialErrors)
+    expect(log.errors.join('\n')).toMatch(/still failing/)
+  })
+
   it('refuses a global Eco write when there are no thermostats', async () => {
     const platform = await launch({
       allowThermostatControl: true,
@@ -334,6 +388,37 @@ describe('MyNestPlatform', () => {
     // Services stay so rooms/automations are not torn down on a Nest blip.
     expect(protect!.getService(api.hap.Service.SmokeSensor)).toBeDefined()
     expect(protect!.getService(api.hap.Service.CarbonMonoxideSensor)).toBeDefined()
+  })
+
+  it('keeps traits that arrived before a device could be classified', async () => {
+    // Nest streams a device's traits across several frames, and
+    // `classifyResource` needs an HVAC/Protect/temperature type before the
+    // device can enter the inventory. Pruning Observe state on inventory
+    // absence discarded the identity and label from the earlier frames, so the
+    // thermostat was later republished as "Thermostat 0001" with no model.
+    await launch()
+    flushSync()
+
+    const fixtures = heatingThermostatTraits(`DEVICE_${THERMOSTAT_ID}`)
+    const isIdentity = (key: string): boolean => key === 'device_identity' || key === 'label'
+
+    harness.options.onTraits(
+      decodeFrame(buildFrame(fixtures.filter((trait) => isIdentity(trait.key)))).traits,
+    )
+    flushSync()
+
+    harness.options.onTraits(
+      decodeFrame(buildFrame(fixtures.filter((trait) => !isIdentity(trait.key)))).traits,
+    )
+    setTransportStatus({ observeFrames: 2, restCycles: 1, knownObjects: 1 })
+    flushSync()
+
+    const thermostat = api.registered.find(
+      (accessory) => (accessory.context as { deviceId?: string }).deviceId === THERMOSTAT_ID,
+    )
+
+    expect(thermostat).toBeDefined()
+    expect(thermostat!.displayName).toBe('Test Thermostat')
   })
 
   it('publishes REST Protects after the first app_launch', async () => {
@@ -675,7 +760,12 @@ describe('MyNestPlatform', () => {
     expect(log.infos.join('\n')).toContain('Gone Protect')
   })
 
-  it('unregisters cached accessories when configuration is unusable', async () => {
+  it('keeps cached accessories when configuration is unusable', async () => {
+    // Unregistering here destroys the user's room assignments, scene
+    // memberships, and automation targets — and fixing the config does not
+    // bring them back, because HomeKit treats re-registered accessories as new
+    // devices. A config typo cannot warrant a more destructive response than a
+    // revoked token, which deliberately keeps them.
     const staleUuid = uuid.generate(`${UUID_PREFIX}BAD`)
     const stale = new Accessory('Stale', staleUuid) as unknown as PlatformAccessory
     stale.context = { deviceId: 'BAD', kind: 'protect', displayName: 'Stale' }
@@ -689,8 +779,9 @@ describe('MyNestPlatform', () => {
     api.emit('didFinishLaunching')
     await Promise.resolve()
 
-    expect(api.unregistered).toContain(stale)
-    expect(log.warns.join('\n')).toContain('cached accessory')
+    expect(api.unregistered).not.toContain(stale)
+    expect(log.errors.join('\n')).toContain('Configuration is not usable')
+    expect(log.errors.join('\n')).toContain('accessories were kept')
   })
 
   it('keeps published accessories when Nest authentication fails permanently', async () => {

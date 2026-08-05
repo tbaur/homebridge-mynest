@@ -108,6 +108,26 @@ export function collectObserveRoomNames(state: ObserveState): RoomNames {
   return names
 }
 
+/** Longest device name published to HomeKit, before the kind suffix. */
+const MAX_DEVICE_NAME_LENGTH = 64
+
+/**
+ * Make a Nest-supplied name safe to publish and to log.
+ *
+ * Names come from the Nest `label` trait or a REST `description`, so they are
+ * remote input. Control characters are stripped because Homebridge logs are the
+ * primary support artifact and get pasted into public issue trackers — a device
+ * named with an embedded newline can forge log lines. The value is also
+ * type-checked rather than trusted: TypeScript only claims these are strings.
+ */
+function cleanName(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+  const cleaned = value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()
+  return cleaned.length > 0 ? cleaned.slice(0, MAX_DEVICE_NAME_LENGTH) : undefined
+}
+
 /**
  * Choose the name to publish to HomeKit.
  *
@@ -126,12 +146,12 @@ export function resolveDeviceName(options: {
   /** Room name, already resolved from whichever transport supplied it. */
   roomName?: string
 }): string {
-  const explicit = options.label?.trim() || options.description?.trim()
+  const explicit = cleanName(options.label) ?? cleanName(options.description)
   if (explicit) {
     return explicit
   }
 
-  const room = options.roomName?.trim()
+  const room = cleanName(options.roomName)
   if (room) {
     return `${room} ${KIND_LABELS[options.kind]}`
   }

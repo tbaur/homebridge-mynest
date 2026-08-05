@@ -31,7 +31,7 @@ cp .env.example .env
 npm run verify
 ```
 
-`verify` is read-only. Thermostat setpoint writes go through Nest BatchUpdateState; confirm with `xtmp/nest-probe` probe 12 (`--confirm`) before trusting a new Nest schema change. Eco Mode uses the same gateway (`encodeEcoModeBatchUpdate`) but has no separate probe confirm yet.
+`verify` is read-only. Thermostat setpoint and Eco writes go through Nest BatchUpdateState (`encodeTargetTemperatureBatchUpdate` / `encodeEcoModeBatchUpdate`). Their encode shapes were established with a maintainer-only probe kit that is not part of this repository, so a change to either needs a live account to validate against — say so in the PR rather than relying on the unit tests alone.
 
 ## Pull requests
 

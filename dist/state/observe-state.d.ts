@@ -57,6 +57,10 @@ export declare class ObserveState {
     /** How many `DEVICE_*` resources are currently held. */
     get deviceResourceCount(): number;
     get resourceIds(): readonly string[];
+    /**
+     * @internal Every resource held, devices and shared context alike. Tests
+     *   only — the platform counts devices via {@link deviceResourceCount}.
+     */
     get size(): number;
     /** Every protobuf type a resource has reported, for device classification. */
     typeUrls(resourceId: string): readonly string[];

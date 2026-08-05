@@ -6,8 +6,17 @@
  *
  * @fileoverview Backoff and retry helpers.
  */
-/** Awaitable delay. Exported so tests can substitute it and skip real waits. */
-export declare function sleep(ms: number): Promise<void>;
+/**
+ * Awaitable delay that a shutdown can cut short.
+ *
+ * `unref`'d and abort-aware because the reconnect backoff reaches five minutes:
+ * a plain timer would hold the Node event loop open for that long after
+ * Homebridge has already asked everything to stop, delaying a service restart
+ * and pushing containers into their SIGKILL grace period.
+ *
+ * Exported so tests can substitute it and skip real waits.
+ */
+export declare function sleep(ms: number, signal?: AbortSignal): Promise<void>;
 /**
  * Exponential backoff with full jitter.
  *
@@ -27,6 +36,8 @@ export interface RetryOptions {
     /** Decides whether a given failure is worth another attempt. */
     isRetryable?: (error: unknown) => boolean;
     onRetry?: (attempt: number, delayMs: number, error: unknown) => void;
+    /** Shutdown signal. Stops retrying rather than burning the attempt budget. */
+    signal?: AbortSignal;
 }
 /**
  * Run an operation, retrying retryable failures with backoff.

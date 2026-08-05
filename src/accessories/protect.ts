@@ -79,12 +79,19 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
    * Nest has said anything would show a working all-clear on no evidence.
    * Once created, services stay through REST outages (rooms/automations keep
    * their targets) and are marked inactive/faulted while the feed is stale.
+   *
+   * Each sensor is gated on *its own* reading. Nest returns different topaz
+   * subsets per firmware, and a bucket carrying `smoke_status` without
+   * `co_status` must not produce a CO tile: its reader would return undefined,
+   * the binder would skip it, and HomeKit would show a CO detector resting at
+   * HAP's default "levels normal" with nothing behind it.
    */
   #ensureAlarmServices(): void {
     const { Characteristic, Service: HapService } = this.platform
-    const hasAlarms = this.state.smoke !== undefined || this.state.carbonMonoxide !== undefined
+    const hasSmoke = this.state.smoke !== undefined
+    const hasCarbonMonoxide = this.state.carbonMonoxide !== undefined
 
-    if (!hasAlarms) {
+    if (!hasSmoke && !hasCarbonMonoxide) {
       this.removeService(HapService.SmokeSensor)
       this.removeService(HapService.CarbonMonoxideSensor)
       this.#smokeService = null
@@ -115,48 +122,72 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
       )
     }
 
-    this.#smokeService = this.resolveService(HapService.SmokeSensor)
-    this.#smokeService.setCharacteristic(Characteristic.Name, `${this.identity.name} Smoke`)
+    if (hasSmoke) {
+      this.#smokeService = this.resolveService(HapService.SmokeSensor)
+      this.#smokeService.setCharacteristic(Characteristic.Name, `${this.identity.name} Smoke`)
+      this.binder.bind(
+        this.#smokeService,
+        Characteristic.SmokeDetected,
+        () => this.#toSmokeValue(this.state.smoke),
+      )
+    } else {
+      this.removeService(HapService.SmokeSensor)
+      this.#smokeService = null
+    }
 
-    this.#coService = this.resolveService(HapService.CarbonMonoxideSensor)
-    this.#coService.setCharacteristic(Characteristic.Name, `${this.identity.name} CO`)
+    if (hasCarbonMonoxide) {
+      this.#coService = this.resolveService(HapService.CarbonMonoxideSensor)
+      this.#coService.setCharacteristic(Characteristic.Name, `${this.identity.name} CO`)
+      this.binder.bind(
+        this.#coService,
+        Characteristic.CarbonMonoxideDetected,
+        () => this.#toCarbonMonoxideValue(this.state.carbonMonoxide),
+      )
+    } else {
+      this.removeService(HapService.CarbonMonoxideSensor)
+      this.#coService = null
+    }
 
-    this.binder.bind(
-      this.#smokeService,
-      Characteristic.SmokeDetected,
-      () => this.#toSmokeValue(this.state.smoke),
-    )
-    this.binder.bind(
-      this.#coService,
-      Characteristic.CarbonMonoxideDetected,
-      () => this.#toCarbonMonoxideValue(this.state.carbonMonoxide),
-    )
-
-    // Both services carry the shared health characteristics so either tile in
-    // the Home app shows a flat battery, an offline device, or a stale REST feed.
+    // Whichever tiles exist carry the shared health characteristics, so the
+    // Home app shows a flat battery, an offline device, or a stale REST feed.
     for (const service of [this.#smokeService, this.#coService]) {
-      this.binder.bind(
-        service,
-        Characteristic.StatusLowBattery,
-        () => this.#toLowBatteryValue(),
-      )
-      this.binder.bind(
-        service,
-        Characteristic.StatusActive,
-        () => this.#isAlarmReadingLive(),
-      )
-      this.binder.bind(
-        service,
-        Characteristic.StatusFault,
-        () => this.#isAlarmReadingLive()
-          ? Characteristic.StatusFault.NO_FAULT
-          : Characteristic.StatusFault.GENERAL_FAULT,
-      )
+      if (service) {
+        this.#bindHealth(service)
+      }
     }
 
     // Alarm tiles carry battery; the standalone Battery service is only for
     // Observe-only Protects that have no smoke/CO yet.
     this.removeService(HapService.Battery)
+  }
+
+  /** Battery plus liveness, for the alarm tiles. */
+  #bindHealth(service: Service): void {
+    this.binder.bind(
+      service,
+      this.platform.Characteristic.StatusLowBattery,
+      () => this.#toLowBatteryValue(),
+    )
+    this.#bindLiveness(service)
+  }
+
+  /**
+   * Mark a service inactive and faulted whenever its reading is not live.
+   *
+   * Shared by the alarm tiles and the occupancy tile: all three are backed by
+   * the same REST feed, so they go stale together.
+   */
+  #bindLiveness(service: Service): void {
+    const { Characteristic } = this.platform
+
+    this.binder.bind(service, Characteristic.StatusActive, () => this.#isAlarmReadingLive())
+    this.binder.bind(
+      service,
+      Characteristic.StatusFault,
+      () => this.#isAlarmReadingLive()
+        ? Characteristic.StatusFault.NO_FAULT
+        : Characteristic.StatusFault.GENERAL_FAULT,
+    )
   }
 
   /** Alarm readings are live only while online and the REST feed is fresh. */
@@ -255,18 +286,7 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
           ? Characteristic.OccupancyDetected.OCCUPANCY_DETECTED
           : Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED,
     )
-    this.binder.bind(
-      service,
-      Characteristic.StatusActive,
-      () => this.#isAlarmReadingLive(),
-    )
-    this.binder.bind(
-      service,
-      Characteristic.StatusFault,
-      () => this.#isAlarmReadingLive()
-        ? Characteristic.StatusFault.NO_FAULT
-        : Characteristic.StatusFault.GENERAL_FAULT,
-    )
+    this.#bindLiveness(service)
 
     if (!ProtectAccessory.#didLogOccupancyHint) {
       ProtectAccessory.#didLogOccupancyHint = true
@@ -340,13 +360,7 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
   }
 
   #toLowBatteryValue(): CharacteristicValue | undefined {
-    const { Characteristic } = this.platform
-    if (this.state.isBatteryLow === undefined) {
-      return undefined
-    }
-    return this.state.isBatteryLow
-      ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
-      : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+    return this.toLowBatteryValue(this.state.isBatteryLow)
   }
 
   /**

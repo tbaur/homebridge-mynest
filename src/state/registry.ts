@@ -177,8 +177,12 @@ function readRestRoomNames(buckets: BucketMap): RoomNames {
 
   for (const value of Object.values(buckets.where ?? {})) {
     for (const entry of (value as WhereBucket | null)?.wheres ?? []) {
-      if (entry?.where_id && entry.name) {
-        names.set(entry.where_id, entry.name)
+      // Type-checked, not just truthiness-checked: a non-string name here ends
+      // up in `resolveDeviceName`, where `.trim()` throws.
+      const whereId = readString(entry, 'where_id')
+      const name = readString(entry, 'name')
+      if (whereId && name) {
+        names.set(whereId, name)
       }
     }
   }
@@ -232,12 +236,15 @@ function buildIdentity(context: BuildContext, kind: DeviceKind): DeviceIdentity 
   const resourceId = toResourceId(deviceId)
 
   const identityTrait = observe.trait(resourceId, 'device_identity')
-  const restBucket = findRestBucket(buckets, deviceId) as
-    { where_id?: string, description?: string, name?: string, model?: string, serial_number?: string }
-    | undefined
+  const restBucket = findRestBucket(buckets, deviceId)
 
+  // Every REST-sourced string goes through `readString`. These are raw JSON
+  // values that TypeScript only *claims* are strings; a number or object
+  // reaching `resolveDeviceName` throws on `.trim()`, and that throw escapes
+  // `buildInventory` on every update cycle, so the plugin publishes nothing at
+  // all until Nest changes its mind.
   const whereId = readString(observe.trait(resourceId, 'device_located_settings'), 'whereId', 'value')
-    ?? restBucket?.where_id
+    ?? readString(restBucket, 'where_id')
 
   const sources: DeviceSources = {
     observe: observe.resource(resourceId) !== undefined,
@@ -251,27 +258,45 @@ function buildIdentity(context: BuildContext, kind: DeviceKind): DeviceIdentity 
       kind,
       deviceId,
       label: readString(observe.trait(resourceId, 'label'), 'label'),
-      description: restBucket?.description ?? restBucket?.name,
+      description: readString(restBucket, 'description') ?? readString(restBucket, 'name'),
       roomName: whereId ? roomNames.get(whereId) : undefined,
     }),
     sources,
-    model: readString(identityTrait, 'modelName', 'value') ?? restBucket?.model,
-    serialNumber: readString(identityTrait, 'serialNumber') ?? restBucket?.serial_number ?? deviceId,
+    // `topaz` spells the model `model`; `device` spells it `model_version`.
+    model: readString(identityTrait, 'modelName', 'value')
+      ?? readString(restBucket, 'model')
+      ?? readString(restBucket, 'model_version'),
+    serialNumber: readString(identityTrait, 'serialNumber')
+      ?? readString(restBucket, 'serial_number')
+      ?? deviceId,
     firmwareVersion: readString(identityTrait, 'fwVersion'),
     whereId,
     structureId: readString(restBucket, 'structure_id'),
   }
 }
 
-/** The first REST bucket of any device type carrying this id. */
+/**
+ * Every REST bucket carrying this id, merged into one identity view.
+ *
+ * A legacy thermostat appears in both `shared` and `device`, and the two carry
+ * different halves of its identity: `shared` has only the setpoints and a name,
+ * while `where_id`, `serial_number`, `structure_id`, and the model live in
+ * `device`. Taking the first match would silently drop the room assignment, so
+ * the device would be published as "Thermostat ABCD" instead of "Hallway
+ * Thermostat". Earlier buckets win on conflict, matching the previous
+ * first-match precedence.
+ */
 function findRestBucket(buckets: BucketMap, deviceId: string): Record<string, unknown> | undefined {
+  let merged: Record<string, unknown> | undefined
+
   for (const { bucket } of REST_DEVICE_BUCKETS) {
     const value = buckets[bucket]?.[deviceId]
     if (value && typeof value === 'object') {
-      return value as Record<string, unknown>
+      merged = { ...(value as Record<string, unknown>), ...merged }
     }
   }
-  return undefined
+
+  return merged
 }
 
 function buildThermostat(

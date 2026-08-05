@@ -13,7 +13,14 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "moduleResolution": "node",
+    // `node10` is the current spelling of the classic resolver, and TypeScript
+    // 6 deprecates it — hence `ignoreDeprecations`. Migrating to `node16` is
+    // blocked upstream, not by choice: it requires `module: node16`, under
+    // which every `import type … from 'homebridge'` fails with TS1541 because
+    // Homebridge is ESM-only and this package is CommonJS. Those imports erase
+    // at compile time, so annotating eight of them with `resolution-mode` would
+    // buy nothing. Revisit when the plugin can emit ESM.
+    "moduleResolution": "node10",
     "types": ["node"],
     "ignoreDeprecations": "6.0",
     "allowSyntheticDefaultImports": true,

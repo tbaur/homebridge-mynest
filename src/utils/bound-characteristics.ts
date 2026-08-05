@@ -50,9 +50,17 @@ interface Binding {
 export class CharacteristicBinder {
   #bindings: Binding[] = []
   readonly #log: Logger
+  readonly #label: string
 
-  constructor(log: Logger) {
+  /**
+   * @param label Device name written into failure messages. `createScopedLogger`
+   *   deliberately does not prefix lines, so without it
+   *   `Could not compute Smoke Detected` names no device — unactionable in a
+   *   house with a dozen Protects.
+   */
+  constructor(log: Logger, label = 'accessory') {
     this.#log = log
+    this.#label = label
   }
 
   /**
@@ -128,7 +136,8 @@ export class CharacteristicBinder {
         value = binding.read()
       } catch (error) {
         this.#log.debug(
-          `Could not compute ${binding.name}: ${error instanceof Error ? error.message : String(error)}`,
+          `${this.#label}: could not compute ${binding.name}: `
+          + `${error instanceof Error ? error.message : String(error)}`,
         )
         continue
       }

@@ -34,7 +34,10 @@ exports.LOW_BATTERY_VOLTS = 2.6;
  */
 function readTemperatureSensorState(options) {
     const { state, resourceId, kryptonite } = options;
-    const batteryLevel = (0, traits_1.readNumber)(kryptonite, 'battery_level');
+    // Range-checked because `battery_level` means percent on a kryptonite bucket
+    // but millivolts on a topaz one. Handing HomeKit a millivolt reading would
+    // trip HAP's 0-100 clamp and warn on every push.
+    const batteryLevel = readPercentage((0, traits_1.readNumber)(kryptonite, 'battery_level'));
     const volts = (0, traits_1.readNumber)(state.trait(resourceId, 'battery'), 'assessedVoltage', 'value');
     return {
         temperatureC: (0, traits_1.readTemperatureC)(state.trait(resourceId, 'current_temperature'))
@@ -46,6 +49,9 @@ function readTemperatureSensorState(options) {
         batteryLevel,
         isBatteryLow: resolveLowBattery(batteryLevel, volts),
     };
+}
+function readPercentage(value) {
+    return value !== undefined && value >= 0 && value <= 100 ? value : undefined;
 }
 /** Prefer the reported percentage; fall back to voltage; otherwise say nothing. */
 function resolveLowBattery(batteryLevel, volts) {

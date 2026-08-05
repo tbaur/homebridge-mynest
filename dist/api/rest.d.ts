@@ -25,6 +25,12 @@ export interface RestRequestOptions {
     fetchImpl?: FetchLike;
     signal?: AbortSignal;
 }
+/** What the subscribe long-poll echoes back so Nest knows what the client has. */
+export interface ObjectRevision {
+    readonly object_key: string;
+    readonly object_revision?: number;
+    readonly object_timestamp?: number;
+}
 /**
  * Pull every bucket the account owns.
  *
@@ -47,7 +53,14 @@ export declare function appLaunch(options: RestRequestOptions & {
  * two cases stay distinguishable.
  */
 export declare function subscribeOnce(options: RestRequestOptions & {
-    objects: readonly NestObject[];
+    /**
+     * Bucket identifiers and revisions the client has already seen.
+     *
+     * Typed as the subset actually sent rather than as whole objects: the values
+     * are never echoed back, and taking `NestObject[]` invited callers to
+     * materialise the entire bucket map twice per cycle just to build this.
+     */
+    revisions: readonly ObjectRevision[];
     timeoutMs?: number;
 }): Promise<SubscribeResult>;
 /**
@@ -82,11 +95,20 @@ export declare class ObjectList {
     /**
      * Replace the list wholesale without outage guards.
      *
-     * Prefer {@link applyAppLaunchSnapshot} for live Nest reads. Kept for tests
-     * that need an immediate reset of the bucket map.
+     * @internal Tests only. Live Nest reads must go through
+     *   {@link applyAppLaunchSnapshot}, whose truncation and two-strike guards
+     *   are what stop a Nest blip from unregistering every accessory.
      */
     replace(updates: readonly NestObject[]): void;
+    /** @internal Tests only; the subscribe loop uses {@link revisions}. */
     get objects(): readonly NestObject[];
+    /**
+     * The identifiers the subscribe long-poll needs, built in one pass.
+     *
+     * Getting this from `objects` copied every tracked bucket and then mapped it
+     * again — two full allocations of the whole bucket map per cycle.
+     */
+    get revisions(): readonly ObjectRevision[];
     get size(): number;
     /**
      * Index the objects as `{ bucketType: { id: value } }`.

@@ -21,6 +21,7 @@ import {
   RateLimitError,
   TimeoutError,
 } from '../../../src/errors'
+import { MAX_RESPONSE_BYTES } from '../../../src/settings'
 import { failingFetch, hangingFetch, jsonFetch, textFetch } from '../../helpers/fetch'
 
 const URL_UNDER_TEST = 'https://home.nest.com/session'
@@ -40,6 +41,33 @@ describe('sendRequest', () => {
     })).rejects.toThrow(/aborted/i)
 
     expect(calls).toHaveLength(0)
+  })
+
+  it('refuses a body that declares more than the size ceiling', async () => {
+    // `app_launch` returns the whole account, so bodies are legitimately large
+    // — but reading one without a ceiling lets a malfunctioning or hostile
+    // endpoint exhaust memory and take down every plugin in the process.
+    const { fetch } = textFetch('small body', {
+      headers: { 'content-length': String(MAX_RESPONSE_BYTES + 1) },
+    })
+
+    await expect(sendRequest(URL_UNDER_TEST, {
+      method: 'GET',
+      headers: {},
+      timeoutMs: 60_000,
+      fetchImpl: fetch,
+    })).rejects.toThrow(ApiParseError)
+  })
+
+  it('accepts a body that declares a size within the ceiling', async () => {
+    const { fetch } = textFetch('ok', { headers: { 'content-length': '2' } })
+
+    await expect(sendRequest(URL_UNDER_TEST, {
+      method: 'GET',
+      headers: {},
+      timeoutMs: 60_000,
+      fetchImpl: fetch,
+    })).resolves.toMatchObject({ status: 200, text: 'ok' })
   })
 
   it('returns the status, headers, and body', async () => {
@@ -126,7 +154,7 @@ describe('sendRequest', () => {
         method: 'GET',
         headers: {},
         timeoutMs: 1000,
-      })).rejects.toThrow(/Node 20/)
+      })).rejects.toThrow(/Node 22/)
     } finally {
       globalThis.fetch = original
     }

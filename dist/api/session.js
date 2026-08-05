@@ -91,15 +91,22 @@ async function openSession(options) {
     // wherever the response says. The value is server-controlled, so it is
     // checked rather than trusted.
     assertNestTransportUrl(transportUrl);
+    const expiresInSec = typeof body.expires_in === 'number'
+        && Number.isFinite(body.expires_in)
+        && body.expires_in > 0
+        ? body.expires_in
+        : undefined;
     if (log.debugEnabled) {
         log.debug(`Nest session established; the session token is ${(0, sanitizers_1.previewSecret)(token)}`
-            + `${typeof body.expires_in === 'number' ? ` and expires in ${body.expires_in}s` : ''}`);
+            + `${expiresInSec !== undefined ? ` and expires in ${expiresInSec}s` : ''}`);
     }
+    const openedAt = Date.now();
     return {
         token: token,
         userId: userId,
         transportUrl: transportUrl.replace(/\/+$/, ''),
-        openedAt: Date.now(),
+        openedAt,
+        expiresAt: expiresInSec !== undefined ? openedAt + expiresInSec * 1_000 : undefined,
     };
 }
 /** Hosts the session token may be sent to, beyond the fixed API endpoints. */
@@ -121,8 +128,13 @@ function assertNestTransportUrl(transportUrl) {
     }
     const isHttps = parsed.protocol === 'https:';
     const isNestHost = ALLOWED_TRANSPORT_SUFFIXES.some((suffix) => parsed.hostname.endsWith(suffix));
-    if (!isHttps || !isNestHost) {
-        throw new errors_1.AuthenticationError(`The Nest session returned an unexpected transport host (${parsed.protocol}//${parsed.hostname}); refusing to send the session token to it.`);
+    // Port and userinfo are part of where the credential actually goes. A
+    // response naming `https://user:pass@sub.nest.com:31337` passes a
+    // hostname-only check while redirecting the live session token elsewhere.
+    const isDefaultPort = parsed.port === '' || parsed.port === '443';
+    const hasUserInfo = parsed.username !== '' || parsed.password !== '';
+    if (!isHttps || !isNestHost || !isDefaultPort || hasUserInfo) {
+        throw new errors_1.AuthenticationError(`The Nest session returned an unexpected transport host (${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}); refusing to send the session token to it.`);
     }
 }
 //# sourceMappingURL=session.js.map

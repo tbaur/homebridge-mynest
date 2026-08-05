@@ -100,6 +100,56 @@ describe('collectObserveRoomNames', () => {
   })
 })
 
+describe('resolveDeviceName hardening', () => {
+  it('strips control characters so a device name cannot forge log lines', () => {
+    // Names come from the Nest `label` trait or a REST `description`, and
+    // Homebridge logs get pasted into public issue trackers.
+    const name = resolveDeviceName({
+      kind: 'protect',
+      deviceId: 'ABCD1234',
+      label: 'Kitchen\n[MyNest] ERROR: token revoked, contact evil.example',
+    })
+
+    expect(name).not.toContain('\n')
+    expect(name).not.toContain('\r')
+    expect(name.startsWith('Kitchen')).toBe(true)
+  })
+
+  it('caps a name long enough to flood a log line', () => {
+    const name = resolveDeviceName({
+      kind: 'protect',
+      deviceId: 'ABCD1234',
+      label: 'x'.repeat(500),
+    })
+
+    expect(name.length).toBeLessThanOrEqual(64)
+  })
+
+  it('ignores a non-string name rather than throwing on trim', () => {
+    // These are raw JSON values that TypeScript only claims are strings. A
+    // number reaching `.trim()` threw, and that throw escaped buildInventory on
+    // every update cycle, so the plugin published nothing at all.
+    const name = resolveDeviceName({
+      kind: 'thermostat',
+      deviceId: 'ABCD1234',
+      label: 12345 as unknown as string,
+      description: {} as unknown as string,
+      roomName: null as unknown as string,
+    })
+
+    expect(name).toBe('Thermostat 1234')
+  })
+
+  it('falls back past a name that is only whitespace or control characters', () => {
+    expect(resolveDeviceName({
+      kind: 'protect',
+      deviceId: 'ABCD1234',
+      label: '\u0000\u0001  \t ',
+      roomName: 'Hallway',
+    })).toBe('Hallway Protect')
+  })
+})
+
 describe('resolveDeviceName', () => {
   it('prefers a name the user typed', () => {
     expect(resolveDeviceName({

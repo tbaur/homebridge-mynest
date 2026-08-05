@@ -93,9 +93,13 @@ describe('TemperatureSensorAccessory', () => {
     expect(read(Service.TemperatureSensor, Characteristic.CurrentTemperature)).toBe(18)
   })
 
-  it('summarises its state, quietly at first and aloud on a change', () => {
+  it('summarises its state, once on arrival and again on a change', () => {
     const { handler, log, device } = build({ temperatureC: 18 })
 
+    handler.update({ ...device, state: { temperatureC: 18, batteryLevel: 60 } })
+    expect(log.infos.join('\n')).toContain('18.0')
+
+    log.infos.length = 0
     handler.update({ ...device, state: { temperatureC: 18, batteryLevel: 60 } })
     expect(log.infos).toEqual([])
     expect(log.debugs.join('\n')).toContain('18.0')

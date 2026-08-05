@@ -39,12 +39,18 @@ import {
 /**
  * Map a Nest alarm status code onto {@link AlarmLevel}.
  *
- * Nest uses `0` for clear and rising integers for severity. Anything
- * unrecognised is treated as an emergency: on a smoke alarm, the safe reading
- * of an unknown non-zero value is that something is wrong.
+ * Nest uses `0` for clear and rising integers for severity. An unknown
+ * *numeric* code is treated as an emergency: on a smoke alarm, the safe reading
+ * of an unrecognised severity is that something is wrong.
+ *
+ * A value that is not a number at all is a different case, and must not take
+ * that branch. `null` is how JSON commonly spells "no reading", and returning
+ * `emergency` for it fires a critical HomeKit smoke alarm — plus every
+ * automation wired to it — on every Protect in the house, from a single Nest
+ * serialisation change. Absent and malformed both publish nothing instead.
  */
-export function toAlarmLevel(status: number | undefined): AlarmLevel | undefined {
-  if (status === undefined) {
+export function toAlarmLevel(status: unknown): AlarmLevel | undefined {
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 0) {
     return undefined
   }
   if (status === 0) {

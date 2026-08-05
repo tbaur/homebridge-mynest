@@ -58,6 +58,15 @@ export interface NestTransportOptions {
      * owns operator visibility instead). Defaults to true.
      */
     statusHeartbeatEnabled?: boolean;
+    /**
+     * Overridable for tests; production uses the module constants.
+     *
+     * Both of these are quarter-hour and five-minute intervals, which no test can
+     * wait out — and they are the only two operator signals that are on by
+     * default, so leaving them unexercised is not an option either.
+     */
+    statusHeartbeatMs?: number;
+    observeSilenceCheckMs?: number;
     /** Injected REST breaker (tests); defaults to a fresh instance. */
     restCircuitBreaker?: CircuitBreaker;
     /** Injected Observe breaker (tests); defaults to a fresh instance. */

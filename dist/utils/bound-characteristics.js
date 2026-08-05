@@ -33,8 +33,16 @@ exports.CharacteristicBinder = void 0;
 class CharacteristicBinder {
     #bindings = [];
     #log;
-    constructor(log) {
+    #label;
+    /**
+     * @param label Device name written into failure messages. `createScopedLogger`
+     *   deliberately does not prefix lines, so without it
+     *   `Could not compute Smoke Detected` names no device — unactionable in a
+     *   house with a dozen Protects.
+     */
+    constructor(log, label = 'accessory') {
         this.#log = log;
+        this.#label = label;
     }
     /**
      * Publish a characteristic and record how to compute its value.
@@ -97,7 +105,8 @@ class CharacteristicBinder {
                 value = binding.read();
             }
             catch (error) {
-                this.#log.debug(`Could not compute ${binding.name}: ${error instanceof Error ? error.message : String(error)}`);
+                this.#log.debug(`${this.#label}: could not compute ${binding.name}: `
+                    + `${error instanceof Error ? error.message : String(error)}`);
                 continue;
             }
             if (value === null || value === undefined) {

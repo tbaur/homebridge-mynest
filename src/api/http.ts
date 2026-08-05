@@ -14,6 +14,7 @@
  */
 
 import { ApiParseError, NetworkError, TimeoutError, createApiError, isAbortError, parseRetryAfterMs } from '../errors'
+import { MAX_RESPONSE_BYTES } from '../settings'
 import { sanitizeUrl } from '../utils/sanitizers'
 
 /** Node's global `fetch`, or a substitute supplied by tests. */
@@ -49,7 +50,7 @@ export interface RawResponse {
 export async function sendRequest(url: string, options: SendOptions): Promise<RawResponse> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   if (typeof fetchImpl !== 'function') {
-    throw new NetworkError('global fetch is unavailable; Node 20 or newer is required')
+    throw new NetworkError('global fetch is unavailable; Node 22 or newer is required')
   }
 
   // `addEventListener('abort')` does not fire for a signal that is already
@@ -79,9 +80,30 @@ export async function sendRequest(url: string, options: SendOptions): Promise<Ra
       body: options.body,
       signal: controller.signal,
     })
+
+    // `app_launch` returns the whole account, so bodies are legitimately large
+    // — but reading one without a ceiling lets a malfunctioning or hostile
+    // endpoint exhaust memory and take down every plugin in the process. The
+    // Observe path already enforces the equivalent frame ceiling.
+    const declared = Number(response.headers.get('content-length'))
+    if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+      throw new ApiParseError(
+        `${sanitizeUrl(url)} announced ${declared} bytes, beyond the ${MAX_RESPONSE_BYTES} byte limit`,
+      )
+    }
+
     const text = await response.text()
+    if (text.length > MAX_RESPONSE_BYTES) {
+      throw new ApiParseError(
+        `${sanitizeUrl(url)} returned more than the ${MAX_RESPONSE_BYTES} byte limit`,
+      )
+    }
+
     return { status: response.status, headers: response.headers, text }
   } catch (error) {
+    if (error instanceof ApiParseError) {
+      throw error
+    }
     if (options.signal?.aborted) {
       throw error
     }

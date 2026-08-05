@@ -3,7 +3,16 @@
   "compilerOptions": {
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "types": ["jest", "node"]
+    "types": ["jest", "node"],
+    // Checking only — nothing is emitted from this project, so the build's
+    // `rootDir: ./src` would otherwise reject every file under `tests/`.
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*"],
+  // `exclude` is inherited through `extends`, and the base excludes `tests` so
+  // the build never emits them. Without this override that exclusion wins over
+  // the `include` above, and the test sources are silently left out of the
+  // project — so neither `npm run typecheck` nor type-aware linting sees them.
+  "exclude": ["node_modules", "dist", "coverage"]
 }

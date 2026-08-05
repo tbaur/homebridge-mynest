@@ -32,6 +32,12 @@
  */
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024
 
+/** A frame is at minimum a tag byte plus a one-byte varint length. */
+const MIN_FRAME_HEADER_BYTES = 2
+
+/** Tag byte plus the longest a varint32 length prefix can be. */
+const MAX_FRAME_HEADER_BYTES = 6
+
 /** Raised when the stream cannot be parsed and the connection must be dropped. */
 export class FramingError extends Error {
   constructor(message: string) {
@@ -67,7 +73,11 @@ function readVarint(buffer: Buffer, offset: number): Varint | null {
     }
 
     shift += 7
-    if (shift > 35) {
+    // A length prefix is a varint32: five bytes at most, the last of them read
+    // at shift 28. Reaching shift 35 means a sixth byte is coming, which would
+    // let a corrupt prefix decode past 2^35 before the frame-size ceiling
+    // rejects it.
+    if (shift >= 35) {
       throw new FramingError('Observe stream carried a malformed length prefix')
     }
   }
@@ -83,6 +93,16 @@ function readVarint(buffer: Buffer, offset: number): Varint | null {
  */
 export class FrameSplitter {
   #buffer: Buffer = Buffer.alloc(0)
+  /**
+   * Chunks received since the last concat.
+   *
+   * Concatenating on every chunk is quadratic in the frame size: a 16 MB frame
+   * arriving in 16 KB pieces would copy ~8 GB, blocking the event loop and
+   * starving every other plugin. Holding the pieces and joining once, when the
+   * announced length is actually available, keeps it linear.
+   */
+  #pending: Buffer[] = []
+  #pendingBytes = 0
 
   /**
    * Add bytes from the wire and take every complete frame they finish.
@@ -92,7 +112,18 @@ export class FrameSplitter {
    *   recoverable by waiting for more bytes.
    */
   push(chunk: Buffer): Buffer[] {
-    this.#buffer = this.#buffer.length === 0 ? chunk : Buffer.concat([this.#buffer, chunk])
+    if (chunk.length > 0) {
+      this.#pending.push(chunk)
+      this.#pendingBytes += chunk.length
+    }
+
+    // Only materialise once there is plausibly a whole frame to read. The
+    // header is a tag byte plus a varint of at most five bytes.
+    if (this.#needsMoreBytes()) {
+      return []
+    }
+
+    this.#coalesce()
 
     const frames: Buffer[] = []
 
@@ -131,8 +162,68 @@ export class FrameSplitter {
     return frames
   }
 
+  /**
+   * Whether the bytes held so far cannot yet complete a frame.
+   *
+   * Reads the announced length from the head of the buffered data without
+   * joining it, so a large frame is copied once rather than once per chunk.
+   */
+  #needsMoreBytes(): boolean {
+    const total = this.#buffer.length + this.#pendingBytes
+    if (total < MIN_FRAME_HEADER_BYTES) {
+      return true
+    }
+
+    const header = this.#peekHeader()
+    const length = readVarint(header, 1)
+    if (length === null) {
+      // Header itself is still incomplete; only wait if a longer varint could
+      // still arrive, otherwise fall through so `push` raises the framing error.
+      return header.length < MAX_FRAME_HEADER_BYTES
+    }
+
+    const totalLength = 1 + length.byteLength + length.value
+    // An announced length beyond the ceiling must be rejected now, not waited
+    // on — buffering toward it is exactly what the ceiling exists to prevent.
+    if (totalLength > MAX_FRAME_BYTES) {
+      return false
+    }
+
+    return total < totalLength
+  }
+
+  /** The first few bytes of the buffered data, without joining all of it. */
+  #peekHeader(): Buffer {
+    if (this.#buffer.length >= MAX_FRAME_HEADER_BYTES || this.#pending.length === 0) {
+      return this.#buffer.subarray(0, MAX_FRAME_HEADER_BYTES)
+    }
+
+    const parts: Buffer[] = [this.#buffer]
+    let collected = this.#buffer.length
+    for (const chunk of this.#pending) {
+      if (collected >= MAX_FRAME_HEADER_BYTES) {
+        break
+      }
+      parts.push(chunk)
+      collected += chunk.length
+    }
+    return Buffer.concat(parts).subarray(0, MAX_FRAME_HEADER_BYTES)
+  }
+
+  /** Join the buffered chunks into the working buffer. */
+  #coalesce(): void {
+    if (this.#pending.length === 0) {
+      return
+    }
+    this.#buffer = this.#buffer.length === 0 && this.#pending.length === 1
+      ? this.#pending[0]!
+      : Buffer.concat([this.#buffer, ...this.#pending])
+    this.#pending = []
+    this.#pendingBytes = 0
+  }
+
   /** Bytes held for a frame that is not yet complete. */
   get pendingBytes(): number {
-    return this.#buffer.length
+    return this.#buffer.length + this.#pendingBytes
   }
 }

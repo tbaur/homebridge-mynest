@@ -52,6 +52,7 @@ export interface ObserveSessionOptions {
     sessionMs?: number;
     idleTimeoutMs?: number;
     pingIntervalMs?: number;
+    connectTimeoutMs?: number;
 }
 /**
  * Open one Observe connection and pump frames until it ends.

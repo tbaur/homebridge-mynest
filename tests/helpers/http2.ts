@@ -33,11 +33,17 @@ export class FakeHttp2Session extends EventEmitter {
   readonly stream = new FakeStream()
   requestHeaders: Record<string, unknown> = {}
   isClosed = false
+  destroyed = false
   pingCount = 0
   /** Set to make `ping` throw, as a dead session does. */
   shouldFailPing = false
+  /** Set to make `request` throw, as a session already in GOAWAY does. */
+  shouldFailRequest = false
 
   request(headers: Record<string, unknown>): FakeStream {
+    if (this.shouldFailRequest) {
+      throw new Error('ERR_HTTP2_GOAWAY_SESSION')
+    }
     this.requestHeaders = headers
     return this.stream
   }
@@ -51,6 +57,17 @@ export class FakeHttp2Session extends EventEmitter {
   }
 
   close(): void {
+    this.isClosed = true
+  }
+
+  /**
+   * Force the session down.
+   *
+   * `close()` is graceful and may never complete on a half-dead socket, so the
+   * Observe client follows it with a `destroy()` after a grace period.
+   */
+  destroy(): void {
+    this.destroyed = true
     this.isClosed = true
   }
 

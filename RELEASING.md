@@ -7,16 +7,16 @@ Releases are fully automated with [release-please](https://github.com/googleapis
 1. A branch is created and changes are committed.
 2. A PR is opened with a **Conventional Commit title**. The title determines the next version when the PR is squash-merged into `main`:
 
-   | PR title prefix | Example | Version bump (1.x) |
+   | PR title prefix | Example | Version bump (examples assume a 1.0.0 baseline) |
    | --- | --- | --- |
    | `fix:` | `fix: rate-limit REST subscribe success path` | patch (1.0.0 → 1.0.1) |
    | `feat:` | `feat: expose Protect humidity` | minor (1.0.0 → 1.1.0) |
-   | `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer | `feat!: drop Node 20` | major (1.0.0 → 2.0.0) |
+   | `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer | `feat!: require Homebridge 2 and Node 22` | major (1.0.0 → 2.0.0) |
    | `chore:`, `docs:`, `refactor:`, `test:`, `ci:` | `docs: fix typo` | no release |
 
    To force an exact version (for example graduating to `1.0.0`), put `Release-As: 1.0.0` in the commit/PR body footer. release-please will open a Release PR for that version.
 
-3. The **Tests** workflow runs on the PR (matrix: Node 20, 22, 24, plus a security audit). The PR is squash-merged to `main`.
+3. The **Tests** workflow runs on the PR (matrix: Node 22 and 24 — the versions Homebridge 2 supports — plus a typecheck, a committed-`dist` drift check, and a security audit). The PR is squash-merged to `main`.
 4. **release-please** opens or updates a **Release PR** titled `chore(main): release X.Y.Z`.
 5. Merging the Release PR triggers `release.yml`, which creates the `vX.Y.Z` tag, publishes a GitHub Release, and runs `npm publish` with provenance on Node 24.
 

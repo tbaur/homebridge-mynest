@@ -109,8 +109,12 @@ function readRestRoomNames(buckets) {
     const names = new Map();
     for (const value of Object.values(buckets.where ?? {})) {
         for (const entry of value?.wheres ?? []) {
-            if (entry?.where_id && entry.name) {
-                names.set(entry.where_id, entry.name);
+            // Type-checked, not just truthiness-checked: a non-string name here ends
+            // up in `resolveDeviceName`, where `.trim()` throws.
+            const whereId = (0, traits_1.readString)(entry, 'where_id');
+            const name = (0, traits_1.readString)(entry, 'name');
+            if (whereId && name) {
+                names.set(whereId, name);
             }
         }
     }
@@ -153,8 +157,13 @@ function buildIdentity(context, kind) {
     const resourceId = (0, classify_1.toResourceId)(deviceId);
     const identityTrait = observe.trait(resourceId, 'device_identity');
     const restBucket = findRestBucket(buckets, deviceId);
+    // Every REST-sourced string goes through `readString`. These are raw JSON
+    // values that TypeScript only *claims* are strings; a number or object
+    // reaching `resolveDeviceName` throws on `.trim()`, and that throw escapes
+    // `buildInventory` on every update cycle, so the plugin publishes nothing at
+    // all until Nest changes its mind.
     const whereId = (0, traits_1.readString)(observe.trait(resourceId, 'device_located_settings'), 'whereId', 'value')
-        ?? restBucket?.where_id;
+        ?? (0, traits_1.readString)(restBucket, 'where_id');
     const sources = {
         observe: observe.resource(resourceId) !== undefined,
         rest: restBucket !== undefined,
@@ -166,26 +175,42 @@ function buildIdentity(context, kind) {
             kind,
             deviceId,
             label: (0, traits_1.readString)(observe.trait(resourceId, 'label'), 'label'),
-            description: restBucket?.description ?? restBucket?.name,
+            description: (0, traits_1.readString)(restBucket, 'description') ?? (0, traits_1.readString)(restBucket, 'name'),
             roomName: whereId ? roomNames.get(whereId) : undefined,
         }),
         sources,
-        model: (0, traits_1.readString)(identityTrait, 'modelName', 'value') ?? restBucket?.model,
-        serialNumber: (0, traits_1.readString)(identityTrait, 'serialNumber') ?? restBucket?.serial_number ?? deviceId,
+        // `topaz` spells the model `model`; `device` spells it `model_version`.
+        model: (0, traits_1.readString)(identityTrait, 'modelName', 'value')
+            ?? (0, traits_1.readString)(restBucket, 'model')
+            ?? (0, traits_1.readString)(restBucket, 'model_version'),
+        serialNumber: (0, traits_1.readString)(identityTrait, 'serialNumber')
+            ?? (0, traits_1.readString)(restBucket, 'serial_number')
+            ?? deviceId,
         firmwareVersion: (0, traits_1.readString)(identityTrait, 'fwVersion'),
         whereId,
         structureId: (0, traits_1.readString)(restBucket, 'structure_id'),
     };
 }
-/** The first REST bucket of any device type carrying this id. */
+/**
+ * Every REST bucket carrying this id, merged into one identity view.
+ *
+ * A legacy thermostat appears in both `shared` and `device`, and the two carry
+ * different halves of its identity: `shared` has only the setpoints and a name,
+ * while `where_id`, `serial_number`, `structure_id`, and the model live in
+ * `device`. Taking the first match would silently drop the room assignment, so
+ * the device would be published as "Thermostat ABCD" instead of "Hallway
+ * Thermostat". Earlier buckets win on conflict, matching the previous
+ * first-match precedence.
+ */
 function findRestBucket(buckets, deviceId) {
+    let merged;
     for (const { bucket } of REST_DEVICE_BUCKETS) {
         const value = buckets[bucket]?.[deviceId];
         if (value && typeof value === 'object') {
-            return value;
+            merged = { ...value, ...merged };
         }
     }
-    return undefined;
+    return merged;
 }
 function buildThermostat(context, comfortTemperatureC) {
     const { observe, buckets, deviceId } = context;

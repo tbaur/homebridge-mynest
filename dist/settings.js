@@ -8,15 +8,14 @@
  * @fileoverview Plugin-wide constants and Nest endpoints.
  *
  * Nest publishes no consumer API for these paths and no documentation. Every
- * value here was confirmed empirically against a live account with the
- * nest-probe kit (reads by default; probe 12 dry-runs BatchUpdateState encode,
- * with optional operator `--confirm` for a live POST), and each one that looks
- * arbitrary carries a comment explaining why it is what it is. Treat this file
- * as the record of what the service actually does, because nothing external
- * will tell you when it changes.
+ * value here was confirmed empirically against a live account with a
+ * maintainer-only probe kit that is not part of this repository, and each one
+ * that looks arbitrary carries a comment explaining why it is what it is.
+ * Treat this file as the record of what the service actually does, because
+ * nothing external will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PRODUCTIVE_SESSION_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
 exports.resolveEndpoints = resolveEndpoints;
 exports.appLaunchUrl = appLaunchUrl;
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -31,6 +30,13 @@ exports.UUID_PREFIX = 'mynest-';
  * Not a Nest resource — used only for Homebridge cache / HomeKit UUID stability.
  */
 exports.GLOBAL_ECO_DEVICE_ID = 'GLOBAL_ECO';
+/**
+ * HomeKit name of the house-wide Eco Mode switch.
+ *
+ * Declared here because the platform and the accessory both publish it, and a
+ * mismatch would rename the tile on every restart.
+ */
+exports.GLOBAL_ECO_DISPLAY_NAME = 'Nest Eco Mode';
 /** Reported as the HomeKit accessory manufacturer. */
 exports.MANUFACTURER = 'Nest';
 /**
@@ -98,6 +104,13 @@ exports.SESSION_TIMEOUT_MS = 40_000;
 /** Hard ceiling on an `app_launch`, which returns the whole account at once. */
 exports.APP_LAUNCH_TIMEOUT_MS = 120_000;
 /**
+ * Hard ceiling on a BatchUpdateState write.
+ *
+ * A HomeKit-originated write is user-facing: the Home app spinner sits there
+ * until this resolves, so the deadline is far shorter than a read's.
+ */
+exports.BATCH_UPDATE_TIMEOUT_MS = 30_000;
+/**
  * How long to hold a REST `subscribe` long-poll open before aborting it.
  *
  * Nest parks the request until something changes, so the client decides the
@@ -105,6 +118,19 @@ exports.APP_LAUNCH_TIMEOUT_MS = 120_000;
  * the normal outcome on a quiet home, not a failure.
  */
 exports.SUBSCRIBE_TIMEOUT_MS = 120_000;
+/**
+ * Fraction of the subscribe budget a 502/504 must have consumed to count as an
+ * expired long-poll rather than a failing edge.
+ *
+ * Nest answers a long-poll that timed out server-side with 502 or 504, which is
+ * an ordinary idle result. A broken edge returns the same codes in
+ * milliseconds. Treating the fast case as idle marks the REST cycle successful,
+ * which both refreshes the Protect alarm-feed staleness clock — leaving a
+ * frozen all-clear on a life-safety tile — and clears the backoff, turning the
+ * loop into a 2-second poll against an already-degraded service. Elapsed time
+ * is the only signal that separates them.
+ */
+exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = 0.5;
 /**
  * How long after the last successful REST cycle (including idle subscribe)
  * Protect smoke/CO may still be treated as live from cached topaz.
@@ -125,6 +151,23 @@ exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS + 60_000;
 exports.OBSERVE_SESSION_MS = 30 * 60_000;
 /** Interval between HTTP/2 pings that keep the Observe stream from idling out. */
 exports.OBSERVE_PING_INTERVAL_MS = 60_000;
+/**
+ * How long a connection must last to count as productive rather than a flap.
+ *
+ * Nest sends a resource catalogue as the first frame of every connection, so
+ * frame count alone cannot distinguish a working stream from a gateway that
+ * accepts and immediately drops. Without a duration floor the latter resets
+ * the reconnect backoff on every attempt.
+ */
+exports.OBSERVE_PRODUCTIVE_SESSION_MS = 30_000;
+/**
+ * Deadline for the Observe gateway to answer with response headers.
+ *
+ * The idle deadline is ten minutes, which is the right bound for a *connected*
+ * stream that goes quiet but far too long for one that never connects — and
+ * Observe is the only source of thermostat state.
+ */
+exports.OBSERVE_CONNECT_TIMEOUT_MS = 30_000;
 /**
  * Longest silence tolerated on an Observe stream before it is recycled.
  *
@@ -180,8 +223,59 @@ exports.FORBIDDEN_FATAL_THRESHOLD = 3;
  * cadence bounds how long the plugin can run on a dead session.
  */
 exports.SESSION_REFRESH_MS = 6 * 60 * 60_000;
+/**
+ * Refresh a session this long before Nest's own reported expiry.
+ *
+ * Only used when `GET /session` reports `expires_in`; otherwise
+ * {@link SESSION_REFRESH_MS} is the only trigger.
+ */
+exports.SESSION_EXPIRY_MARGIN_MS = 5 * 60_000;
 /** Maximum attempts for a single REST request before surfacing the failure. */
 exports.MAX_REQUEST_ATTEMPTS = 3;
+/**
+ * Attempts for a HomeKit-driven thermostat write.
+ *
+ * Lower than a read's: a user is watching the Home app spinner. One retry
+ * covers a dropped packet without making a failure feel like a hang.
+ */
+exports.BATCH_UPDATE_MAX_ATTEMPTS = 2;
+/**
+ * Warn on the first transport failure and every Nth after it.
+ *
+ * Everything in between stays at debug: a flapping connection must be visible
+ * without flooding the log of an otherwise healthy install.
+ */
+exports.LOOP_FAILURE_WARN_EVERY = 10;
+/** Interval between operator-visible transport status lines. */
+exports.STATUS_HEARTBEAT_MS = 15 * 60_000;
+/**
+ * Recent Observe frames considered when judging whether decoding is working.
+ *
+ * Wide enough that the per-connection catalogue frame (which never decodes as a
+ * `StreamBody`) cannot on its own push the failure ratio over the threshold.
+ */
+exports.FRAME_DECODE_WINDOW = 20;
+/** Undecodable share of the recent window that warrants warning the operator. */
+exports.FRAME_DECODE_FAILURE_RATIO = 0.5;
+/** How often to check whether the Observe stream has gone silent. */
+exports.OBSERVE_SILENCE_CHECK_MS = 5 * 60_000;
+/**
+ * Longest ceiling honoured from a server `Retry-After`.
+ *
+ * The header is untrusted. A delay above 2^31-1 ms collapses to 1 ms in Node's
+ * `setTimeout`, so an absurd value would turn a rate-limit response into an
+ * immediate retry — the opposite of what it asks for.
+ */
+exports.MAX_RETRY_AFTER_MS = 15 * 60_000;
+/**
+ * Largest REST response body accepted, in bytes.
+ *
+ * `app_launch` returns the whole account, so this is generous — but without a
+ * ceiling a malfunctioning or hostile endpoint can exhaust memory and take down
+ * every plugin sharing the Homebridge process. Mirrors the frame ceiling the
+ * Observe path already enforces.
+ */
+exports.MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /**
  * How often to re-run `app_launch` to pick up devices added or removed.
  *
@@ -223,4 +317,43 @@ exports.MIN_SETPOINT_C = 9;
 exports.MAX_SETPOINT_C = 32;
 /** Granularity of thermostat setpoints in Celsius, matching Nest's own UI. */
 exports.SETPOINT_STEP_C = 0.5;
+/**
+ * Setpoint assumed when Nest has reported none at all.
+ *
+ * Only reachable on a write against a thermostat whose setpoint traits have
+ * not arrived, which HomeKit can provoke immediately after a restart.
+ */
+exports.DEFAULT_SETPOINT_C = 20;
+/**
+ * Gap opened between heat and cool when Nest reported only one of the pair.
+ *
+ * Nest's trait always carries both bounds, so a write has to supply a value
+ * for the bound the user did not touch.
+ */
+exports.DEFAULT_SETPOINT_SPAN_C = 5;
+/**
+ * Smallest gap Nest will hold between the heat and cool setpoints.
+ *
+ * A write that would cross the bounds is widened to this rather than being
+ * rejected, so HomeKit never has a change silently dropped.
+ */
+exports.MIN_SETPOINT_SPAN_C = 2;
+// ---------------------------------------------------------------------------
+// Reported temperatures
+//
+// Distinct from setpoints: a reading is whatever the sensor says, at the
+// sensor's own precision, and may legitimately sit below any setpoint floor.
+// ---------------------------------------------------------------------------
+/** Coldest reading treated as real rather than a decode landing on a wrong field. */
+exports.MIN_REPORTED_TEMPERATURE_C = -50;
+/** Hottest reading treated as real. Matches HomeKit's own ceiling. */
+exports.MAX_REPORTED_TEMPERATURE_C = 100;
+/**
+ * Granularity HomeKit is told to expect for a temperature *reading*.
+ *
+ * Matches HAP's own default. Reusing the coarser {@link SETPOINT_STEP_C} here
+ * would round every reading to the nearest half degree, so the same physical
+ * sensor would disagree with itself between a thermostat tile and its own.
+ */
+exports.REPORTED_TEMPERATURE_STEP_C = 0.1;
 //# sourceMappingURL=settings.js.map

@@ -32,19 +32,25 @@ const protobufjs_1 = __importDefault(require("protobufjs"));
  * others exist so a misconfigured `files` list in package.json fails with a
  * clear message rather than an obscure protobufjs parse error.
  */
+let cachedSchemaDirectory = null;
 function resolveSchemaDirectory() {
+    if (cachedSchemaDirectory !== null) {
+        return cachedSchemaDirectory;
+    }
     const candidates = [
         (0, node_path_1.resolve)(__dirname, '..', '..', 'assets', 'protobuf'),
         (0, node_path_1.resolve)(__dirname, '..', '..', '..', 'assets', 'protobuf'),
     ];
     for (const candidate of candidates) {
         if ((0, node_fs_1.existsSync)((0, node_path_1.join)(candidate, 'root.proto'))) {
+            cachedSchemaDirectory = candidate;
             return candidate;
         }
     }
     throw new Error(`Could not find the bundled Nest protobuf schemas. Looked in: ${candidates.join(', ')}`);
 }
 let cachedRoot = null;
+let cachedTraitsRequest = null;
 /**
  * Load the protobuf schemas once per process.
  *
@@ -56,9 +62,16 @@ function loadSchemas() {
     cachedRoot ??= protobufjs_1.default.loadSync((0, node_path_1.join)(resolveSchemaDirectory(), 'root.proto'));
     return cachedRoot;
 }
-/** The opaque request body that tells Nest which traits to stream. */
+/**
+ * The opaque request body that tells Nest which traits to stream.
+ *
+ * Read once. This is called on every Observe connection, and reconnects can
+ * come every few seconds during an outage — synchronous filesystem IO on the
+ * event loop at that cadence stalls every plugin in the process.
+ */
 function readObserveTraitsRequest() {
-    return (0, node_fs_1.readFileSync)((0, node_path_1.join)(resolveSchemaDirectory(), 'ObserveTraits.protobuf'));
+    cachedTraitsRequest ??= (0, node_fs_1.readFileSync)((0, node_path_1.join)(resolveSchemaDirectory(), 'ObserveTraits.protobuf'));
+    return cachedTraitsRequest;
 }
 /**
  * Decode one framed Observe message.
@@ -79,7 +92,7 @@ function decodeFrame(frame) {
         decoded = streamBody.decode(frame);
     }
     catch {
-        return { traits: [] };
+        return { traits: [], isUndecodable: true };
     }
     const traits = [];
     for (const message of decoded.message ?? []) {
@@ -116,7 +129,14 @@ function decodeFrame(frame) {
     }
     return { traits };
 }
-/** Trait type names already known to have no vendored schema. */
+/**
+ * Trait type names already known to have no vendored schema.
+ *
+ * Bounded: the names come from Nest, so an unbounded set is a slow leak driven
+ * by remote input. Past the cap the lookup simply repeats, which costs a little
+ * time rather than memory that is never reclaimed.
+ */
+const MAX_UNKNOWN_TYPES = 512;
 const unknownTypes = new Set();
 /**
  * Decode a trait payload into a plain object.
@@ -141,7 +161,9 @@ function decodeTrait(update) {
     catch {
         // Cached so a trait streamed on every frame does not repeat the lookup and
         // the exception it throws for the lifetime of the process.
-        unknownTypes.add(typeName);
+        if (unknownTypes.size < MAX_UNKNOWN_TYPES) {
+            unknownTypes.add(typeName);
+        }
         return undefined;
     }
     try {

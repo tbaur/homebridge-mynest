@@ -64,14 +64,6 @@ function readOwnTemperature(state: ObserveState, resourceId: string): number | u
     ?? readTemperatureC(state.trait(resourceId, 'temperature'))
 }
 
-/**
- * Map Nest's setpoint mode onto {@link HvacMode}.
- *
- * Nest does not encode "off" in `hvacMode`. It signals it by clearing the
- * `active` flag on the setpoint while leaving the last mode in place, so a
- * thermostat switched off still reports `HEAT`. Reading `hvacMode` alone
- * therefore shows every off thermostat as heating.
- */
 /** Nest's retained `settings.hvacMode` (never OFF — that is `active=0`). */
 function readLastHvacMode(
   settings: Record<string, unknown> | undefined,
@@ -92,6 +84,14 @@ function readLastHvacMode(
   }
 }
 
+/**
+ * Map Nest's setpoint mode onto {@link HvacMode}.
+ *
+ * Nest does not encode "off" in `hvacMode`. It signals it by clearing the
+ * `active` flag on the setpoint while leaving the last mode in place, so a
+ * thermostat switched off still reports `HEAT`. Reading `hvacMode` alone
+ * therefore shows every off thermostat as heating.
+ */
 function readMode(settings: Record<string, unknown> | undefined): HvacMode | undefined {
   if (!settings) {
     return undefined
@@ -235,14 +235,17 @@ export function mergeThermostatState(
     currentTemperatureC: observe?.currentTemperatureC ?? rest?.currentTemperatureC,
     currentHumidity: observe?.currentHumidity ?? rest?.currentHumidity,
     mode: observe?.mode ?? rest?.mode,
-    lastHvacMode: observe?.lastHvacMode ?? rest?.lastHvacMode,
     activity: observe?.activity ?? rest?.activity,
     targetTemperatureC: observe?.targetTemperatureC ?? rest?.targetTemperatureC,
     targetTemperatureLowC: observe?.targetTemperatureLowC ?? rest?.targetTemperatureLowC,
     targetTemperatureHighC: observe?.targetTemperatureHighC ?? rest?.targetTemperatureHighC,
-    isEcoActive: observe?.isEcoActive ?? rest?.isEcoActive,
     canHeat: observe?.canHeat ?? rest?.canHeat,
     canCool: observe?.canCool ?? rest?.canCool,
-    displayUnit: observe?.displayUnit ?? rest?.displayUnit,
+    // Observe-only fields: `readThermostatFromRest` never sets these, so a
+    // `?? rest?.…` fallback would be an unreachable branch implying the legacy
+    // buckets carry data they do not.
+    lastHvacMode: observe?.lastHvacMode,
+    isEcoActive: observe?.isEcoActive,
+    displayUnit: observe?.displayUnit,
   }
 }

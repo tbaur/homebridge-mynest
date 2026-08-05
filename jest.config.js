@@ -31,21 +31,47 @@ module.exports = {
   collectCoverage: true,
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
+  // Per-area floors as well as a global one, set just under the current figures
+  // so a regression fails the build. The global number alone is carried by small
+  // fully-covered modules, which let the two largest and most consequential
+  // files sit below the stated bar while the gate stayed green.
   coverageThreshold: {
     global: {
+      branches: 83,
+      functions: 95,
+      lines: 92,
+      statements: 92,
+    },
+    './src/api/': {
+      branches: 79,
+      functions: 92,
+      lines: 91,
+    },
+    './src/platform.ts': {
+      branches: 74,
+      functions: 81,
+      lines: 86,
+    },
+    './src/accessories/': {
       branches: 80,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      lines: 92,
+    },
+    './src/state/': {
+      branches: 91,
+      lines: 96,
+    },
+    './src/utils/': {
+      branches: 92,
+      lines: 97,
     },
   },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
-    // Only the entry point, not every index.ts. The glob form also catches
-    // `src/errors/index.ts`, which is the error hierarchy rather than a barrel.
-    '!src/index.ts',
-    '!src/settings.ts', // Constants only
+    // Type-only modules emit no runtime code, so they can never be covered.
+    '!src/types/config.ts',
+    '!src/types/nest.ts',
+    '!src/diagnostics/types.ts',
   ],
 
   testMatch: [

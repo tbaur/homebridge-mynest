@@ -2,12 +2,13 @@
 
 ## Supported Versions
 
-| Version | Supported         |
+| Version | Supported |
 | ------- | ----------------- |
-| 1.x.x   | ✅ Active support |
-| 0.1.x   | ❌ Unsupported (upgrade to 1.x) |
+| 2.x.x | ✅ Active support (requires Homebridge 2.x and Node.js 22+) |
+| 1.x.x | ❌ Unsupported (upgrade to 2.x) |
+| 0.1.x | ❌ Unsupported (upgrade to 2.x) |
 
-Only the latest 1.x release is supported. Fixes are shipped forward rather than backported.
+Only the latest 2.x release is supported. Fixes are shipped forward rather than backported.
 
 ## Reporting a Vulnerability
 
@@ -47,4 +48,6 @@ This plugin implements:
 
 ## Scope limits
 
-Cameras, doorbells, Yale locks, and Google-account-only homes are out of scope. Life-safety alarm state for Protects is only published while Nest REST can refresh it; Observe-only units and Protects whose REST feed is down do not keep a frozen all-clear.
+Out-of-scope devices are listed in the [README](README.md#supported-devices): cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes.
+
+Life-safety alarm state for Protects is only published while Nest REST can refresh it; Observe-only units and Protects whose REST feed is down do not keep a frozen all-clear.
