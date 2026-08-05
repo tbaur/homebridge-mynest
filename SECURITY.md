@@ -2,13 +2,14 @@
 
 ## Supported Versions
 
+Only the latest published release is supported. Fixes are shipped forward rather than backported, so the answer to "is my version supported?" is always "upgrade to the newest release".
+
 | Version | Supported |
 | ------- | ----------------- |
-| 2.x.x | ✅ Active support (requires Homebridge 2.x and Node.js 22+) |
-| 1.x.x | ❌ Unsupported (upgrade to 2.x) |
-| 0.1.x | ❌ Unsupported (upgrade to 2.x) |
+| Latest release | ✅ Active support |
+| Anything older | ❌ Unsupported — upgrade |
 
-Only the latest 2.x release is supported. Fixes are shipped forward rather than backported.
+The next release requires **Homebridge 2.x and Node.js 22 or newer**; Homebridge 1.x is no longer supported.
 
 ## Reporting a Vulnerability
 

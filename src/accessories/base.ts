@@ -33,6 +33,15 @@ export interface AccessoryContext {
   synthetic?: 'global_eco'
 }
 
+/** Whether any field published as Accessory Information differs. */
+function hasIdentityChanged(previous: DeviceIdentity, next: DeviceIdentity): boolean {
+  return previous.name !== next.name
+    || previous.model !== next.model
+    || previous.serialNumber !== next.serialNumber
+    || previous.firmwareVersion !== next.firmwareVersion
+    || previous.id !== next.id
+}
+
 /** One HomeKit accessory backed by one Nest device. */
 export abstract class NestAccessory<TState> {
   protected readonly platform: MyNestPlatform
@@ -76,10 +85,16 @@ export abstract class NestAccessory<TState> {
    * unconditionally is cheaper than diffing here.
    */
   update(device: NestDevice): void {
+    const previousIdentity = this.identity
     this.identity = device.identity
     this.state = device.state as TState
 
-    this.#applyAccessoryInformation()
+    // Only when it actually changed. These four values essentially never do, and
+    // re-applying them ran HAP's full value-validation path four times per
+    // device per refresh on the hot update path.
+    if (hasIdentityChanged(previousIdentity, device.identity)) {
+      this.#applyAccessoryInformation()
+    }
     this.onServicesMayChange()
     this.binder.refresh()
     this.#logSummary()

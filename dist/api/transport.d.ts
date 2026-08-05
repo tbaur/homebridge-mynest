@@ -67,6 +67,7 @@ export interface NestTransportOptions {
      */
     statusHeartbeatMs?: number;
     observeSilenceCheckMs?: number;
+    forbiddenReprobeMs?: number;
     /** Injected REST breaker (tests); defaults to a fresh instance. */
     restCircuitBreaker?: CircuitBreaker;
     /** Injected Observe breaker (tests); defaults to a fresh instance. */
@@ -106,6 +107,14 @@ export interface TransportStatus {
      * stay published and are marked inactive/faulted instead.
      */
     readonly isRestAlarmFeedAvailable: boolean;
+    /**
+     * True while most recent Observe frames fail to decode.
+     *
+     * Surfaced so health can go degraded: the stream still reports `connected`
+     * and the frame counter still climbs, so nothing else distinguishes a Nest
+     * schema change from a healthy home.
+     */
+    readonly isDecodeDegraded: boolean;
     readonly circuitBreaker: {
         readonly rest: CircuitBreakerStatus;
         readonly observe: CircuitBreakerStatus;

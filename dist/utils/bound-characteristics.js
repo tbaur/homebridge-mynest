@@ -25,6 +25,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CharacteristicBinder = void 0;
 /**
+ * Reader failures warned about before falling back to debug.
+ *
+ * A broken mapping throws on every refresh, so this has to be visible without
+ * flooding the log of an otherwise healthy install.
+ */
+const MAX_READ_FAILURE_WARNINGS = 3;
+/**
  * Holds every characteristic an accessory publishes, with how to read it.
  *
  * Accessories bind once at construction and call {@link refresh} whenever new
@@ -32,6 +39,7 @@ exports.CharacteristicBinder = void 0;
  */
 class CharacteristicBinder {
     #bindings = [];
+    #readFailures = 0;
     #log;
     #label;
     /**
@@ -105,8 +113,20 @@ class CharacteristicBinder {
                 value = binding.read();
             }
             catch (error) {
-                this.#log.debug(`${this.#label}: could not compute ${binding.name}: `
-                    + `${error instanceof Error ? error.message : String(error)}`);
+                // Warned for the first few, then dropped to debug. A state-mapping bug
+                // throws on every refresh forever, and `createScopedLogger` discards
+                // debug entirely unless the operator enabled it — so at debug only, an
+                // accessory silently stopped updating and the log said nothing.
+                this.#readFailures++;
+                const message = `${this.#label}: could not compute ${binding.name} `
+                    + `(${this.#readFailures} failure(s)): `
+                    + `${error instanceof Error ? error.message : String(error)}`;
+                if (this.#readFailures <= MAX_READ_FAILURE_WARNINGS) {
+                    this.#log.warn(message);
+                }
+                else {
+                    this.#log.debug(message);
+                }
                 continue;
             }
             if (value === null || value === undefined) {

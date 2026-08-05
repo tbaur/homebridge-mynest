@@ -137,12 +137,15 @@ function runObserveSession(options) {
             // that went silent may never do — and the `idle` outcome exists
             // precisely for a socket that is up but not delivering. Force the
             // teardown shortly after so a half-dead session cannot linger.
-            const destroyTimer = setTimeout(() => {
-                if (!client.destroyed) {
-                    client.destroy();
-                }
-            }, CLIENT_DESTROY_GRACE_MS);
-            destroyTimer.unref?.();
+            if (!client.destroyed) {
+                const destroyTimer = setTimeout(() => {
+                    if (!client.destroyed) {
+                        client.destroy();
+                    }
+                }, CLIENT_DESTROY_GRACE_MS);
+                destroyTimer.unref?.();
+                client.once('close', () => clearTimeout(destroyTimer));
+            }
             if ('error' in outcome) {
                 reject(outcome.error);
                 return;

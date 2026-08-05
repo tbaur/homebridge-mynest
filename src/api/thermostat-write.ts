@@ -75,7 +75,10 @@ export function buildThermostatSetpointWrite(
 ): ThermostatSetpointWrite {
   const mode = patch.mode ?? state.mode ?? 'heat'
   const standbyMode = resolveStandbyMode(state, patch.mode)
-  const effective = patch.mode ?? state.mode ?? 'heat'
+  // Which bound a single-setpoint change lands on. When the unit is off, Nest
+  // keeps the real mode in `lastHvacMode`, so `off` must resolve through the
+  // standby mode or a cool-only thermostat's target would move its heat bound.
+  const effective: HvacMode = mode === 'off' ? standbyMode : mode
 
   // A cool-mode thermostat reports its single setpoint as the *cool* bound.
   // Seeding `heat` from it would make a request to cool harder read as a
@@ -114,19 +117,29 @@ export function buildThermostatSetpointWrite(
     }
   }
 
-  if (cool < heat) {
+  // Clamp before enforcing the span, not after. Clamping last could undo the
+  // repair: a heat bound at the ceiling pushed cool to ceiling + span, which
+  // clamped straight back to the ceiling and produced a zero gap — exactly what
+  // MIN_SETPOINT_SPAN_C exists to prevent.
+  heat = clampSetpoint(heat)
+  cool = clampSetpoint(cool)
+
+  if (cool - heat < MIN_SETPOINT_SPAN_C) {
     if (didSetCool && !didSetHeat) {
-      heat = cool - MIN_SETPOINT_SPAN_C
+      heat = clampSetpoint(cool - MIN_SETPOINT_SPAN_C)
+      // The untouched bound hit a limit, so the touched one has to give.
+      cool = clampSetpoint(Math.max(cool, heat + MIN_SETPOINT_SPAN_C))
     } else {
-      cool = heat + MIN_SETPOINT_SPAN_C
+      cool = clampSetpoint(heat + MIN_SETPOINT_SPAN_C)
+      heat = clampSetpoint(Math.min(heat, cool - MIN_SETPOINT_SPAN_C))
     }
   }
 
   return {
     resourceId,
     mode,
-    targetTemperatureHeatC: clampSetpoint(heat),
-    targetTemperatureCoolC: clampSetpoint(cool),
+    targetTemperatureHeatC: heat,
+    targetTemperatureCoolC: cool,
     standbyMode,
     clearEco: state.isEcoActive === true,
   }

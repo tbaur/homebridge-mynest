@@ -429,8 +429,13 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
       case Characteristic.TargetHeatingCoolingState.AUTO:
         return 'range'
       case Characteristic.TargetHeatingCoolingState.HEAT:
-      default:
         return 'heat'
+      default:
+        // HAP validates against validValues before calling onSet, but
+        // #supportedTargetStates mutates that set as capabilities arrive. Off is
+        // the safe landing for a value delivered inside that window; heat was
+        // the most consequential of the four.
+        return 'off'
     }
   }
 

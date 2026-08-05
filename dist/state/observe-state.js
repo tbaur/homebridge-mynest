@@ -14,15 +14,33 @@
  * means losing the current temperature every time the fan setting changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ObserveState = void 0;
+exports.ObserveState = exports.MAX_TRACKED_RESOURCES = void 0;
 const protobuf_1 = require("../api/protobuf");
+const classify_1 = require("./classify");
 /**
  * The merged view of everything the Observe stream has said.
  *
  * Keyed by Nest resource id (`DEVICE_…`, `STRUCTURE_…`, `USER_…`).
  */
+/**
+ * Ceiling on distinct Observe resources held at once.
+ *
+ * Generous next to any real home — a large account is tens of resources — so
+ * reaching it means Nest is emitting identifiers this plugin does not model,
+ * which is a leak rather than a house.
+ */
+exports.MAX_TRACKED_RESOURCES = 2_000;
 class ObserveState {
     #byResource = new Map();
+    #onCapReached;
+    #didWarnResourceCap = false;
+    /**
+     * @param onCapReached Called once if {@link MAX_TRACKED_RESOURCES} is hit, so
+     *   the platform can surface it rather than silently dropping resources.
+     */
+    constructor(onCapReached) {
+        this.#onCapReached = onCapReached;
+    }
     /**
      * Merge a frame's traits into the accumulated state.
      *
@@ -35,6 +53,17 @@ class ObserveState {
         for (const update of updates) {
             let traits = this.#byResource.get(update.resourceId);
             if (!traits) {
+                // Bounded, because the key comes from Nest. Pruning only happens after a
+                // snapshot settles, and the settle timer is re-armed by every incoming
+                // trait — so a stream that never goes quiet grows this map without ever
+                // pruning it. `unknownTypes` in the decoder is capped for the same reason.
+                if (this.#byResource.size >= exports.MAX_TRACKED_RESOURCES) {
+                    if (!this.#didWarnResourceCap) {
+                        this.#didWarnResourceCap = true;
+                        this.#onCapReached?.(exports.MAX_TRACKED_RESOURCES);
+                    }
+                    continue;
+                }
                 traits = new Map();
                 this.#byResource.set(update.resourceId, traits);
                 changed.add(update.resourceId);
@@ -88,7 +117,7 @@ class ObserveState {
     retainDeviceResources(liveResourceIds) {
         const removed = [];
         for (const resourceId of [...this.#byResource.keys()]) {
-            if (!resourceId.startsWith('DEVICE_')) {
+            if (!resourceId.startsWith(classify_1.OBSERVE_DEVICE_PREFIX)) {
                 continue;
             }
             if (!liveResourceIds.has(resourceId)) {
@@ -102,7 +131,7 @@ class ObserveState {
     get deviceResourceCount() {
         let count = 0;
         for (const resourceId of this.#byResource.keys()) {
-            if (resourceId.startsWith('DEVICE_')) {
+            if (resourceId.startsWith(classify_1.OBSERVE_DEVICE_PREFIX)) {
                 count++;
             }
         }

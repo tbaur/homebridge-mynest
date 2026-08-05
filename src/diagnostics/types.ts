@@ -39,6 +39,8 @@ export interface TransportGauges {
   lastRestSuccessAgeSec: number | null
   /** Whether Protect smoke/CO may be treated as live from cached REST topaz. */
   isRestAlarmFeedAvailable: boolean
+  /** Most recent Observe frames are failing to decode (likely a schema change). */
+  isDecodeDegraded: boolean
   /** Per-transport circuit breaker states (`CLOSED` / `OPEN` / `HALF_OPEN`). */
   circuitBreaker: {
     rest: string

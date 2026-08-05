@@ -29,7 +29,7 @@ import {
   isCircuitBreakerFailure,
   parseRetryAfterMs,
 } from '../../../src/errors'
-import { MAX_RETRY_AFTER_MS } from '../../../src/settings'
+import { MAX_RETRY_AFTER_MS, MIN_RETRY_AFTER_MS } from '../../../src/settings'
 
 describe('the error hierarchy', () => {
   it('derives every error from NestError with a usable name', () => {
@@ -146,8 +146,15 @@ describe('parseRetryAfterMs', () => {
     expect(parsed).toBeLessThanOrEqual(60_000)
   })
 
-  it('treats a date already past as no delay', () => {
-    expect(parseRetryAfterMs(new Date(Date.now() - 60_000).toUTCString())).toBe(0)
+  it('floors an already-past date at the minimum rather than zero', () => {
+    // Consumers select the server value with `??`, which does not treat `0` as
+    // absent, so a zero would bypass computed backoff and spin.
+    expect(parseRetryAfterMs(new Date(Date.now() - 60_000).toUTCString()))
+      .toBe(MIN_RETRY_AFTER_MS)
+  })
+
+  it('floors an explicit Retry-After: 0 at the minimum', () => {
+    expect(parseRetryAfterMs('0')).toBe(MIN_RETRY_AFTER_MS)
   })
 
   it('ignores a header it cannot read', () => {

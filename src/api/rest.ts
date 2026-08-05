@@ -138,7 +138,9 @@ export async function subscribeOnce(
     // has already re-thrown a caller abort untouched, so reaching here with a
     // TimeoutError means Nest simply had nothing to say.
     if (isIdleTimeout(error, options.signal)) {
-      return { isIdle: true, objects: [] }
+      // No response at all — report that, so the caller does not treat silence
+      // as evidence that Nest is reachable.
+      return { isIdle: true, objects: [], hadResponse: false }
     }
     throw error
   }
@@ -152,7 +154,7 @@ export async function subscribeOnce(
   if (response.status === 502 || response.status === 504) {
     const elapsedMs = Date.now() - startedAt
     if (elapsedMs >= timeoutMs * SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO) {
-      return { isIdle: true, objects: [] }
+      return { isIdle: true, objects: [], hadResponse: true }
     }
     throw createApiError(
       response.status,
@@ -177,7 +179,7 @@ export async function subscribeOnce(
   }
 
   const objects = readObjects(body)
-  return { isIdle: objects.length === 0, objects }
+  return { isIdle: objects.length === 0, objects, hadResponse: true }
 }
 
 function isIdleTimeout(error: unknown, signal: AbortSignal | undefined): boolean {

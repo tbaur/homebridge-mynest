@@ -19,6 +19,7 @@ import {
   FRAME_DECODE_WINDOW,
   OBSERVE_IDLE_TIMEOUT_MS,
   REST_ALARM_FEED_STALE_MS,
+  REST_RESPONSE_STALE_MS,
   resolveEndpoints,
 } from '../../../src/settings'
 import { AuthenticationError } from '../../../src/errors'
@@ -347,6 +348,114 @@ describe('NestTransport', () => {
       jest.restoreAllMocks()
       transport.stop()
     }
+  })
+
+  it('does not treat a timed-out subscribe as proof Nest is reachable', async () => {
+    // A blackholed route and a quiet house both produce a full-length client
+    // timeout, so elapsed time cannot separate them. Counting silence as a
+    // successful cycle refreshed the Protect alarm-feed clock and reset the
+    // breaker, leaving smoke/CO tiles on a live frozen all-clear while
+    // diagnostics reported healthy.
+    const { transport } = createTransport()
+    await transport.start()
+
+    // start() ran app_launch, which is a real response.
+    expect(transport.status.isRestAlarmFeedAvailable).toBe(true)
+
+    const realNow = Date.now
+    let offset = 0
+    jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offset)
+    try {
+      // Push past the window in which a response is still recent enough to
+      // vouch for the feed, without any new response arriving.
+      offset = REST_RESPONSE_STALE_MS + 60_000
+      expect(transport.status.isRestAlarmFeedAvailable).toBe(false)
+    } finally {
+      jest.restoreAllMocks()
+      transport.stop()
+    }
+  })
+
+  it('re-probes a transport that exhausted its HTTP 403 budget', async () => {
+    // Three 403s land inside ~15s, and this codebase's own position is that a
+    // 403 is most likely a WAF blip — which is sustained for minutes. Never
+    // re-probing froze every thermostat (Observe) or faulted every Protect
+    // (REST) until someone restarted Homebridge.
+    const { fetch } = createNestFetch({ subscribeStatus: 403 })
+    const { transport, log } = createTransport({ fetchImpl: fetch })
+    await transport.start()
+
+    await waitUntil(() => transport.status.restState === 'forbidden_dead')
+    expect(transport.status.restState).toBe('forbidden_dead')
+    expect(log.errors.join('\n')).toMatch(/giving up after 3 HTTP 403s/)
+    expect(log.errors.join('\n')).toMatch(/retrying in \d+ min/)
+
+    transport.stop()
+  })
+
+  it('brings a 403-dead transport back when the cooldown elapses', async () => {
+    const { fetch } = createNestFetch({ subscribeStatus: 403 })
+    const { transport, log } = createTransport({
+      fetchImpl: fetch,
+      forbiddenReprobeMs: 5,
+    })
+    await transport.start()
+
+    await waitUntil(() => transport.status.restState === 'forbidden_dead')
+    // The cooldown fires and the loop restarts rather than staying dead for the
+    // lifetime of the process.
+    await waitUntil(() => log.infos.some((line) => line.includes('Re-probing REST')))
+
+    expect(log.infos.join('\n')).toMatch(/Re-probing REST after HTTP 403 cooldown/)
+    transport.stop()
+  })
+
+  it('brings a 403-dead Observe stream back when the cooldown elapses', async () => {
+    // Observe is the only source of thermostat state on modern accounts, so
+    // leaving it dead for the process lifetime froze every thermostat.
+    const { transport, http2, log } = createTransport({ forbiddenReprobeMs: 5 })
+    await transport.start()
+
+    for (let attempt = 0; attempt < FORBIDDEN_FATAL_THRESHOLD; attempt++) {
+      const connection = await http2.session()
+      connection.respond(403)
+      await waitUntil(() => log.warns.some((line) => line.includes(`(${attempt + 1}/`)))
+    }
+
+    await waitUntil(() => log.infos.some((line) => line.includes('Re-probing Observe')))
+    expect(log.infos.join('\n')).toMatch(/Re-probing Observe after HTTP 403 cooldown/)
+
+    transport.stop()
+  })
+
+  it('reports decode degradation through status so health can see it', async () => {
+    const { transport, http2, log } = createTransport()
+    await transport.start()
+    const connection = await http2.session()
+
+    expect(transport.status.isDecodeDegraded).toBe(false)
+
+    const garbage = Buffer.concat([
+      Buffer.from([0x00, 0x05]),
+      Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff]),
+    ])
+    for (let i = 0; i < FRAME_DECODE_WINDOW + 5; i++) {
+      connection.push(garbage)
+    }
+
+    // A one-shot log line scrolls away; the flag is what reaches the health
+    // rollup, which is the only thing that keeps reporting the condition.
+    expect(transport.status.isDecodeDegraded).toBe(true)
+    expect(log.warns.join('\n')).toContain('could not be')
+
+    // Recovery is announced and clears the flag.
+    for (let i = 0; i < FRAME_DECODE_WINDOW + 5; i++) {
+      connection.push(buildFrame(heatingThermostatTraits()))
+    }
+    expect(transport.status.isDecodeDegraded).toBe(false)
+    expect(log.infos.join('\n')).toContain('decoding again')
+
+    transport.stop()
   })
 
   it('POSTs BatchUpdateState when updating thermostat settings', async () => {

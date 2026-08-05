@@ -15,7 +15,8 @@
  * nothing external will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PRODUCTIVE_SESSION_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PRODUCTIVE_SESSION_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = void 0;
 exports.resolveEndpoints = resolveEndpoints;
 exports.appLaunchUrl = appLaunchUrl;
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -142,6 +143,25 @@ exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = 0.5;
  */
 exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS + 60_000;
 /**
+ * How long REST may go without Nest actually answering before the plugin
+ * proves reachability with an `app_launch`.
+ *
+ * The subscribe long-poll can time out client-side with no response on a
+ * genuinely quiet house, so silence alone is not a fault — but it is also not
+ * evidence of health. This bounds how long the plugin can be blind to a
+ * blackholed route, at the cost of one extra full read per window on an account
+ * that really is silent.
+ */
+exports.REST_PROOF_OF_LIFE_MS = 5 * 60_000;
+/**
+ * How long after Nest's last actual response the alarm feed stops counting as
+ * live, regardless of timed-out cycles.
+ *
+ * Sits above {@link REST_PROOF_OF_LIFE_MS} so a successful proof-of-life read
+ * always lands first on a healthy account; only a genuine outage reaches it.
+ */
+exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS + 2 * 60_000;
+/**
  * How long a single Observe connection is held before being recycled.
  *
  * Nest drops these streams on its own schedule, and a stream that has silently
@@ -206,6 +226,17 @@ exports.OBSERVE_STARTUP_WARN_MS = 60_000;
  */
 exports.OBSERVE_SNAPSHOT_SETTLE_MS = 750;
 /**
+ * How long a fresh Observe session may go without naming a single device before
+ * the snapshot collector gives up on it.
+ *
+ * Distinct from {@link OBSERVE_SNAPSHOT_SETTLE_MS}, which is a quiet period
+ * *after* traits have started arriving. This one has to absorb TCP, TLS, and
+ * gateway processing on a residential link, so it is an order of magnitude
+ * longer — using the short quiet period for both meant a merely slow connection
+ * finalized an empty snapshot and silently disabled HomeKit pruning.
+ */
+exports.OBSERVE_SNAPSHOT_ABANDON_MS = 30_000;
+/**
  * Consecutive HTTP 403 responses on one transport before that loop gives up.
  *
  * A single 403 on a Nest edge host can be a WAF / bot-detection blip against
@@ -215,6 +246,16 @@ exports.OBSERVE_SNAPSHOT_SETTLE_MS = 750;
  * token is rejected immediately.
  */
 exports.FORBIDDEN_FATAL_THRESHOLD = 3;
+/**
+ * How long a 403-exhausted transport waits before probing again.
+ *
+ * The 403 budget is spent in roughly fifteen seconds, so without a re-probe a
+ * transient WAF block permanently disabled a transport for the life of the
+ * process — freezing every thermostat if Observe was the casualty, or faulting
+ * every Protect if REST was. Long enough that re-probing cannot itself sustain
+ * the block.
+ */
+exports.FORBIDDEN_REPROBE_MS = 15 * 60_000;
 /**
  * How long a session is reused before it is re-established.
  *
@@ -267,6 +308,14 @@ exports.OBSERVE_SILENCE_CHECK_MS = 5 * 60_000;
  * immediate retry — the opposite of what it asks for.
  */
 exports.MAX_RETRY_AFTER_MS = 15 * 60_000;
+/**
+ * Shortest delay honoured from a server `Retry-After`.
+ *
+ * A server may legitimately send `Retry-After: 0`, but consumers select its
+ * value with `??` — which does not treat `0` as absent — so a zero would
+ * bypass computed backoff entirely and spin.
+ */
+exports.MIN_RETRY_AFTER_MS = 1_000;
 /**
  * Largest REST response body accepted, in bytes.
  *

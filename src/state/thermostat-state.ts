@@ -150,7 +150,12 @@ export function readThermostatFromObserve(
     activity: readActivity(state.trait(resourceId, 'hvac_control')),
     // In `range` mode Nest carries both bounds and no single setpoint, so the
     // single value is only meaningful for the mode that is actually in use.
-    targetTemperatureC: mode === 'cool' ? coolSetpoint : heatSetpoint,
+    // A switched-off unit reports `off`, with the real mode in `lastHvacMode` —
+    // resolving through it stops a cool-only thermostat showing (and later
+    // writing) its unused heat bound.
+    targetTemperatureC: (mode === 'off' ? lastHvacMode : mode) === 'cool'
+      ? coolSetpoint
+      : heatSetpoint,
     targetTemperatureLowC: heatSetpoint,
     targetTemperatureHighC: coolSetpoint,
     isEcoActive: readEcoActive(state, resourceId),

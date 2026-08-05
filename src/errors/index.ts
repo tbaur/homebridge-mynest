@@ -7,7 +7,7 @@
  * @fileoverview Structured error hierarchy for predictable error handling.
  */
 
-import { MAX_RETRY_AFTER_MS } from '../settings'
+import { MAX_RETRY_AFTER_MS, MIN_RETRY_AFTER_MS } from '../settings'
 
 /**
  * Base class for all plugin errors.
@@ -216,9 +216,15 @@ export function isCircuitBreakerFailure(error: unknown): boolean {
  * Node collapses any delay above 2^31-1 ms to 1 ms, so an absurd server value
  * would turn "wait a very long time" into "retry immediately" — the exact
  * opposite of what a rate-limited endpoint is asking for.
+ *
+ * Floored at {@link MIN_RETRY_AFTER_MS} rather than at zero. Consumers select
+ * the server's value with `??`, which does not treat `0` as absent, so
+ * `Retry-After: 0` (or any already-past HTTP-date) previously produced
+ * `sleep(0)` — an unthrottled loop against a service that had just asked the
+ * client to slow down, with the breaker deliberately not counting 429s.
  */
 function clampRetryAfterMs(ms: number): number {
-  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, Math.round(ms)))
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(MIN_RETRY_AFTER_MS, Math.round(ms)))
 }
 
 /**

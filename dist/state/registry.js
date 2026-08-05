@@ -39,7 +39,7 @@ function buildInventory(options) {
     const { observe, buckets, ignoredDeviceIds, restAlarmFeedAvailable = true, } = options;
     const kinds = collectDeviceKinds(observe, buckets);
     const roomNames = mergeRoomNames((0, classify_1.collectObserveRoomNames)(observe), readRestRoomNames(buckets));
-    const comfortTemperatures = readComfortTemperatures(observe, kinds);
+    const comfortTemperatures = readComfortTemperatures(observe, buckets, kinds);
     const thermostats = new Map();
     const protects = new Map();
     const sensors = new Map();
@@ -130,7 +130,7 @@ function mergeRoomNames(observe, rest) {
  * Computed up front because it crosses devices: a thermostat's reading may
  * belong to a Temperature Sensor elsewhere in the inventory.
  */
-function readComfortTemperatures(observe, kinds) {
+function readComfortTemperatures(observe, buckets, kinds) {
     const temperatures = new Map();
     for (const [deviceId, kind] of kinds) {
         if (kind !== 'thermostat') {
@@ -143,7 +143,13 @@ function readComfortTemperatures(observe, kinds) {
         const sensor = (0, sensor_state_1.readTemperatureSensorState)({
             state: observe,
             resourceId: sensorResourceId,
-            kryptonite: undefined,
+            // The same REST fallback `buildTemperatureSensor` gives this device on its
+            // own tile. Omitting it meant a sensor whose reading currently only exists
+            // in the kryptonite bucket — an Observe patch not yet redelivered after a
+            // reconnect — silently dropped the thermostat back to its own backplate,
+            // which is the several-degree disagreement with the Nest app that this
+            // whole feature exists to remove.
+            kryptonite: buckets.kryptonite?.[(0, classify_1.toDeviceId)(sensorResourceId)],
         });
         if (sensor.temperatureC !== undefined) {
             temperatures.set(deviceId, sensor.temperatureC);

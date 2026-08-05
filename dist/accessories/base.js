@@ -17,6 +17,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NestAccessory = void 0;
 const settings_1 = require("../settings");
 const bound_characteristics_1 = require("../utils/bound-characteristics");
+/** Whether any field published as Accessory Information differs. */
+function hasIdentityChanged(previous, next) {
+    return previous.name !== next.name
+        || previous.model !== next.model
+        || previous.serialNumber !== next.serialNumber
+        || previous.firmwareVersion !== next.firmwareVersion
+        || previous.id !== next.id;
+}
 /** One HomeKit accessory backed by one Nest device. */
 class NestAccessory {
     platform;
@@ -49,9 +57,15 @@ class NestAccessory {
      * unconditionally is cheaper than diffing here.
      */
     update(device) {
+        const previousIdentity = this.identity;
         this.identity = device.identity;
         this.state = device.state;
-        this.#applyAccessoryInformation();
+        // Only when it actually changed. These four values essentially never do, and
+        // re-applying them ran HAP's full value-validation path four times per
+        // device per refresh on the hot update path.
+        if (hasIdentityChanged(previousIdentity, device.identity)) {
+            this.#applyAccessoryInformation();
+        }
         this.onServicesMayChange();
         this.binder.refresh();
         this.#logSummary();

@@ -17,7 +17,12 @@ import { CircuitState } from '../../src/api/circuit-breaker'
 import type { NestTransportOptions, TransportStatus } from '../../src/api/transport'
 import type { TraitUpdate } from '../../src/api/protobuf'
 import type { BucketMap } from '../../src/types/nest'
-import { PLATFORM_NAME, UUID_PREFIX } from '../../src/settings'
+import { AuthenticationError, NetworkError } from '../../src/errors'
+import {
+  OBSERVE_SNAPSHOT_ABANDON_MS,
+  PLATFORM_NAME,
+  UUID_PREFIX,
+} from '../../src/settings'
 import { createHomebridgeLogging, FakeHomebridgeApi } from '../helpers/homebridge'
 import {
   buildFrame,
@@ -25,6 +30,7 @@ import {
   protectTraits,
 } from '../helpers/observe-fixtures'
 import { decodeFrame } from '../../src/api/protobuf'
+import { MAX_TRACKED_RESOURCES } from '../../src/state/observe-state'
 
 interface TransportHarness {
   options: NestTransportOptions
@@ -36,6 +42,8 @@ interface TransportHarness {
 }
 
 let harness: TransportHarness
+/** Errors the mocked `transport.start()` should throw, in order. */
+const pendingStartFailures: Error[] = []
 
 const DEFAULT_STATUS: TransportStatus = {
   hasSession: true,
@@ -47,6 +55,7 @@ const DEFAULT_STATUS: TransportStatus = {
   lastObserveFrameAgeSec: null,
   lastRestSuccessAgeSec: 0,
   isRestAlarmFeedAvailable: true,
+  isDecodeDegraded: false,
   circuitBreaker: {
     rest: {
       state: CircuitState.CLOSED,
@@ -98,12 +107,20 @@ jest.mock('../../src/api/transport', () => {
           lastObserveFrameAgeSec: null,
           lastRestSuccessAgeSec: 0,
           isRestAlarmFeedAvailable: true,
+  isDecodeDegraded: false,
           circuitBreaker: {
             rest: { ...closedBreaker },
             observe: { ...closedBreaker },
           },
         },
         start: jest.fn(async () => {
+          // Lets a test make the first boot attempt fail, which is otherwise
+          // impossible to arrange: the transport is constructed and started in
+          // the same tick inside the platform.
+          const failure = pendingStartFailures.shift()
+          if (failure) {
+            throw failure
+          }
           // REST-first boot: buckets arrive before Observe frames.
           options.onBuckets(restBuckets)
         }),
@@ -176,6 +193,7 @@ describe('MyNestPlatform', () => {
     jest.useFakeTimers()
     api = new FakeHomebridgeApi()
     log = createHomebridgeLogging()
+    pendingStartFailures.length = 0
   })
 
   afterEach(() => {
@@ -209,6 +227,34 @@ describe('MyNestPlatform', () => {
 
     expect(log.errors.join('\n')).toMatch(/Access Token is required/)
     expect(api.registered).toHaveLength(0)
+  })
+
+  it('retries a transient startup failure instead of blaming the token', async () => {
+    // A Raspberry Pi that boots before its network is up rejects here with a
+    // NetworkError. Treating that as fatal disabled the plugin for the life of
+    // the process and told the user to paste a fresh token — and because
+    // `didFinishLaunching` fires once, nothing ever tried again.
+    pendingStartFailures.push(new NetworkError('Could not reach https://home.nest.com/session'))
+
+    await launch()
+
+    expect(log.warns.join('\n')).toMatch(/Could not reach Nest at startup/)
+    expect(log.errors.join('\n')).not.toMatch(/Paste a fresh token/)
+
+    // Backoff, then a successful second attempt.
+    await jest.advanceTimersByTimeAsync(60_000)
+    await Promise.resolve()
+
+    expect(log.infos.join('\n')).toContain('Connected to Nest')
+  })
+
+  it('still treats a rejected token at startup as fatal', async () => {
+    pendingStartFailures.push(new AuthenticationError())
+
+    await launch()
+
+    expect(log.errors.join('\n')).toMatch(/Paste a fresh token/)
+    expect(log.warns.join('\n')).not.toMatch(/retrying in the background/)
   })
 
   it('logs that thermostat control is enabled when the flag is on', async () => {
@@ -388,6 +434,70 @@ describe('MyNestPlatform', () => {
     // Services stay so rooms/automations are not torn down on a Nest blip.
     expect(protect!.getService(api.hap.Service.SmokeSensor)).toBeDefined()
     expect(protect!.getService(api.hap.Service.CarbonMonoxideSensor)).toBeDefined()
+  })
+
+  it('still prunes a ghost accessory after a slow Observe connection', async () => {
+    // HomeKit pruning is gated on a *settled* snapshot. Arming the 750 ms quiet
+    // window at session start meant a connection that took longer than that to
+    // deliver its first trait finalized an empty snapshot, nulled the collector,
+    // stopped re-arming, and left `#hasSettledObserveSnapshot` false — so the
+    // ghost below would never be unregistered. Pruning is the only observable
+    // consequence, so it is what this asserts.
+    const ghostUuid = uuid.generate(`${UUID_PREFIX}GHOST01`)
+    const ghost = new Accessory('Ghost Protect', ghostUuid) as unknown as PlatformAccessory
+    ghost.context = { deviceId: 'GHOST01', kind: 'protect', displayName: 'Ghost Protect' }
+
+    const platform = new MyNestPlatform(
+      log,
+      { platform: PLATFORM_NAME, accessToken: 'b'.repeat(120) },
+      api.asApi(),
+    )
+    platform.configureAccessory(ghost)
+    api.emit('didFinishLaunching')
+    await Promise.resolve()
+    await Promise.resolve()
+    flushSync()
+
+    // Two consecutive settled snapshots that omit the ghost confirm removal.
+    for (const frames of [1, 2]) {
+      harness.options.onObserveSessionStart?.()
+      // Slower than the settle window, well inside the abandon window: the
+      // collector must still be open when the first trait lands.
+      jest.advanceTimersByTime(5_000)
+      harness.options.onTraits(thermostatTraits())
+      setTransportStatus({ observeFrames: frames, restCycles: 1, knownObjects: 1 })
+      await settleObserveSnapshot()
+    }
+
+    expect(api.unregistered).toContain(ghost)
+  })
+
+  it('warns when Observe floods the plugin with more resources than it models', async () => {
+    await launch()
+    flushSync()
+
+    harness.options.onTraits(
+      Array.from({ length: MAX_TRACKED_RESOURCES + 10 }, (_, index) => ({
+        resourceId: `DEVICE_FLOOD${index}`,
+        key: 'label',
+      })),
+    )
+    flushSync()
+
+    expect(log.warns.join('\n')).toMatch(/tracking \d+ resources/)
+  })
+
+  it('stops collecting a snapshot only after the abandon deadline', async () => {
+    // A session that connects but never names a device must not leave the
+    // collector open forever, or pruning stays blocked for that session.
+    await launch({ debug: true })
+    flushSync()
+
+    harness.options.onObserveSessionStart?.()
+    jest.advanceTimersByTime(OBSERVE_SNAPSHOT_ABANDON_MS + 1_000)
+    flushSync()
+
+    expect(log.debugs.join('\n')).toMatch(/produced no devices before the snapshot deadline/)
   })
 
   it('keeps traits that arrived before a device could be classified', async () => {

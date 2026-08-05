@@ -28,7 +28,9 @@ HomeKit accessories are unregistered only when Nest has confirmed a device is go
 | Device absent from the Observe ∪ REST inventory after the above | Unregister from HomeKit |
 | Expired / revoked access token (or both transports exhausted on HTTP 403) | Stop updates; **keep** accessories — Nest Account auth is a manually pasted session token, so unregistering would bounce rooms/automations until the user pastes a fresh one and restarts |
 
-Unusable plugin config at startup (missing/invalid token shape, etc.) still clears the cache: there is no session to refresh and no honest last-known feed to keep serving.
+Unusable plugin config at startup (missing/invalid token shape, etc.) **keeps** the cached accessories, for the same reason an expired token does. A typo, a half-edited `config.json`, or a truncated token would otherwise destroy every room assignment, scene membership, and automation target in the Home app — and fixing the config does not bring them back, because HomeKit treats the re-registered accessories as new devices. A config error cannot warrant a more destructive response than a revoked token. The plugin logs why and publishes nothing until it is restarted with a usable config.
+
+A transient failure at startup (DNS, TLS, a timeout, a 5xx) is **not** fatal: it is retried with backoff, because `didFinishLaunching` fires only once and a host that boots before its network is up would otherwise stay idle for the lifetime of the process.
 
 ## Session
 

@@ -129,7 +129,7 @@ export class FrameSplitter {
 
     for (;;) {
       // A frame is at minimum a tag byte plus a one-byte varint.
-      if (this.#buffer.length < 2) {
+      if (this.#buffer.length < MIN_FRAME_HEADER_BYTES) {
         break
       }
 

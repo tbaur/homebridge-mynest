@@ -57,6 +57,18 @@ export interface SubscribeResult {
   /** True when the long-poll was aborted by the client with no updates. */
   readonly isIdle: boolean
   readonly objects: readonly NestObject[]
+  /**
+   * Whether Nest actually answered, as opposed to the client deadline firing
+   * with nothing received.
+   *
+   * A quiet house and a blackholed route both produce a full-length timeout, so
+   * elapsed time cannot tell them apart — only the presence of a response can.
+   * Without this the transport counted "no bytes from Nest for two minutes" as a
+   * successful cycle, which refreshed the Protect alarm-feed freshness clock and
+   * reset the circuit breaker, leaving smoke/CO tiles showing a live frozen
+   * all-clear while diagnostics reported healthy.
+   */
+  readonly hadResponse: boolean
 }
 
 /** Buckets indexed as `{ bucketType: { id: value } }`. */

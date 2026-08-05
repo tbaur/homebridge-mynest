@@ -14,6 +14,7 @@
  */
 
 import { decodeTrait, type TraitUpdate } from '../api/protobuf'
+import { OBSERVE_DEVICE_PREFIX } from './classify'
 
 /** One trait as last reported, with enough context to classify the device. */
 export interface TraitRecord {
@@ -33,8 +34,27 @@ export type ResourceTraits = ReadonlyMap<string, TraitRecord>
  *
  * Keyed by Nest resource id (`DEVICE_…`, `STRUCTURE_…`, `USER_…`).
  */
+/**
+ * Ceiling on distinct Observe resources held at once.
+ *
+ * Generous next to any real home — a large account is tens of resources — so
+ * reaching it means Nest is emitting identifiers this plugin does not model,
+ * which is a leak rather than a house.
+ */
+export const MAX_TRACKED_RESOURCES = 2_000
+
 export class ObserveState {
   readonly #byResource = new Map<string, Map<string, TraitRecord>>()
+  readonly #onCapReached?: (cap: number) => void
+  #didWarnResourceCap = false
+
+  /**
+   * @param onCapReached Called once if {@link MAX_TRACKED_RESOURCES} is hit, so
+   *   the platform can surface it rather than silently dropping resources.
+   */
+  constructor(onCapReached?: (cap: number) => void) {
+    this.#onCapReached = onCapReached
+  }
 
   /**
    * Merge a frame's traits into the accumulated state.
@@ -49,6 +69,17 @@ export class ObserveState {
     for (const update of updates) {
       let traits = this.#byResource.get(update.resourceId)
       if (!traits) {
+        // Bounded, because the key comes from Nest. Pruning only happens after a
+        // snapshot settles, and the settle timer is re-armed by every incoming
+        // trait — so a stream that never goes quiet grows this map without ever
+        // pruning it. `unknownTypes` in the decoder is capped for the same reason.
+        if (this.#byResource.size >= MAX_TRACKED_RESOURCES) {
+          if (!this.#didWarnResourceCap) {
+            this.#didWarnResourceCap = true
+            this.#onCapReached?.(MAX_TRACKED_RESOURCES)
+          }
+          continue
+        }
         traits = new Map()
         this.#byResource.set(update.resourceId, traits)
         changed.add(update.resourceId)
@@ -112,7 +143,7 @@ export class ObserveState {
   retainDeviceResources(liveResourceIds: ReadonlySet<string>): readonly string[] {
     const removed: string[] = []
     for (const resourceId of [...this.#byResource.keys()]) {
-      if (!resourceId.startsWith('DEVICE_')) {
+      if (!resourceId.startsWith(OBSERVE_DEVICE_PREFIX)) {
         continue
       }
       if (!liveResourceIds.has(resourceId)) {
@@ -127,7 +158,7 @@ export class ObserveState {
   get deviceResourceCount(): number {
     let count = 0
     for (const resourceId of this.#byResource.keys()) {
-      if (resourceId.startsWith('DEVICE_')) {
+      if (resourceId.startsWith(OBSERVE_DEVICE_PREFIX)) {
         count++
       }
     }

@@ -144,7 +144,10 @@ describe('subscribeOnce', () => {
 
     const result = await subscribeOnce({ session, endpoints, revisions: [], timeoutMs: 10, fetchImpl: fetch })
 
-    expect(result).toEqual({ isIdle: true, objects: [] })
+    // `hadResponse: false` is the load-bearing part: a quiet house and a
+    // blackholed route both time out, so the caller needs to know Nest never
+    // answered rather than counting silence as a healthy cycle.
+    expect(result).toEqual({ isIdle: true, objects: [], hadResponse: false })
   })
 
   it('treats a server-side long-poll expiry as idle', async () => {
@@ -159,7 +162,7 @@ describe('subscribeOnce', () => {
         revisions: [],
         fetchImpl: fetch,
         timeoutMs: 0,
-      })).resolves.toEqual({ isIdle: true, objects: [] })
+      })).resolves.toEqual({ isIdle: true, objects: [], hadResponse: true })
     }
   })
 

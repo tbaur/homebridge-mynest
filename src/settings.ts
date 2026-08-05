@@ -179,6 +179,27 @@ export const SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = 0.5
 export const REST_ALARM_FEED_STALE_MS = SUBSCRIBE_TIMEOUT_MS + 60_000
 
 /**
+ * How long REST may go without Nest actually answering before the plugin
+ * proves reachability with an `app_launch`.
+ *
+ * The subscribe long-poll can time out client-side with no response on a
+ * genuinely quiet house, so silence alone is not a fault — but it is also not
+ * evidence of health. This bounds how long the plugin can be blind to a
+ * blackholed route, at the cost of one extra full read per window on an account
+ * that really is silent.
+ */
+export const REST_PROOF_OF_LIFE_MS = 5 * 60_000
+
+/**
+ * How long after Nest's last actual response the alarm feed stops counting as
+ * live, regardless of timed-out cycles.
+ *
+ * Sits above {@link REST_PROOF_OF_LIFE_MS} so a successful proof-of-life read
+ * always lands first on a healthy account; only a genuine outage reaches it.
+ */
+export const REST_RESPONSE_STALE_MS = REST_PROOF_OF_LIFE_MS + 2 * 60_000
+
+/**
  * How long a single Observe connection is held before being recycled.
  *
  * Nest drops these streams on its own schedule, and a stream that has silently
@@ -253,6 +274,18 @@ export const OBSERVE_STARTUP_WARN_MS = 60_000
 export const OBSERVE_SNAPSHOT_SETTLE_MS = 750
 
 /**
+ * How long a fresh Observe session may go without naming a single device before
+ * the snapshot collector gives up on it.
+ *
+ * Distinct from {@link OBSERVE_SNAPSHOT_SETTLE_MS}, which is a quiet period
+ * *after* traits have started arriving. This one has to absorb TCP, TLS, and
+ * gateway processing on a residential link, so it is an order of magnitude
+ * longer — using the short quiet period for both meant a merely slow connection
+ * finalized an empty snapshot and silently disabled HomeKit pruning.
+ */
+export const OBSERVE_SNAPSHOT_ABANDON_MS = 30_000
+
+/**
  * Consecutive HTTP 403 responses on one transport before that loop gives up.
  *
  * A single 403 on a Nest edge host can be a WAF / bot-detection blip against
@@ -262,6 +295,17 @@ export const OBSERVE_SNAPSHOT_SETTLE_MS = 750
  * token is rejected immediately.
  */
 export const FORBIDDEN_FATAL_THRESHOLD = 3
+
+/**
+ * How long a 403-exhausted transport waits before probing again.
+ *
+ * The 403 budget is spent in roughly fifteen seconds, so without a re-probe a
+ * transient WAF block permanently disabled a transport for the life of the
+ * process — freezing every thermostat if Observe was the casualty, or faulting
+ * every Protect if REST was. Long enough that re-probing cannot itself sustain
+ * the block.
+ */
+export const FORBIDDEN_REPROBE_MS = 15 * 60_000
 
 /**
  * How long a session is reused before it is re-established.
@@ -324,6 +368,15 @@ export const OBSERVE_SILENCE_CHECK_MS = 5 * 60_000
  * immediate retry — the opposite of what it asks for.
  */
 export const MAX_RETRY_AFTER_MS = 15 * 60_000
+
+/**
+ * Shortest delay honoured from a server `Retry-After`.
+ *
+ * A server may legitimately send `Retry-After: 0`, but consumers select its
+ * value with `??` — which does not treat `0` as absent — so a zero would
+ * bypass computed backoff entirely and spin.
+ */
+export const MIN_RETRY_AFTER_MS = 1_000
 
 /**
  * Largest REST response body accepted, in bytes.

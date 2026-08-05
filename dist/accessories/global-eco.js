@@ -74,6 +74,16 @@ class GlobalEcoAccessory {
         this.#allEco = allEco;
         this.#binder.refresh();
     }
+    /**
+     * Release the pending-write backstop.
+     *
+     * Called when the switch is removed or the platform stops. The timer is
+     * `unref`'d so it cannot hold the process open, but without this it could
+     * still fire up to 45s later and refresh a torn-down accessory.
+     */
+    dispose() {
+        this.#clearPending();
+    }
     #clearPending() {
         this.#pendingAllEco = null;
         this.#pendingSinceMs = null;

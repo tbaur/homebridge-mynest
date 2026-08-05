@@ -85,7 +85,7 @@ export function buildInventory(options: BuildInventoryOptions): DeviceInventory 
 
   const kinds = collectDeviceKinds(observe, buckets)
   const roomNames = mergeRoomNames(collectObserveRoomNames(observe), readRestRoomNames(buckets))
-  const comfortTemperatures = readComfortTemperatures(observe, kinds)
+  const comfortTemperatures = readComfortTemperatures(observe, buckets, kinds)
 
   const thermostats = new Map<string, Extract<NestDevice, { identity: { kind: 'thermostat' } }>>()
   const protects = new Map<string, Extract<NestDevice, { identity: { kind: 'protect' } }>>()
@@ -203,6 +203,7 @@ function mergeRoomNames(observe: RoomNames, rest: RoomNames): RoomNames {
  */
 function readComfortTemperatures(
   observe: ObserveState,
+  buckets: BucketMap,
   kinds: ReadonlyMap<string, DeviceKind>,
 ): Map<string, number> {
   const temperatures = new Map<string, number>()
@@ -220,7 +221,14 @@ function readComfortTemperatures(
     const sensor = readTemperatureSensorState({
       state: observe,
       resourceId: sensorResourceId,
-      kryptonite: undefined,
+      // The same REST fallback `buildTemperatureSensor` gives this device on its
+      // own tile. Omitting it meant a sensor whose reading currently only exists
+      // in the kryptonite bucket — an Observe patch not yet redelivered after a
+      // reconnect — silently dropped the thermostat back to its own backplate,
+      // which is the several-degree disagreement with the Nest app that this
+      // whole feature exists to remove.
+      kryptonite: buckets.kryptonite?.[toDeviceId(sensorResourceId)] as
+        KryptoniteBucket | undefined,
     })
     if (sensor.temperatureC !== undefined) {
       temperatures.set(deviceId, sensor.temperatureC)

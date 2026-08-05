@@ -93,7 +93,9 @@ async function subscribeOnce(options) {
         // has already re-thrown a caller abort untouched, so reaching here with a
         // TimeoutError means Nest simply had nothing to say.
         if (isIdleTimeout(error, options.signal)) {
-            return { isIdle: true, objects: [] };
+            // No response at all — report that, so the caller does not treat silence
+            // as evidence that Nest is reachable.
+            return { isIdle: true, objects: [], hadResponse: false };
         }
         throw error;
     }
@@ -106,7 +108,7 @@ async function subscribeOnce(options) {
     if (response.status === 502 || response.status === 504) {
         const elapsedMs = Date.now() - startedAt;
         if (elapsedMs >= timeoutMs * settings_1.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO) {
-            return { isIdle: true, objects: [] };
+            return { isIdle: true, objects: [], hadResponse: true };
         }
         throw (0, errors_1.createApiError)(response.status, `subscribe returned HTTP ${response.status} after ${elapsedMs}ms, too fast to be an expired long-poll`, { retryAfterMs: (0, errors_1.parseRetryAfterMs)(response.headers.get('retry-after')) });
     }
@@ -125,7 +127,7 @@ async function subscribeOnce(options) {
         });
     }
     const objects = readObjects(body);
-    return { isIdle: objects.length === 0, objects };
+    return { isIdle: objects.length === 0, objects, hadResponse: true };
 }
 function isIdleTimeout(error, signal) {
     if (signal?.aborted) {

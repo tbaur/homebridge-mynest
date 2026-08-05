@@ -24,5 +24,13 @@ export declare class GlobalEcoAccessory {
      * matches within {@link PENDING_ECO_MAX_MS}, take Nest truth.
      */
     updateAllEco(allEco: boolean): void;
+    /**
+     * Release the pending-write backstop.
+     *
+     * Called when the switch is removed or the platform stops. The timer is
+     * `unref`'d so it cannot hold the process open, but without this it could
+     * still fire up to 45s later and refresh a torn-down accessory.
+     */
+    dispose(): void;
 }
 //# sourceMappingURL=global-eco.d.ts.map

@@ -84,6 +84,26 @@ describe('GlobalEcoAccessory', () => {
     }
   })
 
+  it('does not fire the pending backstop after disposal', async () => {
+    // The switch can be removed, or the platform stopped, while a write is still
+    // unconfirmed. Without a disposal path the backstop fired up to 45s later
+    // and refreshed a torn-down accessory.
+    jest.useFakeTimers()
+    try {
+      const { service, platform, handler, log } = build()
+      jest.spyOn(platform, 'applyGlobalEcoWrite').mockResolvedValue(true)
+
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+      handler.dispose()
+
+      jest.advanceTimersByTime(90_000)
+
+      expect(log.warns.join('\n')).not.toMatch(/did not confirm Eco change/)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('reverts On when control is off', async () => {
     const { service, platform, log, handler } = build({ allowThermostatControl: false })
     handler.updateAllEco(false)

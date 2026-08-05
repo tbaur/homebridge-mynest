@@ -45,7 +45,7 @@ class NestTransport {
     #lastRestError = null;
     /** Rolling window of frame decode outcomes; `true` means undecodable. */
     #recentFrameOutcomes = [];
-    #didWarnDecodeRate = false;
+    #isDecodeDegraded = false;
     #observeFrames = 0;
     #restCycles = 0;
     #lastAppLaunchAt = 0;
@@ -60,11 +60,14 @@ class NestTransport {
     #didWarnObserveSilent = false;
     #statusTimer = null;
     #observeSilenceTimer = null;
+    #forbiddenReprobeTimers = new Map();
     #observeStartupWarnTimer = null;
     #lastObserveFrameAt = null;
     #observeSessionOpen = false;
     #restLoopRunning = false;
     #lastRestSuccessAt = null;
+    /** Last time Nest actually answered a REST request, not merely timed out. */
+    #lastRestResponseAt = null;
     #wasRestAlarmFeedAvailable = true;
     #restAlarmFeedStaleTimer = null;
     constructor(options) {
@@ -117,6 +120,7 @@ class NestTransport {
             lastObserveFrameAgeSec,
             lastRestSuccessAgeSec,
             isRestAlarmFeedAvailable: this.#computeRestAlarmFeedAvailable(),
+            isDecodeDegraded: this.#isDecodeDegraded,
             circuitBreaker: {
                 rest: this.#restBreaker.getStatus(),
                 observe: this.#observeBreaker.getStatus(),
@@ -126,6 +130,14 @@ class NestTransport {
     /** Whether cached REST topaz may still be treated as a live Protect alarm feed. */
     #computeRestAlarmFeedAvailable() {
         if (this.#isStopped || this.#restForbiddenDead) {
+            return false;
+        }
+        // Positive evidence Nest answered *something* recently. A blackholed route
+        // produces a full-length client timeout every cycle, which otherwise looks
+        // exactly like a quiet house — and treating that as success kept a
+        // life-safety tile reporting a frozen all-clear indefinitely.
+        if (this.#lastRestResponseAt !== null
+            && Date.now() - this.#lastRestResponseAt > settings_1.REST_RESPONSE_STALE_MS) {
             return false;
         }
         // Subscribe loop exited after running (not mid-startup before the flag is set).
@@ -140,8 +152,17 @@ class NestTransport {
         }
         return Date.now() - this.#lastRestSuccessAt <= settings_1.REST_ALARM_FEED_STALE_MS;
     }
-    #noteRestSuccess() {
-        this.#lastRestSuccessAt = Date.now();
+    /**
+     * @param hadResponse Whether Nest actually answered. A cycle that only hit
+     *   the client deadline is not evidence of reachability, so it must not
+     *   refresh the proof-of-life clock the alarm feed depends on.
+     */
+    #noteRestSuccess(hadResponse = true) {
+        const now = Date.now();
+        this.#lastRestSuccessAt = now;
+        if (hadResponse) {
+            this.#lastRestResponseAt = now;
+        }
         this.#armRestAlarmFeedStaleTimer();
         this.#emitRestAlarmFeedAvailability();
     }
@@ -307,12 +328,19 @@ class NestTransport {
             clearInterval(this.#observeSilenceTimer);
             this.#observeSilenceTimer = null;
         }
+        for (const timer of this.#forbiddenReprobeTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.#forbiddenReprobeTimers.clear();
         if (this.#observeStartupWarnTimer) {
             clearTimeout(this.#observeStartupWarnTimer);
             this.#observeStartupWarnTimer = null;
         }
         this.#clearRestAlarmFeedStaleTimer();
-        this.#emitRestAlarmFeedAvailability();
+        // Deliberately not emitting availability here. `#isStopped` forces the feed
+        // to compute as unavailable, so an orderly shutdown would log a
+        // fault-shaped warning on every restart — training operators who alert on
+        // warn to ignore the one message that matters during a real outage.
     }
     async #openSession() {
         const startedAt = Date.now();
@@ -500,14 +528,26 @@ class NestTransport {
         if (this.#recentFrameOutcomes.length > settings_1.FRAME_DECODE_WINDOW) {
             this.#recentFrameOutcomes.shift();
         }
-        if (this.#recentFrameOutcomes.length < settings_1.FRAME_DECODE_WINDOW || this.#didWarnDecodeRate) {
+        if (this.#recentFrameOutcomes.length < settings_1.FRAME_DECODE_WINDOW) {
             return;
         }
         const failed = this.#recentFrameOutcomes.filter(Boolean).length;
-        if (failed / this.#recentFrameOutcomes.length > settings_1.FRAME_DECODE_FAILURE_RATIO) {
-            this.#didWarnDecodeRate = true;
+        const isDegraded = failed / this.#recentFrameOutcomes.length > settings_1.FRAME_DECODE_FAILURE_RATIO;
+        // Held as state rather than a one-shot warning. A schema change is the most
+        // likely way this plugin breaks, and its signature is every frame decoding
+        // to nothing while `observeFrames` climbs and the stream reports connected —
+        // so a single log line that scrolls away leaves the plugin reporting perfect
+        // health while every reading in the house is frozen.
+        if (isDegraded === this.#isDecodeDegraded) {
+            return;
+        }
+        this.#isDecodeDegraded = isDegraded;
+        if (isDegraded) {
             this.#options.log.warn(`${failed} of the last ${this.#recentFrameOutcomes.length} Observe frames could not be `
                 + 'decoded — Nest may have changed its trait schema, so readings will be stale.');
+        }
+        else {
+            this.#options.log.info('Observe frames are decoding again.');
         }
     }
     /**
@@ -565,7 +605,17 @@ class NestTransport {
             this.#emitRestAlarmFeedAvailability();
             const cycleStartedAt = Date.now();
             try {
-                if (Date.now() - this.#lastAppLaunchAt >= settings_1.REDISCOVERY_INTERVAL_MS) {
+                // `app_launch` doubles as a proof of life. The subscribe long-poll can
+                // legitimately time out with no response on a quiet house, so without a
+                // call that always produces a real answer there is no way to tell a
+                // silent-but-healthy account from a route that is swallowing traffic.
+                const needsProofOfLife = this.#lastRestResponseAt !== null
+                    && Date.now() - this.#lastRestResponseAt >= settings_1.REST_PROOF_OF_LIFE_MS;
+                if (needsProofOfLife
+                    || Date.now() - this.#lastAppLaunchAt >= settings_1.REDISCOVERY_INTERVAL_MS) {
+                    if (needsProofOfLife) {
+                        this.#options.log.debug('No REST response from Nest recently; running app_launch to confirm reachability');
+                    }
                     await this.#runAppLaunch();
                 }
                 const session = await this.#ensureSession();
@@ -586,7 +636,7 @@ class NestTransport {
                     sampleLatency: false,
                 });
                 this.#options.metrics?.restCycle?.(true, Date.now() - cycleStartedAt);
-                this.#noteRestSuccess();
+                this.#noteRestSuccess(result.hadResponse);
                 if (!result.isIdle) {
                     this.#objects.merge(result.objects);
                     this.#publishBuckets();
@@ -664,10 +714,19 @@ class NestTransport {
                 }
                 if (this.#observeForbiddenDead && this.#restForbiddenDead) {
                     this.#options.onFatal(new errors_1.AuthenticationError(`Nest returned HTTP 403 on both REST and Observe ${settings_1.FORBIDDEN_FATAL_THRESHOLD} times — token may be revoked; get a fresh one from https://home.nest.com/session.`, { cause: error }));
+                    return false;
                 }
-                else {
-                    this.#options.log.error(`${context} giving up after ${count} HTTP 403s — other transport keeps running if it can.`);
-                }
+                // Recoverable, on a long backoff. The threshold is three 403s inside
+                // roughly 15 seconds, and this codebase's own position is that a 403 is
+                // most likely a WAF or bot-detection blip — which is by nature
+                // sustained for minutes, so three in a row is the expected shape of a
+                // transient block rather than proof of a revoked token. Never re-probing
+                // meant one such block froze every thermostat (Observe) or faulted every
+                // Protect (REST) until someone restarted Homebridge.
+                this.#options.log.error(`${context} giving up after ${count} HTTP 403s — retrying in `
+                    + `${Math.round((this.#options.forbiddenReprobeMs ?? settings_1.FORBIDDEN_REPROBE_MS) / 60_000)} min; `
+                    + 'other transport keeps running if it can.');
+                this.#scheduleForbiddenReprobe(transport);
                 return false;
             }
         }
@@ -693,12 +752,53 @@ class NestTransport {
         }
         return true;
     }
-    /** Whether a failure is plausibly the session being rejected. */
+    /**
+     * Whether a failure is plausibly the session being rejected.
+     *
+     * 403 is deliberately excluded. This codebase classifies a 403 as a probable
+     * WAF/bot-detection block, and answering a bot-detection block by immediately
+     * opening a new session — which `withRetry` will attempt up to three times,
+     * since `ForbiddenError` is retryable — is how a soft block becomes a durable
+     * one. The per-transport 403 counter and its re-probe handle that case.
+     */
     #isSessionSuspect(error) {
-        if (error instanceof errors_1.ForbiddenError) {
-            return true;
-        }
         return error instanceof errors_1.ApiResponseError && error.httpStatus === 401;
+    }
+    /**
+     * Bring a 403-dead transport back after a cooling-off period.
+     *
+     * Fail-fast is right; permanent is not. A WAF block clears on its own, and the
+     * plugin has no other way to notice that it has.
+     */
+    #scheduleForbiddenReprobe(transport) {
+        if (this.#isStopped || this.#forbiddenReprobeTimers.has(transport)) {
+            return;
+        }
+        const timer = setTimeout(() => {
+            this.#forbiddenReprobeTimers.delete(transport);
+            if (this.#isStopped) {
+                return;
+            }
+            this.#options.log.info(`Re-probing ${transport === 'rest' ? 'REST' : 'Observe'} after HTTP 403 cooldown`);
+            if (transport === 'observe') {
+                this.#observeForbiddenDead = false;
+                this.#observeForbidden = 0;
+                this.#runObserveLoop().catch((error) => {
+                    this.#options.log.error(`Observe loop stopped unexpectedly: ${(0, sanitizers_1.sanitizeError)(error)}`);
+                });
+            }
+            else {
+                this.#restForbiddenDead = false;
+                this.#restForbidden = 0;
+                this.#emitRestAlarmFeedAvailability();
+                this.#runSubscribeLoop().catch((error) => {
+                    this.#restLoopRunning = false;
+                    this.#options.log.error(`REST loop stopped unexpectedly: ${(0, sanitizers_1.sanitizeError)(error)}`);
+                });
+            }
+        }, this.#options.forbiddenReprobeMs ?? settings_1.FORBIDDEN_REPROBE_MS);
+        timer.unref?.();
+        this.#forbiddenReprobeTimers.set(transport, timer);
     }
     /**
      * Report a transport failure at a level an operator will actually see.
@@ -799,8 +899,15 @@ class NestTransport {
             if (this.#isStopped || this.#observeForbiddenDead) {
                 return;
             }
+            // `null` means Observe has *never* delivered a frame — strictly worse than
+            // a stream that went quiet, and previously invisible here because the
+            // check required a non-null age. That case got one warning at the 60s mark
+            // and nothing afterwards, while HomeKit had no thermostats at all.
             const ageSec = this.status.lastObserveFrameAgeSec;
-            if (ageSec !== null && ageSec * 1_000 > settings_1.OBSERVE_IDLE_TIMEOUT_MS) {
+            if (ageSec === null) {
+                this.#options.log.warn('Observe has never delivered a frame — thermostats are missing from HomeKit.');
+            }
+            else if (ageSec * 1_000 > settings_1.OBSERVE_IDLE_TIMEOUT_MS) {
                 this.#options.log.warn(`Observe has delivered no frames for ${ageSec}s — thermostat readings are stale.`);
             }
         }, this.#options.observeSilenceCheckMs ?? settings_1.OBSERVE_SILENCE_CHECK_MS);

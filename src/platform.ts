@@ -24,6 +24,7 @@ import type {
 import {
   GLOBAL_ECO_DEVICE_ID,
   GLOBAL_ECO_DISPLAY_NAME,
+  OBSERVE_SNAPSHOT_ABANDON_MS,
   OBSERVE_SNAPSHOT_SETTLE_MS,
   PLATFORM_NAME,
   PLUGIN_NAME,
@@ -40,7 +41,7 @@ import {
   type ThermostatState,
 } from './types/device'
 import type { BucketMap } from './types/nest'
-import { ConfigurationError } from './errors'
+import { AuthenticationError, ConfigurationError, SessionShapeError } from './errors'
 import { NestTransport } from './api/transport'
 import type { TraitUpdate } from './api/protobuf'
 import {
@@ -53,11 +54,12 @@ import {
 } from './diagnostics/collector'
 import { formatDiagnosticLine } from './diagnostics/format'
 import type { DeviceGauges, DiagnosticsSnapshot } from './diagnostics/types'
-import { toDeviceId, toResourceId } from './state/classify'
+import { OBSERVE_DEVICE_PREFIX, toDeviceId, toResourceId } from './state/classify'
 import { ObserveState } from './state/observe-state'
 import { buildInventory, listDevices } from './state/registry'
 import { validateConfig } from './utils/validators'
 import { createScopedLogger, type Logger } from './utils/logger'
+import { computeBackoffMs } from './utils/retry'
 import { sanitizeError, sanitizeString } from './utils/sanitizers'
 import type { AccessoryContext } from './accessories/base'
 import { NestAccessory } from './accessories/base'
@@ -118,6 +120,20 @@ function isParseableJson(value: string): boolean {
   }
 }
 
+/**
+ * Whether a startup failure is genuinely unrecoverable without user action.
+ *
+ * Only a rejected credential or a config/contract problem qualifies. Everything
+ * else — DNS, TLS, timeouts, 5xx, an open breaker — is a transient condition the
+ * run loops already recover from, so the boot path must retry rather than give
+ * up and blame the token.
+ */
+function isFatalStartupError(error: unknown): boolean {
+  return error instanceof AuthenticationError
+    || error instanceof ConfigurationError
+    || error instanceof SessionShapeError
+}
+
 export class MyNestPlatform implements DynamicPlatformPlugin {
   readonly Service: typeof Service
   readonly Characteristic: typeof Characteristic
@@ -135,7 +151,12 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   /** Optional house-wide Eco switch (not a Nest device). */
   #globalEco: GlobalEcoAccessory | null = null
 
-  readonly #observe = new ObserveState()
+  readonly #observe = new ObserveState((cap) => {
+    this.#log.warn(
+      `Observe is tracking ${cap} resources — further ones are being dropped. `
+      + 'Nest may be emitting identifiers this plugin does not model.',
+    )
+  })
   #buckets: BucketMap = {}
   #transport: NestTransport | null = null
   #pendingUpdate: NodeJS.Timeout | null = null
@@ -150,6 +171,8 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
    */
   #observeSnapshotIds: Set<string> | null = null
   #observeSnapshotSettleTimer: NodeJS.Timeout | null = null
+  /** Guards against a session that connects but never delivers a device. */
+  #observeSnapshotAbandonTimer: NodeJS.Timeout | null = null
   /**
    * True after at least one non-truncated Observe device burst has settled.
    * HomeKit prune must wait for this — early frames increment `observeFrames`
@@ -178,6 +201,8 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   #lastInventory: DeviceInventory | null = null
   #diagnosticsTimer: NodeJS.Timeout | null = null
   #fatalReminderTimer: NodeJS.Timeout | null = null
+  #startRetryTimer: NodeJS.Timeout | null = null
+  #startRetryAttempt = 0
   #lastDiagnosticsHealth: 'healthy' | 'degraded' | null = null
   /** One-shot startup line after the first HomeKit inventory sync. */
   #hasLoggedPlatformReady = false
@@ -288,15 +313,62 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     try {
       await transport.start()
     } catch (error) {
-      this.#handleFatal(error instanceof Error ? error : new Error(String(error)))
+      // Only an unrecoverable failure may reach #handleFatal. `start()` opens a
+      // session and runs one app_launch, so it also rejects for DNS, TLS,
+      // timeout, 5xx, and breaker errors — none of which mean the token is bad.
+      // Treating those as fatal permanently disabled the plugin for the life of
+      // the process and told the user to paste a fresh token, which is exactly
+      // what a Raspberry Pi that boots before its network is up would see.
+      // Steady state already classifies these correctly; this is the boot path
+      // catching up.
+      if (isFatalStartupError(error)) {
+        this.#handleFatal(error instanceof Error ? error : new Error(String(error)))
+        return
+      }
+
+      this.#log.warn(
+        `Could not reach Nest at startup (${sanitizeError(error)}); retrying in the background.`,
+      )
+      this.#scheduleStartRetry()
       return
     }
 
+    this.#startRetryAttempt = 0
     this.#startDiagnostics()
 
     // REST is up; Observe usually follows within a second. Naming both avoids
     // implying thermostats are already live when only app_launch succeeded.
     this.#log.info('Connected to Nest (REST up; Observe connecting)')
+  }
+
+  /**
+   * Retry `#start` with backoff after a transient startup failure.
+   *
+   * `didFinishLaunching` fires once, so without this a single blip at boot left
+   * the plugin permanently idle — and cache-restored Protect tiles keep whatever
+   * smoke/CO value Homebridge persisted, with no handler to mark them faulted.
+   */
+  #scheduleStartRetry(): void {
+    if (this.#isShuttingDown || this.#hasFatal || this.#startRetryTimer) {
+      return
+    }
+
+    this.#transport?.stop()
+    this.#transport = null
+
+    this.#startRetryAttempt++
+    const delayMs = computeBackoffMs(this.#startRetryAttempt)
+
+    this.#startRetryTimer = setTimeout(() => {
+      this.#startRetryTimer = null
+      if (this.#isShuttingDown || this.#hasFatal) {
+        return
+      }
+      void this.#start().catch((error: unknown) => {
+        this.#log.error(`Startup retry failed: ${sanitizeError(error)}`)
+      })
+    }, delayMs)
+    this.#startRetryTimer.unref?.()
   }
 
   #stop(): void {
@@ -322,16 +394,19 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       this.#fatalReminderTimer = null
     }
 
+    if (this.#startRetryTimer) {
+      clearTimeout(this.#startRetryTimer)
+      this.#startRetryTimer = null
+    }
+
     if (this.#pendingUpdate) {
       clearTimeout(this.#pendingUpdate)
       this.#pendingUpdate = null
     }
-    if (this.#observeSnapshotSettleTimer) {
-      clearTimeout(this.#observeSnapshotSettleTimer)
-      this.#observeSnapshotSettleTimer = null
-    }
+    this.#clearObserveSnapshotTimers()
     this.#observeSnapshotIds = null
     this.#observeRemovalCandidates.clear()
+    this.#globalEco?.dispose()
 
     this.#transport?.stop()
     this.#transport = null
@@ -399,7 +474,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     if (this.#observeSnapshotIds) {
       for (const update of traits) {
-        if (update.resourceId.startsWith('DEVICE_')) {
+        if (update.resourceId.startsWith(OBSERVE_DEVICE_PREFIX)) {
           this.#observeSnapshotIds.add(update.resourceId)
         }
       }
@@ -412,25 +487,54 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   /**
    * Start collecting the device set Nest sends on a fresh Observe connection.
    *
-   * The settle timer is armed immediately rather than waiting for the first
-   * trait. A session that delivers none — a breaker-open attempt, or a stream
-   * that drops before any data — would otherwise leave `#observeSnapshotIds`
-   * non-null forever, and `#removeStaleAccessories` returns early while a
-   * burst is in flight. HomeKit pruning would then never run again.
-   * `#finalizeObserveSnapshot` already no-ops on an empty set.
+   * Two separate deadlines, because they answer different questions. The
+   * *abandon* deadline covers "did this session ever deliver anything?" and has
+   * to be long enough to absorb a TCP + TLS handshake plus gateway processing —
+   * arming the short quiet-period timer here instead meant a merely slow
+   * connection finalized an empty snapshot, which nulled the collector, stopped
+   * re-arming, and left `#hasSettledObserveSnapshot` false so HomeKit pruning
+   * never ran again for that session. The *settle* deadline is the quiet period
+   * after the last trait, and only `#applyTraits` may arm it.
    */
   #beginObserveSnapshot(): void {
     if (this.#isShuttingDown) {
       return
     }
     this.#observeSnapshotIds = new Set()
-    this.#armObserveSnapshotSettle()
+    this.#clearObserveSnapshotTimers()
+
+    this.#observeSnapshotAbandonTimer = setTimeout(() => {
+      this.#observeSnapshotAbandonTimer = null
+      if (this.#observeSnapshotIds?.size === 0) {
+        // Nothing arrived at all; stop collecting so a trait-less session
+        // cannot leave the collector open forever and block pruning.
+        this.#observeSnapshotIds = null
+        this.#log.debug('Observe session produced no devices before the snapshot deadline')
+      }
+    }, OBSERVE_SNAPSHOT_ABANDON_MS)
+    this.#observeSnapshotAbandonTimer.unref?.()
+  }
+
+  #clearObserveSnapshotTimers(): void {
+    if (this.#observeSnapshotSettleTimer) {
+      clearTimeout(this.#observeSnapshotSettleTimer)
+      this.#observeSnapshotSettleTimer = null
+    }
+    if (this.#observeSnapshotAbandonTimer) {
+      clearTimeout(this.#observeSnapshotAbandonTimer)
+      this.#observeSnapshotAbandonTimer = null
+    }
   }
 
   /** After the opening burst goes quiet, drop Observe devices Nest omitted. */
   #armObserveSnapshotSettle(): void {
     if (this.#observeSnapshotSettleTimer) {
       clearTimeout(this.#observeSnapshotSettleTimer)
+    }
+    // The burst has started, so the "never delivered anything" guard is moot.
+    if (this.#observeSnapshotAbandonTimer) {
+      clearTimeout(this.#observeSnapshotAbandonTimer)
+      this.#observeSnapshotAbandonTimer = null
     }
 
     this.#observeSnapshotSettleTimer = setTimeout(() => {
@@ -471,7 +575,8 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     this.#hasSettledObserveSnapshot = true
     this.#observeSnapshotSequence++
 
-    const knownDeviceIds = this.#observe.resourceIds.filter((id) => id.startsWith('DEVICE_'))
+    const knownDeviceIds = this.#observe.resourceIds
+      .filter((id) => id.startsWith(OBSERVE_DEVICE_PREFIX))
     const missing = knownDeviceIds.filter((id) => !snapshotIds.has(id))
 
     for (const id of snapshotIds) {
@@ -853,7 +958,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     }
 
     for (const [uuid, accessory] of this.#cachedAccessories) {
-      const context = accessory.context as AccessoryContext
+      const context = accessory.context as AccessoryContext | undefined
       if (context?.synthetic === 'global_eco') {
         continue
       }
@@ -927,6 +1032,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory])
       this.#cachedAccessories.delete(uuid)
     }
+    this.#globalEco?.dispose()
     this.#globalEco = null
   }
 
@@ -999,6 +1105,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
             lastObserveFrameAgeSec: null,
             lastRestSuccessAgeSec: null,
             isRestAlarmFeedAvailable: false,
+            isDecodeDegraded: false,
             circuitBreaker: { rest: 'CLOSED', observe: 'CLOSED' },
           }
         }
@@ -1012,6 +1119,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
           lastObserveFrameAgeSec: status.lastObserveFrameAgeSec,
           lastRestSuccessAgeSec: status.lastRestSuccessAgeSec,
           isRestAlarmFeedAvailable: status.isRestAlarmFeedAvailable,
+          isDecodeDegraded: status.isDecodeDegraded,
           circuitBreaker: {
             rest: status.circuitBreaker.rest.state,
             observe: status.circuitBreaker.observe.state,

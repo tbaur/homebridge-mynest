@@ -57,7 +57,13 @@ export class FakeHttp2Session extends EventEmitter {
   }
 
   close(): void {
+    if (this.isClosed) {
+      return
+    }
     this.isClosed = true
+    // A real Http2Session emits `close` once it finishes closing, which is what
+    // the client relies on to cancel its forced-destroy backstop.
+    this.emit('close')
   }
 
   /**

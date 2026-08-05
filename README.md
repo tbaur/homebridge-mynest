@@ -34,7 +34,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 
 <!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->
 - **Built for Homebridge 2** — Live updates use stored getters + `updateValue(...)`, not the removed `getValue()` or stale `.value` reads
-- **556 Tests** — Jest suite gated on 92% statements / 83% branches globally, plus per-area floors, and verified to leave no open handles
+- **575 Tests** — Jest suite gated on 92% statements / 83% branches globally, plus per-area floors, and verified to leave no open handles
 - **Strict TypeScript** — `strict` mode with unused locals/params and no implicit returns, plus type-aware linting (no floating promises)
 - **Secret hygiene** — Access tokens are redacted from logs, and untrusted Nest responses cannot reach `Object.prototype`
 - **No analytics** — Zero tracking or data collection

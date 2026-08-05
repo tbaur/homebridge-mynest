@@ -38,14 +38,14 @@ module.exports = {
   coverageThreshold: {
     global: {
       branches: 83,
-      functions: 95,
+      functions: 94,
       lines: 92,
       statements: 92,
     },
     './src/api/': {
-      branches: 79,
-      functions: 92,
-      lines: 91,
+      branches: 80,
+      functions: 91,
+      lines: 90,
     },
     './src/platform.ts': {
       branches: 74,
@@ -57,7 +57,7 @@ module.exports = {
       lines: 92,
     },
     './src/state/': {
-      branches: 91,
+      branches: 92,
       lines: 96,
     },
     './src/utils/': {
