@@ -35,7 +35,7 @@
   "devDependencies": {
     "@homebridge/hap-nodejs": "^2.0.4",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.1.2",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "eslint": "^10.7.0",
