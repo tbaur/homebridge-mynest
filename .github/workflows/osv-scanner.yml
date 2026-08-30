@@ -1,7 +1,6 @@
-# Scans the committed lockfile against the OSV database: weekly and on every
-# push to main, plus a PR check that fails when a change introduces a new
-# vulnerability. Complements `npm audit` in test.yml, which uses a different
-# advisory source.
+# Scans the committed lockfile against the OSV database: weekly, plus a PR
+# check that fails when a change introduces a new vulnerability. Complements
+# `npm audit` in test.yml, which uses a different advisory source.
 #
 # Uses a third-party action, pinned by commit SHA like every other action here.
 # Options: https://google.github.io/osv-scanner/github-action/
@@ -15,8 +14,6 @@ on:
     branches: [ "main" ]
   schedule:
     - cron: '22 4 * * 1'
-  push:
-    branches: [ "main" ]
 
 permissions:
   # Required to upload SARIF file to CodeQL. See: https://github.com/github/codeql-action/issues/2117
@@ -28,7 +25,7 @@ permissions:
 
 jobs:
   scan-scheduled:
-    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' }}
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
     with:
       # Recurse the whole tree; --skip-git because only the lockfile matters.
