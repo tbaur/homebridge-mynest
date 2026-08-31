@@ -1,5 +1,7 @@
 # Protocol notes
 
+User-facing options and troubleshooting: [README-DETAILED.md](README-DETAILED.md). Token capture: [AUTH.md](AUTH.md).
+
 Nest publishes no consumer API. Everything below was confirmed with a probe kit against a live Nest Account. Treat this as a working map of private backends, not a promise Nest will keep them stable.
 
 ## Dual transport

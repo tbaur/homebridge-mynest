@@ -1,5 +1,7 @@
 # Authentication
 
+Install and options: [README](../README.md). Full options and troubleshooting: [README-DETAILED.md](README-DETAILED.md).
+
 This plugin supports **Nest Account** access tokens only. Google account sign-in (browser cookies, `issueToken`, `ya29.` OAuth tokens, JWTs) is intentionally not implemented.
 
 Nest publishes no consumer API for this path. The plugin opens a session the same way the Nest web app does: `GET https://home.nest.com/session` with `Authorization: Basic <access_token>`, then uses the session `access_token`, `userid`, and `urls.transport_url` for REST and Observe.

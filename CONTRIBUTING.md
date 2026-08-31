@@ -38,4 +38,4 @@ npm run verify
 
 - Keep PRs focused
 - Include tests for behaviour changes
-- Update docs when user-facing semantics change (especially occupancy and smoke/CO)
+- Update docs when user-facing semantics change (especially occupancy and smoke/CO). User-facing install stays in [README.md](README.md); options and troubleshooting live in [docs/README-DETAILED.md](docs/README-DETAILED.md).
