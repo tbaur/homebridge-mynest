@@ -84,6 +84,8 @@
     "assets/**/*",
     "config.schema.json",
     "CHANGELOG.md",
-    "SECURITY.md"
+    "SECURITY.md",
+    "README.md",
+    "docs/**/*"
   ]
 }

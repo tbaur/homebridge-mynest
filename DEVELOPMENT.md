@@ -1,5 +1,7 @@
 # Development
 
+User-facing install and options: [README.md](README.md). Full options, occupancy caveats, and troubleshooting: [docs/README-DETAILED.md](docs/README-DETAILED.md). Token capture: [docs/AUTH.md](docs/AUTH.md). Wire-level notes: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
 ## Architecture
 
 Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below it, `api/` speaks Nest (REST + Observe) and knows nothing about HomeKit. The state layer between them is pure and fixture-testable.

@@ -1,5 +1,7 @@
 # Scripts
 
+User-facing options: [docs/README-DETAILED.md](../docs/README-DETAILED.md). Token capture: [docs/AUTH.md](../docs/AUTH.md).
+
 | Script | Purpose |
 | --- | --- |
 | `verify.mjs` | Live read-only check of compiled `dist/` against a Nest Account |
