@@ -13,7 +13,7 @@
  */
 
 import type { CharacteristicValue, Perms, PlatformAccessory, Service } from 'homebridge'
-import { formatThermostatUpdateLog } from '../api/thermostat-write'
+import { clampSetpoint, formatThermostatUpdateLog } from '../api/thermostat-write'
 import {
   MAX_REPORTED_TEMPERATURE_C,
   MAX_SETPOINT_C,
@@ -34,6 +34,24 @@ function midpoint(low: number | undefined, high: number | undefined): number | u
     return undefined
   }
   return (low + high) / 2
+}
+
+/**
+ * A Nest setpoint on the grid this accessory publishes.
+ *
+ * HAP quantizes and clamps whatever it is handed against the characteristic's
+ * props, so pushing Nest's raw Celsius leaves HomeKit holding a number the
+ * plugin never computed. A thermostat set to Fahrenheit makes that the normal
+ * case rather than an edge one: it stores 72 °F as 22.222 °C, and every push
+ * lands a quarter degree from what the Nest app shows. Doing the arithmetic
+ * here keeps `onGet`, plugin state, and HomeKit's cache on one number.
+ *
+ * Quantize first and anchor the grid at {@link MIN_SETPOINT_C}, because that is
+ * what HAP does with `minStep` and `minValue`.
+ */
+function toPublishedSetpoint(celsius: number): number {
+  const steps = Math.round((celsius - MIN_SETPOINT_C) / SETPOINT_STEP_C)
+  return clampSetpoint(steps * SETPOINT_STEP_C + MIN_SETPOINT_C)
 }
 
 export class ThermostatAccessory extends NestAccessory<ThermostatState> {
@@ -180,9 +198,18 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
    * Send a Nest write when control is enabled; otherwise refresh so HomeKit
    * does not keep a slider position Nest never accepted.
    *
-   * Nest errors are logged and the last good values are pushed back — never
-   * rethrown into HAP `onSet`, which would mark the accessory "No Response"
-   * for a long sticky period in the Home app.
+   * A refused write and a failed one are different events and must not look
+   * alike. Refused means `allowThermostatControl` is off: nothing malfunctioned,
+   * the plugin is doing what it was configured to do, so `onSet` resolves and
+   * the last good values are pushed back.
+   *
+   * A write that reached Nest and failed is reported as a HAP communication
+   * failure, so the user learns their change was dropped instead of watching a
+   * slider spring back for no stated reason — and an automation awaiting the
+   * write sees it fail rather than succeed. Safe here only because every
+   * characteristic is bound with an `onGet` handler and the deferred refresh
+   * pushes a value a tick later: HAP resets the error status on both paths, so
+   * the failure cannot settle into a sticky "No Response".
    */
   async #write(patch: Partial<{
     mode: HvacMode
@@ -203,6 +230,12 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     } catch (error) {
       this.log.warn(`${this.identity.name}: thermostat update failed: ${sanitizeError(error)}`)
       this.#revertHomeKitValues()
+
+      // `HapStatusError` rather than the Nest error: rethrowing that would put a
+      // stack trace in the Homebridge log through HAP's unhandled-error path,
+      // and Nest's message is already logged above without the token in it.
+      const { HAPStatus, HapStatusError } = this.platform.api.hap
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
     }
   }
 
@@ -330,7 +363,7 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     const characteristic = this.binder.bind(this.#service, type, () => {
       const value = read()
       if (value !== undefined) {
-        return value
+        return toPublishedSetpoint(value)
       }
       const current = this.#service.getCharacteristic(type).value
       return typeof current === 'number'
@@ -341,8 +374,21 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
         : MIN_SETPOINT_C
     }, options.write ? { write: options.write } : {})
 
-    if (typeof characteristic.value === 'number' && characteristic.value < MIN_SETPOINT_C) {
-      characteristic.updateValue(MIN_SETPOINT_C)
+    // Correct both bounds; only the floor used to be. `setProps` clamps a
+    // cached value into the range itself, but it reports doing so, and Heating
+    // Threshold arrives holding HAP's default of 0 °C on every fresh
+    // thermostat, so pre-correcting is what keeps that off the log.
+    //
+    // Push only when the clamp actually moves the value. `updateValue` runs
+    // before the props below and is validated against the ones still in force,
+    // whose Heating Threshold ceiling is 25 °C, so re-sending an already-legal
+    // 30 °C would push it down to 25 instead of leaving it alone.
+    const cached = characteristic.value
+    if (typeof cached === 'number') {
+      const clamped = clampSetpoint(cached)
+      if (clamped !== cached) {
+        characteristic.updateValue(clamped)
+      }
     }
 
     characteristic.setProps({

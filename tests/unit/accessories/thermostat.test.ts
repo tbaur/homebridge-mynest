@@ -7,16 +7,39 @@
  * @fileoverview The thermostat accessory, against the real HAP implementation.
  */
 
+import type { Characteristic as HapCharacteristic, PlatformAccessory } from 'homebridge'
 import { ThermostatAccessory } from '../../../src/accessories/thermostat'
 import type { DeviceOfKind } from '../../../src/types/device'
 import type { ThermostatState } from '../../../src/types/device'
 import { Characteristic, Service, createAccessory, createPlatformStub } from '../../helpers/hap'
 import { createRecordingLogger } from '../../helpers/logger'
 
-function build(state: ThermostatState) {
+/**
+ * Record HAP's own complaints about a characteristic into `sink`.
+ *
+ * Debug-level ones are dropped: `setProps` corrects an out-of-range cached
+ * value on purpose and reports it at debug for exactly that reason, so it is
+ * the warn and error entries that mean the plugin pushed something illegal.
+ */
+function captureWarnings(characteristic: HapCharacteristic, sink: string[]): void {
+  characteristic.on('characteristic-warning', (type, message) => {
+    if (String(type) !== 'debug-message') {
+      sink.push(message)
+    }
+  })
+}
+
+/**
+ * @param restoreCache Runs before the accessory is published, so a test can set
+ *   up the Thermostat service the way Homebridge's cache hands one back after a
+ *   restart — and watch what binding then does to it.
+ */
+function build(state: ThermostatState, restoreCache?: (accessory: PlatformAccessory) => void) {
   const platform = createPlatformStub()
   const accessory = createAccessory('Hallway Thermostat')
   const log = createRecordingLogger()
+
+  restoreCache?.(accessory)
 
   const device: DeviceOfKind<'thermostat'> = {
     identity: {
@@ -192,8 +215,147 @@ describe('ThermostatAccessory', () => {
       .getCharacteristic(Characteristic.TargetTemperature).props
 
     expect(minValue).toBe(9)
+    // Nest's own 90 °F ceiling is 32.222 °C, which HAP quantizes onto the step
+    // grid as 32.0 before range-checking it, so 32 contains every setpoint Nest
+    // can report. Going higher would only let the Home app offer a setpoint
+    // above Nest's limit.
     expect(maxValue).toBe(32)
     expect(minStep).toBe(0.5)
+  })
+
+  describe('publishing a setpoint', () => {
+    // HAP validates every value against the characteristic's props, so a raw
+    // Nest reading outside them is corrected and complained about on every
+    // single push and poll. The write path has always clamped; the publish path
+    // is what was missing, and matching HAP's own arithmetic here is also what
+    // keeps `onGet`, plugin state, and HomeKit's cache on one number.
+
+    /** Watch a setpoint characteristic from before the accessory publishes. */
+    const watch = (
+      type: typeof Characteristic.TargetTemperature,
+      warnings: string[],
+    ) => (accessory: PlatformAccessory) => {
+      captureWarnings(
+        accessory.addService(Service.Thermostat as never).getCharacteristic(type as never),
+        warnings,
+      )
+    }
+
+    it('publishes Nest\'s 90 °F cooling ceiling within the props it declared', () => {
+      // 90 °F is 32.222 °C, which HAP quantizes to 32.0 before range-checking,
+      // so it lands inside the declared ceiling without any headroom above 32.
+      const warnings: string[] = []
+      const { service } = build({
+        currentTemperatureC: 30,
+        mode: 'cool',
+        activity: 'cooling',
+        targetTemperatureC: 32.222,
+        canHeat: false,
+        canCool: true,
+        displayUnit: 'F',
+      }, watch(Characteristic.TargetTemperature, warnings))
+
+      const characteristic = service.getCharacteristic(Characteristic.TargetTemperature)
+      expect(characteristic.value).toBeLessThanOrEqual(characteristic.props.maxValue!)
+      expect(characteristic.value).toBeGreaterThanOrEqual(32)
+      expect(warnings).toEqual([])
+    })
+
+    it('quantizes a Fahrenheit thermostat\'s setpoint onto the half-degree grid', () => {
+      // Nest stores 72 °F as 22.222 °C. Publishing that leaves the plugin
+      // believing it pushed 22.222 while HomeKit holds 22.
+      const { read } = build({ ...heating, targetTemperatureC: 22.222 })
+
+      expect(read(Characteristic.TargetTemperature)).toBe(22)
+    })
+
+    it('clamps a setpoint below Nest\'s floor without HAP objecting', () => {
+      const warnings: string[] = []
+      const { read } = build(
+        { ...heating, targetTemperatureC: 4 },
+        watch(Characteristic.TargetTemperature, warnings),
+      )
+
+      expect(read(Characteristic.TargetTemperature)).toBe(9)
+      expect(warnings).toEqual([])
+    })
+
+    it('answers a HomeKit poll for an out-of-range setpoint without objecting', async () => {
+      // HomeKit polls onGet, and HAP validates the answer the same way it
+      // validates a push — so an unclamped reader complains on every poll, not
+      // just once.
+      const warnings: string[] = []
+      const { service } = build(
+        { ...heating, targetTemperatureC: 4 },
+        watch(Characteristic.TargetTemperature, warnings),
+      )
+
+      await expect(
+        service.getCharacteristic(Characteristic.TargetTemperature).handleGetRequest(),
+      ).resolves.toBe(9)
+      expect(warnings).toEqual([])
+    })
+
+    it('publishes both range bounds on the grid', () => {
+      const { read } = build({
+        ...heating,
+        mode: 'range',
+        canCool: true,
+        targetTemperatureC: undefined,
+        targetTemperatureLowC: 18.888,
+        targetTemperatureHighC: 32.222,
+      })
+
+      expect(read(Characteristic.HeatingThresholdTemperature)).toBe(19)
+      expect(read(Characteristic.CoolingThresholdTemperature)).toBe(32)
+    })
+  })
+
+  describe('a setpoint restored from the Homebridge cache', () => {
+    // `Characteristic.deserialize` assigns `value` directly, with no
+    // validation, so a restored accessory really can hold a setpoint outside
+    // every prop range now in force. Seeding through `updateValue` would
+    // validate against HAP's defaults and correct the thing under test.
+    //
+    // State is empty in both cases so the reader has no Nest value and falls
+    // back to what binding left on the characteristic.
+    const restore = (
+      type: typeof Characteristic.TargetTemperature,
+      value: number,
+      warnings: string[],
+    ) => (accessory: PlatformAccessory) => {
+      const characteristic = accessory
+        .addService(Service.Thermostat as never)
+        .getCharacteristic(type as never)
+      characteristic.value = value
+      captureWarnings(characteristic, warnings)
+    }
+
+    it('is brought inside the range when it sits above the ceiling', () => {
+      const warnings: string[] = []
+      const { service } = build(
+        {},
+        restore(Characteristic.CoolingThresholdTemperature, 34, warnings),
+      )
+
+      expect(service.getCharacteristic(Characteristic.CoolingThresholdTemperature).value)
+        .toBe(32)
+      expect(warnings).toEqual([])
+    })
+
+    it('is brought inside the range when it sits below the floor', () => {
+      // Heating Threshold is the one that actually arrives out of range: HAP
+      // defaults it to 0 °C, below Nest's floor.
+      const warnings: string[] = []
+      const { service } = build(
+        {},
+        restore(Characteristic.HeatingThresholdTemperature, -40, warnings),
+      )
+
+      expect(service.getCharacteristic(Characteristic.HeatingThresholdTemperature).value)
+        .toBe(9)
+      expect(warnings).toEqual([])
+    })
   })
 
   it('reports the unit the device itself displays', () => {
@@ -357,25 +519,48 @@ describe('ThermostatAccessory', () => {
     expect(spy).toHaveBeenCalledWith('THERM01', expect.anything(), { targetTemperatureHighC: 25 })
   })
 
-  it('does not reject onSet when a Nest write fails', async () => {
-    // Throwing out of onSet makes Home sticky "No Response".
-    const { service, platform, read } = build(heating)
+  it('tells HomeKit a failed Nest write failed', async () => {
+    // Resolving would report the HVAC as changed when it was not, leaving the
+    // user with a slider that springs back and no reason given.
+    const { service, platform, read, log } = build(heating)
     jest.spyOn(platform, 'applyThermostatWrite').mockRejectedValue(new Error('Nest 503'))
 
     await expect(
       service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24),
-    ).resolves.toBeUndefined()
+    ).rejects.toBe(-70402)
 
-    // HAP assigns the requested value after onSet; revert is deferred one tick.
+    expect(log.warns.join('\n')).toMatch(/Hallway Thermostat: thermostat update failed/)
+    // Nest's last known values still go back, so the error status cannot stick:
+    // updateValue clears it, as does the next onGet.
     await new Promise<void>((resolve) => setImmediate(resolve))
     expect(read(Characteristic.TargetTemperature)).toBe(21)
+    expect(service.getCharacteristic(Characteristic.TargetTemperature).statusCode).toBe(0)
+  })
+
+  it('does not surface the Nest error text to HomeKit', async () => {
+    // A rethrown Nest error takes HAP's unhandled-error path, which prints the
+    // stack. The message is already logged above, redacted.
+    const { service, platform } = build(heating)
+    jest.spyOn(platform, 'applyThermostatWrite')
+      .mockRejectedValue(new Error('Nest 503 for token abc123'))
+
+    const rejection = await service.getCharacteristic(Characteristic.TargetTemperature)
+      .handleSetRequest(24)
+      .then(() => undefined, (error: unknown) => error)
+
+    expect(String(rejection)).not.toContain('abc123')
   })
 
   it('reverts HomeKit when thermostat control is disabled', async () => {
+    // Deliberately *not* an error: nothing malfunctioned, so onSet resolves and
+    // only the slider moves back. Reporting a failure here would fault a
+    // read-only install on every touch.
     const { service, platform, read, log } = build(heating)
     jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue(null)
 
-    await service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24)
+    await expect(
+      service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24),
+    ).resolves.toBeUndefined()
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(read(Characteristic.TargetTemperature)).toBe(21)

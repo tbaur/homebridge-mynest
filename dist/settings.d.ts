@@ -336,7 +336,15 @@ export declare const MAX_DIAGNOSTICS_INTERVAL_SEC = 86400;
 export declare const PROTECT_OCCUPANCY_HOLD_OFF_SEC = 600;
 /** Floor on the thermostat setpoint HomeKit may request, in Celsius. */
 export declare const MIN_SETPOINT_C = 9;
-/** Ceiling on the thermostat setpoint HomeKit may request, in Celsius. */
+/**
+ * Ceiling on the thermostat setpoint HomeKit may request, in Celsius.
+ *
+ * Nest's own ceiling is 90 °F, or 32.222 °C, which does not sit on the
+ * {@link SETPOINT_STEP_C} grid. HAP quantizes a value onto that grid *before*
+ * range-checking it, so 32.222 arrives as 32.0 and needs no headroom above 32
+ * to publish cleanly. Raising this to 32.5 would only add a setpoint the Home
+ * app can offer and Nest cannot honour.
+ */
 export declare const MAX_SETPOINT_C = 32;
 /** Granularity of thermostat setpoints in Celsius, matching Nest's own UI. */
 export declare const SETPOINT_STEP_C = 0.5;

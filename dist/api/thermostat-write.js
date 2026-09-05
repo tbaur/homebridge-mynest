@@ -20,6 +20,7 @@ exports.buildThermostatSetpointWrite = buildThermostatSetpointWrite;
 exports.formatThermostatUpdateLog = formatThermostatUpdateLog;
 exports.encodeEcoModeBatchUpdate = encodeEcoModeBatchUpdate;
 exports.encodeTargetTemperatureBatchUpdate = encodeTargetTemperatureBatchUpdate;
+exports.clampSetpoint = clampSetpoint;
 const node_crypto_1 = require("node:crypto");
 const settings_1 = require("../settings");
 const protobuf_1 = require("./protobuf");
@@ -223,6 +224,14 @@ function resolveStandbyMode(state, patchMode) {
     }
     return state.canCool && !state.canHeat ? 'cool' : 'heat';
 }
+/**
+ * Confine a Celsius setpoint to the range Nest accepts.
+ *
+ * Exported because the accessory's publish path needs the same bounds: the
+ * range HomeKit is told about and the range a write is clamped to must come
+ * from one place, or a value the plugin publishes can be one it would refuse
+ * to send back.
+ */
 function clampSetpoint(celsius) {
     return Math.min(settings_1.MAX_SETPOINT_C, Math.max(settings_1.MIN_SETPOINT_C, celsius));
 }

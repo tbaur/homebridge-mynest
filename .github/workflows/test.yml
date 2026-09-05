@@ -17,9 +17,11 @@ jobs:
 
     strategy:
       matrix:
-        # Homebridge 2 requires Node ^22 || ^24, so those are the only
-        # versions this plugin can run under end to end.
-        node-version: [22.x, 24.x]
+        # Mirrors `engines.node` in package.json, which mirrors Homebridge's
+        # own. Homebridge warns the operator about any plugin whose range does
+        # not satisfy the running Node, so the range cannot lag behind theirs —
+        # and a range this plugin claims but never builds against is a guess.
+        node-version: [22.x, 24.x, 26.x]
 
     steps:
     - name: Checkout code

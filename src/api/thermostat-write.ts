@@ -285,6 +285,14 @@ function resolveStandbyMode(
   return state.canCool && !state.canHeat ? 'cool' : 'heat'
 }
 
-function clampSetpoint(celsius: number): number {
+/**
+ * Confine a Celsius setpoint to the range Nest accepts.
+ *
+ * Exported because the accessory's publish path needs the same bounds: the
+ * range HomeKit is told about and the range a write is clamped to must come
+ * from one place, or a value the plugin publishes can be one it would refuse
+ * to send back.
+ */
+export function clampSetpoint(celsius: number): number {
   return Math.min(MAX_SETPOINT_C, Math.max(MIN_SETPOINT_C, celsius))
 }

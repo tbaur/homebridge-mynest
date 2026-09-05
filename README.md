@@ -3,7 +3,7 @@
 [![Tests](https://github.com/tbaur/homebridge-mynest/actions/workflows/test.yml/badge.svg)](https://github.com/tbaur/homebridge-mynest/actions/workflows/test.yml)
 [![npm version](https://img.shields.io/npm/v/homebridge-mynest?style=flat-square)](https://www.npmjs.com/package/homebridge-mynest)
 [![npm downloads](https://img.shields.io/npm/dt/homebridge-mynest?style=flat-square)](https://www.npmjs.com/package/homebridge-mynest)
-[![Node.js](https://img.shields.io/badge/node-22%20%7C%7C%2024-green)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-22%20%7C%7C%2024%20%7C%7C%2026-green)](https://nodejs.org)
 [![Homebridge](https://img.shields.io/badge/homebridge-2.x-purple)](https://homebridge.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -121,7 +121,7 @@ See [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
 ## Requirements
 
 - **Homebridge 2.x** (Homebridge 1.x is not supported)
-- **Node.js 22 or 24**
+- **Node.js 22, 24, or 26**
 - A Nest Account (not Google-only) with an `access_token` from [home.nest.com/session](https://home.nest.com/session)
 
 ## More Info
