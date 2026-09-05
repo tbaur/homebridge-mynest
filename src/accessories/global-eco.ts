@@ -176,6 +176,13 @@ export class GlobalEcoAccessory {
       this.#clearPending()
       this.#log.warn(`${DISPLAY_NAME}: Eco update failed: ${sanitizeError(error)}`)
       setImmediate(() => this.#binder.refresh())
+
+      // Same distinction the thermostat draws: a refusal above resolves, but a
+      // write that reached Nest and failed is reported so the user is not left
+      // watching a switch flip back with no stated reason. The deferred refresh
+      // clears HAP's error status a tick later, so it cannot stick.
+      const { HAPStatus, HapStatusError } = this.#platform.api.hap
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
     }
   }
 

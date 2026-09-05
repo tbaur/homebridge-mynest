@@ -116,12 +116,17 @@ describe('GlobalEcoAccessory', () => {
     expect(log.warns.join('\n')).toMatch(/enable Allow thermostat control/)
   })
 
-  it('reverts On when Nest rejects the write', async () => {
+  it('reports a failed write to HomeKit and reverts On', async () => {
+    // A write that reached Nest and failed is not the same event as one the
+    // plugin refused, and must not look like one: resolving would tell HomeKit
+    // and any waiting automation the change was accepted.
     const { service, platform, handler } = build()
     handler.updateAllEco(false)
     jest.spyOn(platform, 'applyGlobalEcoWrite').mockRejectedValue(new Error('Nest 503'))
 
-    await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+    // -70402 is HAPStatus.SERVICE_COMMUNICATION_FAILURE.
+    await expect(service.getCharacteristic(Characteristic.On).handleSetRequest(true))
+      .rejects.toBe(-70402)
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(service.getCharacteristic(Characteristic.On).value).toBe(false)

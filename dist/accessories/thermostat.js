@@ -210,6 +210,11 @@ class ThermostatAccessory extends base_1.NestAccessory {
             },
         });
     }
+    /**
+     * Send an Eco write, drawing the same line between refused and failed as
+     * {@link #write}: a refusal is the configured behaviour and resolves, while a
+     * write that reached Nest and failed is reported as a communication failure.
+     */
     async #writeEco(ecoOn) {
         try {
             const sent = await this.platform.applyEcoWrite(this.deviceId, ecoOn);
@@ -223,6 +228,8 @@ class ThermostatAccessory extends base_1.NestAccessory {
         catch (error) {
             this.log.warn(`${this.identity.name}: Eco update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
             this.#revertHomeKitValues();
+            const { HAPStatus, HapStatusError } = this.platform.api.hap;
+            throw new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
         }
     }
     /**

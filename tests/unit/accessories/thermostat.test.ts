@@ -456,6 +456,30 @@ describe('ThermostatAccessory', () => {
     expect(log.infos.join('\n')).toMatch(/Hallway Thermostat: Updating to Eco/)
   })
 
+  it('reports a failed Eco write to HomeKit', async () => {
+    // Same distinction the setpoint path draws: a refusal resolves, a genuine
+    // failure is reported. -70402 is HAPStatus.SERVICE_COMMUNICATION_FAILURE.
+    const { accessory, platform, log } = build(heating)
+    jest.spyOn(platform, 'applyEcoWrite').mockRejectedValue(new Error('Nest 503'))
+    const eco = accessory.getService(Service.Switch as never)!
+
+    await expect(eco.getCharacteristic(Characteristic.On).handleSetRequest(true))
+      .rejects.toBe(-70402)
+
+    expect(log.warns.join('\n')).toMatch(/Hallway Thermostat: Eco update failed/)
+  })
+
+  it('resolves a refused Eco write rather than reporting a failure', async () => {
+    const { accessory, platform, log } = build(heating)
+    jest.spyOn(platform, 'applyEcoWrite').mockResolvedValue(false)
+    const eco = accessory.getService(Service.Switch as never)!
+
+    await expect(eco.getCharacteristic(Characteristic.On).handleSetRequest(true))
+      .resolves.not.toThrow()
+
+    expect(log.warns.join('\n')).toMatch(/enable Allow thermostat control/)
+  })
+
   it('routes target temperature writes through the platform', async () => {
     const { service, platform, log } = build(heating)
     const spy = jest.spyOn(platform, 'applyThermostatWrite').mockResolvedValue({
