@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.0.1](https://github.com/tbaur/homebridge-mynest/compare/v2.0.0...v2.0.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* clamp published thermostat setpoints and report failed writes ([#46](https://github.com/tbaur/homebridge-mynest/issues/46)) ([c5bf879](https://github.com/tbaur/homebridge-mynest/commit/c5bf87993934dd17d43653bceb296c674a3fd7cc))
+
 ## [2.0.0](https://github.com/tbaur/homebridge-mynest/compare/v1.1.0...v2.0.0) (2026-08-05)
 
 
