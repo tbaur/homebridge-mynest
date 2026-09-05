@@ -52,7 +52,7 @@
   },
   "engines": {
     "homebridge": "^2.0.0",
-    "node": "^22 || ^24"
+    "node": "^22 || ^24 || ^26"
   },
   "peerDependencies": {
     "homebridge": "^2.0.0"

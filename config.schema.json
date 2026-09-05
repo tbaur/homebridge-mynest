@@ -6,18 +6,17 @@
   "footerDisplay": "Thermostat mode/setpoints/Eco write through Nest BatchUpdateState only when Allow thermostat control is enabled (off by default). Each thermostat gets an Eco Mode switch; optionally enable Expose global Eco switch for all-at-once. Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
   "schema": {
     "type": "object",
+    "required": ["name", "accessToken"],
     "properties": {
       "name": {
         "title": "Name",
         "type": "string",
         "default": "MyNest",
-        "required": true,
         "description": "Name shown in the Homebridge log."
       },
       "accessToken": {
         "title": "Nest access token",
         "type": "string",
-        "required": true,
         "minLength": 32,
         "x-schema-form": {
           "type": "password"
@@ -52,7 +51,6 @@
         "title": "Ignored device IDs",
         "type": "array",
         "default": [],
-        "required": false,
         "description": "Nest device IDs or serial numbers to leave out of HomeKit. IDs appear in the Homebridge log when devices are added.",
         "items": {
           "type": "string",

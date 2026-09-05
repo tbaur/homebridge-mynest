@@ -23,13 +23,19 @@ import type { MyNestPlatform } from '../../src/platform'
 import type { ResolvedConfig } from '../../src/types/config'
 
 /**
- * HAP declares `Perms` as a `const enum`, which TypeScript refuses to treat as
- * a value even though the module exports a real object at runtime. Reaching for
- * the runtime export keeps the permission strings out of this file.
+ * HAP declares `Perms` and `HAPStatus` as `const enum`s, which TypeScript
+ * refuses to treat as values even though the module exports real objects at
+ * runtime. Reaching for the runtime exports keeps the permission strings and
+ * status codes out of this file.
+ *
+ * `HapStatusError` is a plain class, but it is taken from the same place so the
+ * stub's `api.hap` carries exactly what Homebridge would hand a plugin.
  */
-const hapPerms = (jest.requireActual('@homebridge/hap-nodejs') as {
+const actualHap = jest.requireActual('@homebridge/hap-nodejs') as {
   Perms: Record<string, string>
-}).Perms
+  HAPStatus: Record<string, number>
+  HapStatusError: new (status: number) => Error
+}
 
 /** A `PlatformAccessory` good enough for the accessory classes under test. */
 export function createAccessory(displayName: string, id = displayName): PlatformAccessory {
@@ -63,7 +69,14 @@ export function createResolvedConfig(overrides: Partial<ResolvedConfig> = {}): R
  */
 export function createPlatformStub(config: Partial<ResolvedConfig> = {}): MyNestPlatform {
   const api = {
-    hap: { Service, Characteristic, uuid, Perms: hapPerms },
+    hap: {
+      Service,
+      Characteristic,
+      uuid,
+      Perms: actualHap.Perms,
+      HAPStatus: actualHap.HAPStatus,
+      HapStatusError: actualHap.HapStatusError,
+    },
   } as unknown as API
 
   return {

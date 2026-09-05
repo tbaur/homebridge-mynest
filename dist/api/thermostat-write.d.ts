@@ -65,3 +65,12 @@ export declare function formatThermostatUpdateLog(write: ThermostatSetpointWrite
 export declare function encodeEcoModeBatchUpdate(resourceId: string, ecoOn: boolean): Buffer;
 /** Encode a NestMessage suitable for TraitBatchApi/BatchUpdateState. */
 export declare function encodeTargetTemperatureBatchUpdate(write: ThermostatSetpointWrite): Buffer;
+/**
+ * Confine a Celsius setpoint to the range Nest accepts.
+ *
+ * Exported because the accessory's publish path needs the same bounds: the
+ * range HomeKit is told about and the range a write is clamped to must come
+ * from one place, or a value the plugin publishes can be one it would refuse
+ * to send back.
+ */
+export declare function clampSetpoint(celsius: number): number;

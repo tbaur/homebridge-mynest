@@ -17,6 +17,7 @@ import {
   MAX_SETPOINT_C,
   MIN_SETPOINT_C,
   MIN_SETPOINT_SPAN_C,
+  SETPOINT_STEP_C,
   MAX_DIAGNOSTICS_INTERVAL_SEC,
   MIN_DIAGNOSTICS_INTERVAL_SEC,
   OBSERVE_IDLE_TIMEOUT_MS,
@@ -92,6 +93,17 @@ describe('constants that constrain each other', () => {
 
   it('leaves room for the setpoint deadband inside the allowed range', () => {
     expect(MAX_SETPOINT_C - MIN_SETPOINT_C).toBeGreaterThan(MIN_SETPOINT_SPAN_C)
+  })
+
+  it('publishes a setpoint ceiling that Nest\'s own reaches once quantized', () => {
+    // Nest's ceiling is 90 °F, or 32.222 °C. HAP quantizes onto the step grid
+    // before range-checking, so that arrives as 32.0 and the ceiling does not
+    // need headroom above it — only enough to contain the quantized value.
+    const nestCeilingC = (90 - 32) * 5 / 9
+    const quantized = SETPOINT_STEP_C
+      * Math.round((nestCeilingC - MIN_SETPOINT_C) / SETPOINT_STEP_C) + MIN_SETPOINT_C
+    expect(quantized).toBeLessThanOrEqual(MAX_SETPOINT_C)
+    expect((MAX_SETPOINT_C - MIN_SETPOINT_C) % SETPOINT_STEP_C).toBe(0)
   })
 
   it('asks for every bucket type the state layer reads', () => {

@@ -11,10 +11,12 @@ import {
   ECO_MODE_STATE_TYPE_URL,
   TARGET_TEMPERATURE_SETTINGS_TYPE_URL,
   buildThermostatSetpointWrite,
+  clampSetpoint,
   encodeEcoModeBatchUpdate,
   encodeTargetTemperatureBatchUpdate,
   formatThermostatUpdateLog,
 } from '../../../src/api/thermostat-write'
+import { MAX_SETPOINT_C, MIN_SETPOINT_C } from '../../../src/settings'
 import { loadSchemas } from '../../../src/api/protobuf'
 import { mergeThermostatState } from '../../../src/state/thermostat-state'
 import type { ThermostatState } from '../../../src/types/device'
@@ -160,6 +162,15 @@ describe('buildThermostatSetpointWrite', () => {
       expect(write.targetTemperatureHeatC).toBeLessThanOrEqual(22)
     })
 
+    it('clamps a bound above the ceiling instead of sending it', () => {
+      const write = buildThermostatSetpointWrite('DEVICE_ABC', baseState, {
+        targetTemperatureHighC: 40,
+      })
+
+      expect(write.targetTemperatureCoolC).toBe(MAX_SETPOINT_C)
+      expect(write.targetTemperatureHeatC).toBeLessThanOrEqual(MAX_SETPOINT_C)
+    })
+
     it('keeps both bounds when a range midpoint is moved', () => {
       const write = buildThermostatSetpointWrite(
         'DEVICE_ABC',
@@ -170,6 +181,22 @@ describe('buildThermostatSetpointWrite', () => {
       expect(write.targetTemperatureHeatC).toBe(19.5)
       expect(write.targetTemperatureCoolC).toBe(24.5)
     })
+  })
+})
+
+describe('clampSetpoint', () => {
+  it('confines a setpoint to the range the accessory publishes', () => {
+    expect(clampSetpoint(50)).toBe(MAX_SETPOINT_C)
+    expect(clampSetpoint(-10)).toBe(MIN_SETPOINT_C)
+    expect(clampSetpoint(21.5)).toBe(21.5)
+  })
+
+  it('brings Nest\'s own 90 °F ceiling onto the published ceiling', () => {
+    // 32.222 °C is Nest's hottest setpoint, and HomeKit can never ask for it:
+    // HAP quantizes onto the half-degree grid, so the slider's top position is
+    // 32.0 either way. Clamping to the same 32 keeps the write path and the
+    // publish path agreeing on what the top of the range means.
+    expect(clampSetpoint(32.222)).toBe(MAX_SETPOINT_C)
   })
 })
 
