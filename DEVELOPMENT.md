@@ -34,6 +34,7 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 - **Life-safety honesty.** No invented Protect all-clear or motion from unverified Observe fields.
 - **HB2 update path.** Store getters; push with `updateValue(reader())` — never `getValue()`, never `updateValue(characteristic.value)`.
 - **Dependency-light.** Runtime dependency is `protobufjs` only; `fetch` and `http2` are Node built-ins.
+- **Dev-dependency hygiene.** An `overrides` entry pins transitive `js-yaml` to `^3.15.2` (GHSA-2883-xcg3-v3hh on 3.x via Jest coverage). It is dev-only and never shipped. The minimum is floating so a later 3.x advisory fix is picked up instead of held back.
 - **Secrets never reach the log.** Tokens, Basic headers, and user ids are redacted.
 
 ## Local workflow
