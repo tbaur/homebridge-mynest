@@ -28,10 +28,9 @@ jobs:
     if: ${{ github.event_name == 'schedule' }}
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
     with:
-      # Recurse the whole tree; --skip-git because only the lockfile matters.
+      # Recurse the whole tree. v2.6.0 dropped --skip-git; git roots are skipped unless --include-git-root is set, so the scan stays on the lockfile.
       scan-args: |-
         -r
-        --skip-git
         ./
   scan-pr:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
@@ -39,5 +38,4 @@ jobs:
     with:
       scan-args: |-
         -r
-        --skip-git
         ./
