@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.0.2](https://github.com/tbaur/homebridge-mynest/compare/v2.0.1...v2.0.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* log one diagnostics health warning ([ede8013](https://github.com/tbaur/homebridge-mynest/commit/ede8013cccdf0cf31396755e03a04a2ce7b96966))
+
 ## [2.0.1](https://github.com/tbaur/homebridge-mynest/compare/v2.0.0...v2.0.1) (2026-09-05)
 
 
