@@ -18,10 +18,6 @@ function diagnosticLabel(msg: string): string {
       return 'Diagnostics start'
     case 'diagnostics.stop':
       return 'Diagnostics stop'
-    case 'health.degraded':
-      return 'Health degraded'
-    case 'health.recovered':
-      return 'Health recovered'
     default:
       return msg
   }

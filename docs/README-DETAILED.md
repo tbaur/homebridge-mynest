@@ -102,7 +102,7 @@ Architecture and the Homebridge 2 update path: [DEVELOPMENT.md](../DEVELOPMENT.m
 
 ## Diagnostics
 
-Set `diagnosticsInterval` to `30`–`86400` to log periodic health heartbeats, plus boot/shutdown snapshots and healthy/degraded transitions. `0` (default) leaves diagnostics off.
+Set `diagnosticsInterval` to `30`–`86400` to log periodic health heartbeats and boot/shutdown snapshots. The heartbeat where health flips from healthy to degraded is a warning; later degraded heartbeats stay at info until it recovers. `0` (default) leaves diagnostics off.
 
 `structuredLogs` adds a JSON line next to each human summary. Reports cover REST and Observe transport gauges, breaker state, device inventory, and API latency.
 

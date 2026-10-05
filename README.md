@@ -23,7 +23,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 ### Reliability
 - **No accessory churn** on a cloud blip or expired token. Devices leave HomeKit only after Nest-confirmed drops
 - **Circuit breakers** on REST and Observe so a dead Nest edge fails fast
-- **Diagnostics** *(optional):* health heartbeats and healthy/degraded transitions in the Homebridge log
+- **Diagnostics** *(optional):* health heartbeats in the Homebridge log, with one warning when health becomes degraded
 
 ### Quality
 <!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->

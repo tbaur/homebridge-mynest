@@ -4,7 +4,7 @@
  * Licensed under the Apache License, Version 2.0
  * See LICENSE file for full license text
  *
- * @fileoverview Platform diagnostics lifecycle: start, heartbeat, stop, transitions.
+ * @fileoverview Platform diagnostics lifecycle: start, heartbeat, stop, health flips.
  */
 
 import type { NestTransportOptions, TransportStatus } from '../../src/api/transport'
@@ -141,7 +141,7 @@ describe('MyNestPlatform diagnostics', () => {
     expect(harness.stop).toHaveBeenCalled()
   })
 
-  it('emits Health degraded when Observe goes silent past the grace window', async () => {
+  it('logs one warning when health flips to degraded and does not repeat it', async () => {
     await launch()
     harness.status = {
       ...harness.status,
@@ -149,8 +149,38 @@ describe('MyNestPlatform diagnostics', () => {
       lastObserveFrameAgeSec: 90,
     }
 
+    const healthLines = (lines: string[]): string[] => lines.filter((line) => line.startsWith('Health:'))
+
+    log.infos.length = 0
+    log.warns.length = 0
     jest.advanceTimersByTime(60_000)
-    expect(log.warns.join('\n')).toMatch(/Health degraded: degraded \[observeDown\]/)
+
+    const warnings = healthLines(log.warns)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Health: degraded [observeDown]')
+    expect(warnings[0]).not.toContain('Health degraded')
+    expect(healthLines(log.infos)).toHaveLength(0)
+
+    log.infos.length = 0
+    log.warns.length = 0
+    jest.advanceTimersByTime(60_000)
+    expect(log.warns).toHaveLength(0)
+    expect(healthLines(log.infos)).toEqual([
+      expect.stringContaining('Health: degraded [observeDown]'),
+    ])
+
+    harness.status = {
+      ...harness.status,
+      observeState: 'connected',
+      lastObserveFrameAgeSec: 1,
+    }
+    log.infos.length = 0
+    log.warns.length = 0
+    jest.advanceTimersByTime(60_000)
+    expect(log.warns).toHaveLength(0)
+    expect(healthLines(log.infos)).toEqual([
+      expect.stringContaining('Health: healthy'),
+    ])
   })
 
   it('emits a structured JSON line when structuredLogs is on', async () => {

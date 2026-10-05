@@ -70,8 +70,6 @@ describe('formatDiagnosticLine', () => {
     ['health', 'Health'],
     ['diagnostics.start', 'Diagnostics start'],
     ['diagnostics.stop', 'Diagnostics stop'],
-    ['health.degraded', 'Health degraded'],
-    ['health.recovered', 'Health recovered'],
   ])('labels the %s channel as "%s"', (msg, label) => {
     expect(formatDiagnosticLine(snapshot({ msg }))).toContain(`${label}:`)
   })
