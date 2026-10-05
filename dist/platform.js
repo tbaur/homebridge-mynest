@@ -884,22 +884,20 @@ class MyNestPlatform {
         this.#diagnosticsTimer = setInterval(() => this.#diagnosticsHeartbeat(), interval);
         this.#diagnosticsTimer.unref?.();
     }
+    /**
+     * Emits one heartbeat. The line is a warning on the interval where health
+     * flips from healthy to degraded, and info otherwise. A reader failure stays
+     * inside the timer so it cannot crash Homebridge.
+     */
     #diagnosticsHeartbeat() {
         if (!this.#diagnostics) {
             return;
         }
         try {
             const report = this.#diagnostics.buildHeartbeat(this.#buildDiagnosticsReaders());
-            this.#emitDiagnostic('info', report);
             const health = report.lifecycle.health;
-            if (this.#lastDiagnosticsHealth !== null && health !== this.#lastDiagnosticsHealth) {
-                const isDegraded = health === 'degraded';
-                const transition = {
-                    ...report,
-                    msg: isDegraded ? 'health.degraded' : 'health.recovered',
-                };
-                this.#emitDiagnostic(isDegraded ? 'warn' : 'info', transition);
-            }
+            const becameDegraded = this.#lastDiagnosticsHealth === 'healthy' && health === 'degraded';
+            this.#emitDiagnostic(becameDegraded ? 'warn' : 'info', report);
             this.#lastDiagnosticsHealth = health;
         }
         catch (error) {
