@@ -34,7 +34,7 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 - **Life-safety honesty.** No invented Protect all-clear or motion from unverified Observe fields.
 - **HB2 update path.** Store getters; push with `updateValue(reader())` — never `getValue()`, never `updateValue(characteristic.value)`.
 - **Dependency-light.** Runtime dependency is `protobufjs` only; `fetch` and `http2` are Node built-ins.
-- **Dev-dependency hygiene.** An `overrides` entry pins transitive `js-yaml` to `^3.15.2` (GHSA-2883-xcg3-v3hh on 3.x via Jest coverage). It is dev-only and never shipped. The minimum is floating so a later 3.x advisory fix is picked up instead of held back.
+- **Dev-dependency hygiene.** An `overrides` entry pins transitive `js-yaml` to `^4.3.1` (GHSA-h67p-54hq-rp68 on 3.x via Jest coverage, and GHSA-5p4m-2wfm-xmqj on 4.x below 4.3.1). js-yaml 3 pulls `sprintf-js`, which has no patched release for CVE-2026-97058. It is dev-only and never shipped.
 - **Secrets never reach the log.** Tokens, Basic headers, and user ids are redacted.
 
 ## Local workflow
