@@ -120,7 +120,7 @@ See [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
 
 ## Requirements
 
-- **Homebridge 2.x** (Homebridge 1.x is not supported)
+- **Homebridge 2.x**
 - **Node.js 22, 24, or 26**
 - A Nest Account (not Google-only) with an `access_token` from [home.nest.com/session](https://home.nest.com/session)
 
