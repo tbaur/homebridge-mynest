@@ -9,7 +9,7 @@ Only the latest published release is supported. Fixes are shipped forward rather
 | Latest release | ✅ Active support |
 | Anything older | ❌ Unsupported — upgrade |
 
-The next release requires **Homebridge 2.x and Node.js 22 or newer**; Homebridge 1.x is no longer supported.
+Requires **Homebridge 2.x** and **Node.js 22 or newer**.
 
 ## Reporting a Vulnerability
 
