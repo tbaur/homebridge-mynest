@@ -113,6 +113,7 @@ module.exports = {
   ],
 
   moduleNameMapper: {
+    '^nock$': '<rootDir>/tests/nock-bridge.js',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
 
