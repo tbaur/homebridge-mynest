@@ -135,6 +135,10 @@ See [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
 - [Changelog](CHANGELOG.md)
 - [Report issues](https://github.com/tbaur/homebridge-mynest/issues)
 
+## Trademarks
+
+homebridge-mynest is an independent project. It is not affiliated with or endorsed by Google. Nest, Nest Protect, and Nest Temperature Sensor are trademarks of Google LLC.
+
 ## License
 
 Copyright 2026 tbaur
