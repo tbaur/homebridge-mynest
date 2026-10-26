@@ -24,9 +24,9 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 - **No accessory churn** on a cloud blip or expired token. Devices leave HomeKit only after Nest-confirmed drops
 - **Circuit breakers** on REST and Observe so a dead Nest edge fails fast
 - **Diagnostics** *(optional):* health heartbeats in the Homebridge log, with one warning when health becomes degraded
+- **PagerDuty** *(optional, off by default):* page when a Protect detects smoke or CO, the Protect alarm feed has been stale for 5 minutes, or the plugin has stopped because Nest rejected the token. Needs Node 22.13 or later. On an older Node 22 the plugin still runs and skips the page. See [PagerDuty](docs/README-DETAILED.md#pagerduty)
 
 ### Quality
-<!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->
 - A per-area test coverage floor, and a CI step that fails if the suite leaks an open handle
 - **Built for Homebridge 2:** stored getters and `updateValue(...)`, not the removed `getValue()`
 - **Secret hygiene:** access tokens are redacted from logs
@@ -68,7 +68,7 @@ Use the Homebridge UI, or add the platform to `config.json`:
 
 ### 4. Restart Homebridge
 
-Thermostats, Protects, and temperature sensors appear in the Home app as Nest reports them. The log should show `Connected to Nest (REST up; Observe connecting)`, then device adds, then `Platform ready`.
+Thermostats, Protects, and temperature sensors appear in the Home app as Nest reports them. The log should show `Connected to Nest`, then one `Adding ...` line per device, then `Platform ready`.
 
 Thermostat control stays off until you enable **Allow thermostat control**. Optionally enable **Expose global Eco switch**.
 
@@ -122,7 +122,7 @@ See [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
 ## Requirements
 
 - **Homebridge 2.x**
-- **Node.js 22, 24, or 26**
+- **Node.js 22, 24, or 26.** PagerDuty signals need 22.13 or later; the rest of the plugin does not
 - A Nest Account (not Google-only) with an `access_token` from [home.nest.com/session](https://home.nest.com/session)
 
 ## More Info
