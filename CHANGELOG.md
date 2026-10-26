@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.1.2](https://github.com/tbaur/homebridge-mynest/compare/v2.1.1...v2.1.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* page auth-failed when Nest rejects the token ([#72](https://github.com/tbaur/homebridge-mynest/issues/72)) ([d69bf69](https://github.com/tbaur/homebridge-mynest/commit/d69bf69e1e67e4f75e8a5148edcbd2c933499ee4))
+
 ## [2.1.1](https://github.com/tbaur/homebridge-mynest/compare/v2.1.0...v2.1.1) (2026-10-26)
 
 
