@@ -610,6 +610,22 @@ describe('NestTransport', () => {
     transport.stop()
   })
 
+  it('logs a Nest HTTP/2 stream reset at debug', async () => {
+    const { transport, http2, log } = createTransport()
+    await transport.start()
+
+    const connection = await http2.session()
+    connection.push(buildFrame(heatingThermostatTraits('DEVICE_THERM01')))
+    connection.failStream('Stream closed with error code NGHTTP2_INTERNAL_ERROR')
+    await waitUntil(() => http2.origins.length >= 2)
+    transport.stop()
+
+    // Visible warnings stay reserved for a stream that is actually down.
+    // This reset already reconnected, so the nghttp2 code is debug detail.
+    expect(log.warns.join('\n')).not.toMatch(/Observe: failed/)
+    expect(log.debugs.join('\n')).toMatch(/Observe stream ended \(reset\).*NGHTTP2_INTERNAL_ERROR/)
+  })
+
   it('treats an Observe stream transport error as recoverable, not fatal', async () => {
     const { transport, http2, fatals, log } = createTransport()
     await transport.start()

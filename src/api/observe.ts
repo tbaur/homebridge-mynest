@@ -55,6 +55,8 @@ export type ObserveEndReason =
   | 'idle'
   /** Nest closed the response. */
   | 'ended'
+  /** Nest reset the HTTP/2 stream. Recover the same way as a clean close. */
+  | 'reset'
   /** The caller asked to stop. */
   | 'aborted'
 
@@ -62,6 +64,11 @@ export interface ObserveSessionResult {
   readonly reason: ObserveEndReason
   readonly frameCount: number
   readonly durationMs: number
+  /**
+   * nghttp2 code and request id, set only for {@link ObserveEndReason} `reset`.
+   * A clean close has no detail.
+   */
+  readonly detail?: string
 }
 
 /** Node's `http2.connect`, or a substitute supplied by tests. */
@@ -81,6 +88,38 @@ export interface ObserveSessionOptions {
   idleTimeoutMs?: number
   pingIntervalMs?: number
   connectTimeoutMs?: number
+}
+
+/**
+ * Peer resets that mean this stream is over.
+ *
+ * Nest drains a live Observe stream with `RST_STREAM` `INTERNAL_ERROR`. Node
+ * reports that as "Stream closed with error code NGHTTP2_INTERNAL_ERROR".
+ * A stream that already delivered data clears the failure streak, so rejecting
+ * here made every recycle log "failed 1x in a row" at warning level. A clean
+ * `end` for the same recycle stays at debug. `NO_ERROR`, `CANCEL`,
+ * `REFUSED_STREAM`, and `STREAM_CLOSED` are the same kind of close. Protocol
+ * and flow-control errors still fail the session.
+ */
+const PEER_RESET = /(?:Stream|Session) closed with error code (NGHTTP2_(?:NO_ERROR|INTERNAL_ERROR|STREAM_CLOSED|REFUSED_STREAM|CANCEL))\b/
+
+/**
+ * Classify a socket error as a peer reset or a real stream failure.
+ *
+ * @see PEER_RESET
+ */
+function classifySocketError(
+  error: Error,
+  requestId: string,
+  label: 'Observe stream failed' | 'Observe connection failed',
+): { reason: 'reset', detail: string } | { error: ObserveStreamError } {
+  const code = PEER_RESET.exec(error.message)?.[1]
+  if (code !== undefined) {
+    return { reason: 'reset', detail: `${code} [request-id ${requestId}]` }
+  }
+  return {
+    error: new ObserveStreamError(`${label} [request-id ${requestId}]: ${error.message}`, { cause: error }),
+  }
 }
 
 /**
@@ -149,9 +188,9 @@ export function runObserveSession(options: ObserveSessionOptions): Promise<Obser
 
     // Registered before anything can throw: an unhandled `error` on an
     // Http2Session is a hard process crash.
-    client.on('error', (error) => settle({
-      error: new ObserveStreamError(`Observe connection failed [request-id ${requestId}]: ${error.message}`, { cause: error }),
-    }))
+    client.on('error', (error) => {
+      settle(classifySocketError(error, requestId, 'Observe connection failed'))
+    })
 
     let request: http2.ClientHttp2Stream
     try {
@@ -180,7 +219,7 @@ export function runObserveSession(options: ObserveSessionOptions): Promise<Obser
      * closed keeps a socket, a ping interval, and a 300 KB frame buffer alive
      * for the lifetime of the Homebridge process.
      */
-    const settle = (outcome: { reason: ObserveEndReason } | { error: Error }): void => {
+    const settle = (outcome: { reason: ObserveEndReason, detail?: string } | { error: Error }): void => {
       if (isSettled) {
         return
       }
@@ -222,6 +261,7 @@ export function runObserveSession(options: ObserveSessionOptions): Promise<Obser
         reason: outcome.reason,
         frameCount,
         durationMs: Date.now() - startedAt,
+        ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
       })
     }
 
@@ -348,9 +388,9 @@ export function runObserveSession(options: ObserveSessionOptions): Promise<Obser
     })
 
     request.on('end', () => settle({ reason: 'ended' }))
-    request.on('error', (error) => settle({
-      error: new ObserveStreamError(`Observe stream failed [request-id ${requestId}]: ${error.message}`, { cause: error }),
-    }))
+    request.on('error', (error) => {
+      settle(classifySocketError(error, requestId, 'Observe stream failed'))
+    })
     client.on('close', () => settle({ reason: 'ended' }))
 
     resetIdleTimer()

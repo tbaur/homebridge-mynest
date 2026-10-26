@@ -30,12 +30,19 @@ export type ObserveEndReason =
  | 'idle'
 /** Nest closed the response. */
  | 'ended'
+/** Nest reset the HTTP/2 stream. Recover the same way as a clean close. */
+ | 'reset'
 /** The caller asked to stop. */
  | 'aborted';
 export interface ObserveSessionResult {
     readonly reason: ObserveEndReason;
     readonly frameCount: number;
     readonly durationMs: number;
+    /**
+     * nghttp2 code and request id, set only for {@link ObserveEndReason} `reset`.
+     * A clean close has no detail.
+     */
+    readonly detail?: string;
 }
 /** Node's `http2.connect`, or a substitute supplied by tests. */
 export type Http2Connect = typeof http2.connect;

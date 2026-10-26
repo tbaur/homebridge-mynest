@@ -540,7 +540,8 @@ class NestTransport {
                 else {
                     consecutiveFailures++;
                 }
-                this.#options.log.debug(`Observe stream ended (${result.reason}) after ${result.frameCount} frame(s) in ${Math.round(result.durationMs / 1000)}s`);
+                const detail = result.detail === undefined ? '' : ` (${result.detail})`;
+                this.#options.log.debug(`Observe stream ended (${result.reason}) after ${result.frameCount} frame(s) in ${Math.round(result.durationMs / 1000)}s${detail}`);
             }
             catch (error) {
                 this.#observeSessionOpen = false;
