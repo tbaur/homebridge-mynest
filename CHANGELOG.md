@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.1.3](https://github.com/tbaur/homebridge-mynest/compare/v2.1.2...v2.1.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* log a Nest Observe stream reset at debug ([bc58dae](https://github.com/tbaur/homebridge-mynest/commit/bc58dae903350a101ea9372212199cb6965d80ff))
+
 ## [2.1.2](https://github.com/tbaur/homebridge-mynest/compare/v2.1.1...v2.1.2) (2026-10-26)
 
 
