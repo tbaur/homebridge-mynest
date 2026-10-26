@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.1.1](https://github.com/tbaur/homebridge-mynest/compare/v2.1.0...v2.1.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* log raw Protect REST fields at debug, not on every arrival ([#69](https://github.com/tbaur/homebridge-mynest/issues/69)) ([44c7cd9](https://github.com/tbaur/homebridge-mynest/commit/44c7cd95c6502047eaf3b9501a861d3085af8c85))
+* stop faulting temperature sensors when the house is quiet ([#71](https://github.com/tbaur/homebridge-mynest/issues/71)) ([793601c](https://github.com/tbaur/homebridge-mynest/commit/793601c9a673d7ad5debf6eac220c473f6683387))
+
 ## [2.1.0](https://github.com/tbaur/homebridge-mynest/compare/v2.0.2...v2.1.0) (2026-10-26)
 
 
