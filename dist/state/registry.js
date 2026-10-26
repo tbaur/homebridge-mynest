@@ -36,7 +36,7 @@ const REST_DEVICE_BUCKETS = [
  * be exercised against fixtures without any transport.
  */
 function buildInventory(options) {
-    const { observe, buckets, ignoredDeviceIds, restAlarmFeedAvailable = true, observeDataStale = false, } = options;
+    const { observe, buckets, ignoredDeviceIds, restAlarmFeedAvailable = true, } = options;
     const kinds = collectDeviceKinds(observe, buckets);
     const roomNames = mergeRoomNames((0, classify_1.collectObserveRoomNames)(observe), readRestRoomNames(buckets));
     const comfortTemperatures = readComfortTemperatures(observe, buckets, kinds);
@@ -50,7 +50,6 @@ function buildInventory(options) {
             deviceId,
             roomNames,
             restAlarmFeedAvailable,
-            observeDataStale,
         };
         let device;
         switch (kind) {
@@ -236,10 +235,9 @@ function buildThermostat(context, comfortTemperatureC) {
         ? (0, thermostat_state_1.readThermostatFromObserve)(observe, resourceId, { comfortTemperatureC })
         : undefined;
     const fromRest = (0, thermostat_state_1.readThermostatFromRest)(buckets.shared?.[deviceId], buckets.device?.[deviceId]);
-    const state = (0, thermostat_state_1.mergeThermostatState)(fromObserve, fromRest);
     return {
         identity: buildIdentity(context, 'thermostat'),
-        state: context.observeDataStale ? { ...state, isObserveStale: true } : state,
+        state: (0, thermostat_state_1.mergeThermostatState)(fromObserve, fromRest),
     };
 }
 function buildProtect(context) {
@@ -256,14 +254,13 @@ function buildProtect(context) {
 }
 function buildTemperatureSensor(context) {
     const { observe, buckets, deviceId } = context;
-    const state = (0, sensor_state_1.readTemperatureSensorState)({
-        state: observe,
-        resourceId: (0, classify_1.toResourceId)(deviceId),
-        kryptonite: buckets.kryptonite?.[deviceId],
-    });
     return {
         identity: buildIdentity(context, 'temperature_sensor'),
-        state: context.observeDataStale ? { ...state, isObserveStale: true } : state,
+        state: (0, sensor_state_1.readTemperatureSensorState)({
+            state: observe,
+            resourceId: (0, classify_1.toResourceId)(deviceId),
+            kryptonite: buckets.kryptonite?.[deviceId],
+        }),
     };
 }
 /** Every device in an inventory, in a stable order, for logging and iteration. */

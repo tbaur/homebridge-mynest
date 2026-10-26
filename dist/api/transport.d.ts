@@ -34,11 +34,6 @@ export interface NestTransportOptions {
      */
     onBuckets: (buckets: BucketMap, updatedKeys?: readonly string[]) => void;
     /**
-     * Called when decoded Observe device traits have been missing for
-     * {@link OBSERVE_DEVICE_DATA_STALE_MS}, and again when one arrives.
-     */
-    onObserveDeviceData?: (stale: boolean) => void;
-    /**
      * Called when a new Observe connection is about to open.
      *
      * The platform uses this to collect the reconnect device snapshot so
@@ -78,11 +73,6 @@ export interface NestTransportOptions {
     statusHeartbeatMs?: number;
     observeSilenceCheckMs?: number;
     forbiddenReprobeMs?: number;
-    /**
-     * How long with no decoded device trait before temperature sensors fault.
-     * Defaults to {@link OBSERVE_DEVICE_DATA_STALE_MS}. Tests set a short value.
-     */
-    observeDataStaleMs?: number;
     /** Injected REST subscribe breaker (tests); defaults to a fresh instance. */
     restCircuitBreaker?: CircuitBreaker;
     /** Injected `app_launch` breaker (tests); defaults to a fresh instance. */

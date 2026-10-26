@@ -638,27 +638,6 @@ describe('NestTransport', () => {
     expect(fatals[0]?.message).toMatch(/access token|HTTP 401/i)
   })
 
-  it('faults when no device trait arrives and clears when one does', async () => {
-    const events: boolean[] = []
-    const { transport, http2, log } = createTransport({
-      observeDataStaleMs: 20,
-      onObserveDeviceData: (stale) => events.push(stale),
-    })
-    await transport.start()
-
-    await new Promise((resolve) => setTimeout(resolve, 40))
-    expect(events).toEqual([true])
-    expect(log.warns.join('\n')).toContain('no device updates for 10 min')
-
-    const connection = await http2.session()
-    connection.push(buildFrame(heatingThermostatTraits('DEVICE_THERM01')))
-    await new Promise((resolve) => setTimeout(resolve, 10))
-
-    expect(events).toEqual([true, false])
-    expect(log.infos.join('\n')).toContain('Observe: device updates resumed')
-    transport.stop()
-  })
-
   it('stops the Observe loop after repeated HTTP 403 without killing a healthy REST path', async () => {
     const { transport, http2, fatals, log } = createTransport()
     await transport.start()

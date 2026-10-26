@@ -119,8 +119,6 @@ class MyNestPlatform {
     #pendingUpdate = null;
     #pendingChangedIds = null;
     #bucketsChanged = false;
-    /** True after 10 minutes with no decoded Observe device trait. */
-    #observeDeviceDataStale = false;
     #isShuttingDown = false;
     #hasFatal = false;
     #startedAt = 0;
@@ -264,11 +262,6 @@ class MyNestPlatform {
             log: this.#log,
             onTraits: (traits) => this.#applyTraits(traits),
             onBuckets: (buckets, updatedKeys) => this.#applyBuckets(buckets, updatedKeys),
-            onObserveDeviceData: (stale) => {
-                this.#observeDeviceDataStale = stale;
-                this.#bucketsChanged = true;
-                this.#scheduleUpdate();
-            },
             onObserveSessionStart: () => this.#beginObserveSnapshot(),
             onFatal: (error) => this.#handleFatal(error),
             onCircuitOpen: () => diagnostics?.breakerTrip(),
@@ -633,7 +626,6 @@ class MyNestPlatform {
             buckets: this.#buckets,
             ignoredDeviceIds: this.#config.ignoredDeviceIds,
             restAlarmFeedAvailable: isFeedAvailable,
-            observeDataStale: this.#observeDeviceDataStale,
         });
         this.#lastInventory = inventory;
         // A reconnect snapshot names every device; a typical patch names one.
@@ -1146,7 +1138,6 @@ class MyNestPlatform {
                 buckets: this.#buckets,
                 ignoredDeviceIds: this.#config.ignoredDeviceIds,
                 restAlarmFeedAvailable: this.#transport?.status.isRestAlarmFeedAvailable ?? false,
-                observeDataStale: this.#observeDeviceDataStale,
             })
             : null);
         if (inventory) {

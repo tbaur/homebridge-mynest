@@ -1040,7 +1040,7 @@ describe('MyNestPlatform', () => {
     expect(log.infos.join('\n')).not.toContain('REST topaz')
   })
 
-  it('faults a temperature sensor when Observe device data goes stale', async () => {
+  it('keeps a temperature sensor healthy through a quiet half hour', async () => {
     await launch()
     flushSync()
 
@@ -1057,7 +1057,8 @@ describe('MyNestPlatform', () => {
     }, ['kryptonite.SENSOR01'])
     flushSync()
 
-    harness.options.onObserveDeviceData?.(true)
+    // Observe sends device traits only on change, so silence is not an outage.
+    jest.advanceTimersByTime(30 * 60_000)
     flushSync()
 
     const sensor = api.registered.find(
@@ -1067,7 +1068,8 @@ describe('MyNestPlatform', () => {
     expect(
       sensor!.getService(api.hap.Service.TemperatureSensor)!
         .getCharacteristic(api.hap.Characteristic.StatusFault).value,
-    ).toBe(api.hap.Characteristic.StatusFault.GENERAL_FAULT)
+    ).toBe(api.hap.Characteristic.StatusFault.NO_FAULT)
+    expect(log.warns.join('\n')).not.toContain('temperature sensors')
   })
 
   it('keeps the other accessories updating when one accessory throws', async () => {

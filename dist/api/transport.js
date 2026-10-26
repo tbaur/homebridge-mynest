@@ -74,8 +74,6 @@ class NestTransport {
     #lastObserveFrameAt = null;
     /** Decoded `DEVICE_` traits in the Observe session that is open now. */
     #decodedDeviceTraitsThisSession = 0;
-    #observeDataStale = false;
-    #observeDataStaleTimer = null;
     #loopRestartTimers = new Map();
     #observeSessionOpen = false;
     #restLoopRunning = false;
@@ -251,7 +249,6 @@ class NestTransport {
         // default `--unhandled-rejections=throw` — taking every other plugin down.
         this.#startLoop('Observe', () => this.#runObserveLoop());
         this.#startLoop('REST', () => this.#runSubscribeLoop());
-        this.#scheduleObserveDataStale();
         if (this.#options.statusHeartbeatEnabled !== false) {
             this.#startStatusHeartbeat();
         }
@@ -331,10 +328,6 @@ class NestTransport {
             this.#observeStartupWarnTimer = null;
         }
         this.#clearRestAlarmFeedStaleTimer();
-        if (this.#observeDataStaleTimer) {
-            clearTimeout(this.#observeDataStaleTimer);
-            this.#observeDataStaleTimer = null;
-        }
         for (const timer of this.#loopRestartTimers.values()) {
             clearTimeout(timer);
         }
@@ -647,44 +640,14 @@ class NestTransport {
         if (status?.code !== undefined && status.code !== 0) {
             this.#options.log.debug(`Observe stream reported status ${status.code}${status.message ? `: ${status.message}` : ''}`);
         }
+        // Observe sends device traits only on change, so a quiet house can go a
+        // long time without one. This counts them only to judge a session productive.
         if (traits.some((trait) => trait.resourceId.startsWith(classify_1.OBSERVE_DEVICE_PREFIX))) {
-            this.#noteDecodedDeviceTrait();
+            this.#decodedDeviceTraitsThisSession++;
         }
         if (traits.length > 0) {
             this.#options.onTraits(traits);
         }
-    }
-    /** A decoded device trait is the only Observe event that means the house is live. */
-    #noteDecodedDeviceTrait() {
-        this.#decodedDeviceTraitsThisSession++;
-        if (this.#observeDataStale) {
-            this.#observeDataStale = false;
-            this.#options.log.info('Observe: device updates resumed');
-            this.#options.onObserveDeviceData?.(false);
-        }
-        this.#scheduleObserveDataStale();
-    }
-    /**
-     * Mark temperature sensors faulted if this long passes with no decoded
-     * device trait. Thermostats keep their last values.
-     *
-     * Catalog frames still increment `#observeFrames` and would otherwise keep
-     * the stream looking healthy.
-     */
-    #scheduleObserveDataStale() {
-        if (this.#observeDataStaleTimer) {
-            clearTimeout(this.#observeDataStaleTimer);
-        }
-        this.#observeDataStaleTimer = setTimeout(() => {
-            this.#observeDataStaleTimer = null;
-            if (this.#isStopped || this.#observeDataStale) {
-                return;
-            }
-            this.#observeDataStale = true;
-            this.#options.log.warn('Observe: no device updates for 10 min, temperature sensors marked faulted');
-            this.#options.onObserveDeviceData?.(true);
-        }, this.#options.observeDataStaleMs ?? settings_1.OBSERVE_DEVICE_DATA_STALE_MS);
-        this.#observeDataStaleTimer.unref?.();
     }
     /**
      * Run a transport loop, and start it again if it throws.
