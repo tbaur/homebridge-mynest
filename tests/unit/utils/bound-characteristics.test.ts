@@ -90,6 +90,71 @@ describe('CharacteristicBinder', () => {
     expect(service.getCharacteristic(Characteristic.CurrentTemperature).value).toBe(20)
   })
 
+  it('rethrows a HomeKit status error from a missing read', async () => {
+    const { service, binder } = setup()
+    const characteristic = binder.bind(
+      service as never,
+      Characteristic.CurrentTemperature as never,
+      () => undefined,
+      {
+        unavailable: (): never => {
+          const error = new Error('status') as Error & { hapStatus: number }
+          error.hapStatus = -70402
+          throw error
+        },
+      },
+    )
+
+    await expect(characteristic.handleGetRequest()).rejects.toBe(-70402)
+  })
+
+  it('returns null from onGet when the reader has no value and no fallback', async () => {
+    const { service, binder } = setup()
+    const characteristic = binder.bind(
+      service as never,
+      Characteristic.CurrentTemperature as never,
+      () => undefined,
+    )
+
+    await characteristic.handleGetRequest()
+    expect(characteristic.value).not.toBeUndefined()
+  })
+
+  it('answers a HomeKit read from whenMissing and does not push that fallback', async () => {
+    const { service, binder } = setup()
+    const reading: { temperature?: number } = {}
+    const characteristic = binder.bind(
+      service as never,
+      Characteristic.CurrentTemperature as never,
+      () => reading.temperature,
+      { whenMissing: () => 21 },
+    )
+
+    binder.refresh()
+    expect(characteristic.value).not.toBe(21)
+    await expect(characteristic.handleGetRequest()).resolves.toBe(21)
+
+    reading.temperature = 19
+    binder.refresh()
+    expect(characteristic.value).toBe(19)
+  })
+
+  it('returns null from a HomeKit read when the reader throws', async () => {
+    const { service, log, binder } = setup()
+    const characteristic = binder.bind(
+      service as never,
+      Characteristic.CurrentTemperature as never,
+      () => {
+        throw new Error('bad read')
+      },
+    )
+
+    // CurrentTemperature cannot be null. HAP substitutes 0 and warns. The
+    // binder's job is to catch the throw so that read does not reject.
+    await expect(characteristic.handleGetRequest()).resolves.toBe(0)
+    expect(log.warns.join('\n')).toContain('bad read')
+  })
+
   it('keeps updating the rest of the accessory when one reader throws', () => {
     const { service, log, binder } = setup()
 

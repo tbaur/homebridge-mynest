@@ -47,7 +47,7 @@ describe('readNumber', () => {
 
 describe('readString', () => {
   it('reads a non-empty string', () => {
-    expect(readString({ label: 'Hallway' }, 'label')).toBe('Hallway')
+    expect(readString({ label: 'Zone One' }, 'label')).toBe('Zone One')
   })
 
   it('treats an empty string as nothing', () => {

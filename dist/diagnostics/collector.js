@@ -154,7 +154,7 @@ class DiagnosticsCollector {
         const reasons = [];
         const transport = readers.transport();
         if (readers.fatalActive()) {
-            reasons.push('fatalAuth');
+            reasons.push('fatalStop');
         }
         if (transport.observeState === 'forbidden_dead') {
             reasons.push('observeForbiddenDead');
@@ -314,6 +314,7 @@ function redactConfig(config) {
         exposeGlobalEcoSwitch: config.exposeGlobalEcoSwitch,
         exposeProtectOccupancy: config.exposeProtectOccupancy,
         exposeProtectTemperature: config.exposeProtectTemperature,
+        pagerdutySignals: config.pagerdutySignals,
         ignoredDeviceIds: config.ignoredDeviceIds.size,
         debug: config.debug,
     };

@@ -13,7 +13,13 @@
  */
 
 import type { CharacteristicValue, Perms, PlatformAccessory, Service } from 'homebridge'
-import { clampSetpoint, formatThermostatUpdateLog } from '../api/thermostat-write'
+import {
+  applySentWrite,
+  clampSetpoint,
+  formatThermostatUpdateLog,
+  isSentWriteConfirmed,
+  type ThermostatSetpointWrite,
+} from '../api/thermostat-write'
 import {
   MAX_REPORTED_TEMPERATURE_C,
   MAX_SETPOINT_C,
@@ -21,6 +27,7 @@ import {
   MIN_SETPOINT_C,
   REPORTED_TEMPERATURE_STEP_C,
   SETPOINT_STEP_C,
+  THERMOSTAT_WRITE_ECHO_MAX_MS,
 } from '../settings'
 import type { HvacActivity, HvacMode, NestDevice, ThermostatState } from '../types/device'
 import type { Logger } from '../utils/logger'
@@ -54,9 +61,31 @@ function toPublishedSetpoint(celsius: number): number {
   return clampSetpoint(steps * SETPOINT_STEP_C + MIN_SETPOINT_C)
 }
 
+type SetpointPatch = Partial<{
+  mode: HvacMode
+  targetTemperatureC: number
+  targetTemperatureLowC: number
+  targetTemperatureHighC: number
+}>
+
+/** HomeKit changes waiting to go out as one Nest write. */
+interface QueuedSetpointWrite {
+  patch: SetpointPatch
+  /** One per `onSet` call merged into this write. */
+  readonly settlers: Array<(failure: Error | undefined) => void>
+}
+
 export class ThermostatAccessory extends NestAccessory<ThermostatState> {
   #service!: Service
   #ecoService: Service | null = null
+  /** Last Eco boolean Nest sent. Keeps a HomeKit read off `null`. */
+  #lastEco: boolean | undefined = undefined
+  /** Changes that arrived since the last write started. */
+  #queuedWrite: QueuedSetpointWrite | null = null
+  /** Serializes writes so each builds on the one before it. */
+  #writeChain: Promise<void> = Promise.resolve()
+  /** Last write Nest accepted but has not echoed through Observe yet. */
+  #unconfirmedWrite: { readonly write: ThermostatSetpointWrite, readonly sentAtMs: number } | null = null
 
   constructor(
     platform: MyNestPlatform,
@@ -73,16 +102,24 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     const { Characteristic, Service: HapService } = this.platform
     this.#service = this.resolveService(HapService.Thermostat)
     this.#service.setCharacteristic(Characteristic.Name, this.identity.name)
+    // This HAP build's Thermostat service does not list StatusFault. Adding it
+    // warns once, when the characteristic is first added. Temperature sensors
+    // carry the fault. Thermostats keep their last values. The transport logs
+    // the 10-minute gap.
     // Homebridge PlatformAccessory may expose setPrimaryService; Hap Accessory does.
     ;(this.accessory as PlatformAccessory & { setPrimaryService?: (service: Service) => void })
       .setPrimaryService?.(this.#service)
 
     // Required Thermostat characteristics must never return null from onGet —
     // HomeKit marks the accessory "No Response" and hides room tiles.
+    // HAP's CurrentTemperature default is 0, which is a legal room temperature.
+    // Until Nest has sent a reading, that default is not one. A cached value
+    // other than 0 is a previous reading and stays.
     this.#bindRequired(
       Characteristic.CurrentTemperature,
       () => this.state.currentTemperatureC,
       20,
+      { untouchedDefault: 0 },
     )
     this.#bindRequired(
       Characteristic.CurrentHeatingCoolingState,
@@ -142,8 +179,8 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
       },
     )
 
-    // Nest owns what the device's own screen shows; HomeKit is always given
-    // Celsius regardless.
+    // Temperature values are always Celsius. The display-unit characteristic
+    // follows the Nest screen.
     this.#bindRequired(
       Characteristic.TemperatureDisplayUnits,
       () => this.state.displayUnit === 'F'
@@ -211,31 +248,88 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
    * pushes a value a tick later: HAP resets the error status on both paths, so
    * the failure cannot settle into a sticky "No Response".
    */
-  async #write(patch: Partial<{
-    mode: HvacMode
-    targetTemperatureC: number
-    targetTemperatureLowC: number
-    targetTemperatureHighC: number
-  }>): Promise<void> {
-    try {
-      const write = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch)
-      if (!write) {
-        this.log.warn(
-          `${this.identity.name}: ignoring HomeKit change — enable Allow thermostat control in config.`,
-        )
-        this.#revertHomeKitValues()
+  #write(patch: SetpointPatch): Promise<void> {
+    // HomeKit sends a scene's mode and setpoint as separate `onSet` calls in
+    // the same tick. Merged here, they become one Nest write; sent apart, each
+    // carries the other's old value and the last one to land wins.
+    return new Promise<void>((resolve, reject) => {
+      const settle = (failure: Error | undefined): void => {
+        if (failure) {
+          reject(failure)
+        } else {
+          resolve()
+        }
+      }
+      if (this.#queuedWrite) {
+        this.#queuedWrite.patch = { ...this.#queuedWrite.patch, ...patch }
+        this.#queuedWrite.settlers.push(settle)
         return
       }
+      this.#queuedWrite = { patch: { ...patch }, settlers: [settle] }
+      setImmediate(() => {
+        this.#writeChain = this.#writeChain.then(() => this.#flushQueuedWrite())
+      })
+    })
+  }
+
+  async #flushQueuedWrite(): Promise<void> {
+    const queued = this.#queuedWrite
+    this.#queuedWrite = null
+    if (!queued) {
+      return
+    }
+    const failure = await this.#sendWrite(queued.patch)
+    for (const settle of queued.settlers) {
+      settle(failure)
+    }
+  }
+
+  /** @returns The HAP error for HomeKit when the write failed; `undefined` otherwise. */
+  async #sendWrite(patch: SetpointPatch): Promise<Error | undefined> {
+    try {
+      const write = await this.platform.applyThermostatWrite(this.deviceId, this.#writeBaseState(), patch)
+      if (!write) {
+        this.log.warn(`${this.identity.name}: thermostat control is off, change ignored`)
+        this.#revertHomeKitValues()
+        return undefined
+      }
+      this.#unconfirmedWrite = { write, sentAtMs: Date.now() }
       this.log.info(`${this.identity.name}: ${formatThermostatUpdateLog(write)}`)
+      return undefined
     } catch (error) {
-      this.log.warn(`${this.identity.name}: thermostat update failed: ${sanitizeError(error)}`)
+      this.log.warn(`${this.identity.name}: update failed: ${sanitizeError(error)}`)
       this.#revertHomeKitValues()
 
       // `HapStatusError` rather than the Nest error: rethrowing that would put a
       // stack trace in the Homebridge log through HAP's unhandled-error path,
       // and Nest's message is already logged above without the token in it.
       const { HAPStatus, HapStatusError } = this.platform.api.hap
-      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      return new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+    }
+  }
+
+  override update(device: NestDevice): void {
+    super.update(device)
+    // Checked on every report, not only at the next write: a report after the
+    // echo can be a change made in the Nest app, and it must not be masked.
+    this.#forgetSettledWrite()
+  }
+
+  /** Nest state with the last accepted, not yet echoed write applied. */
+  #writeBaseState(): ThermostatState {
+    this.#forgetSettledWrite()
+    const unconfirmed = this.#unconfirmedWrite
+    return unconfirmed ? applySentWrite(this.state, unconfirmed.write) : this.state
+  }
+
+  #forgetSettledWrite(): void {
+    const unconfirmed = this.#unconfirmedWrite
+    if (!unconfirmed) {
+      return
+    }
+    const isExpired = Date.now() - unconfirmed.sentAtMs > THERMOSTAT_WRITE_ECHO_MAX_MS
+    if (isExpired || isSentWriteConfirmed(this.state, unconfirmed.write)) {
+      this.#unconfirmedWrite = null
     }
   }
 
@@ -288,8 +382,19 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     this.binder.bind(
       this.#ecoService,
       Characteristic.On,
-      () => this.state.isEcoActive === true,
+      () => {
+        if (this.state.isEcoActive !== undefined) {
+          this.#lastEco = this.state.isEcoActive
+        }
+        return this.state.isEcoActive
+      },
       {
+        whenMissing: () => {
+          if (this.#lastEco !== undefined) {
+            return this.#lastEco
+          }
+          return this.#ecoService?.getCharacteristic(Characteristic.On).value === true
+        },
         write: async (value) => {
           await this.#writeEco(value === true || value === 1)
         },
@@ -306,14 +411,12 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
     try {
       const sent = await this.platform.applyEcoWrite(this.deviceId, ecoOn)
       if (!sent) {
-        this.log.warn(
-          `${this.identity.name}: ignoring HomeKit Eco change — enable Allow thermostat control in config.`,
-        )
+        this.log.warn(`${this.identity.name}: thermostat control is off, Eco change ignored`)
         this.#revertHomeKitValues()
         return
       }
       this.log.info(
-        `${this.identity.name}: ${ecoOn ? 'Updating to Eco' : 'Clearing Eco'}`,
+        `${this.identity.name}: Eco ${ecoOn ? 'on' : 'off'}`,
       )
     } catch (error) {
       this.log.warn(`${this.identity.name}: Eco update failed: ${sanitizeError(error)}`)
@@ -327,26 +430,49 @@ export class ThermostatAccessory extends NestAccessory<ThermostatState> {
   /**
    * Bind a required characteristic that must never answer `onGet` with null.
    *
-   * Prefer Nest's value, then the last HAP value, then a typed fallback. Refresh
-   * still skips undefined Nest readings so we do not push placeholders as if
-   * they were live — only `onGet` needs a non-null answer for HomeKit.
+   * Prefer Nest's value, then the last HAP value, then a typed fallback. The
+   * same reader serves `onGet` and refresh, so before Nest reports, refresh
+   * pushes the fallback too. That is deliberate for CurrentTemperature: HAP's
+   * untouched default of 0 °C would otherwise read as a real temperature.
    */
   #bindRequired(
     type: Parameters<typeof this.binder.bind>[1],
     read: () => CharacteristicValue | undefined,
     fallback: CharacteristicValue,
-    options: { write?: (value: CharacteristicValue) => Promise<void> } = {},
+    options: {
+      write?: (value: CharacteristicValue) => Promise<void>
+      /** HAP's own initial value, which is not a Nest reading. */
+      untouchedDefault?: CharacteristicValue
+    } = {},
   ): void {
+    let nestHasReported = false
     const characteristic = this.binder.bind(this.#service, type, () => {
       const value = read()
       if (value !== undefined && value !== null) {
+        nestHasReported = true
         return value
       }
       const current = this.#service.getCharacteristic(type).value
+      if (
+        !nestHasReported
+        && options.untouchedDefault !== undefined
+        && (current === options.untouchedDefault || current === null || current === undefined)
+      ) {
+        return fallback
+      }
       return current !== undefined && current !== null ? current : fallback
     }, options.write ? { write: options.write } : {})
 
-    if (characteristic.value === null || characteristic.value === undefined) {
+    const current = characteristic.value
+    if (
+      current === null
+      || current === undefined
+      || (
+        !nestHasReported
+        && options.untouchedDefault !== undefined
+        && current === options.untouchedDefault
+      )
+    ) {
       characteristic.updateValue(fallback)
     }
   }

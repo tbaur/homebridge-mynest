@@ -133,6 +133,13 @@ export function runObserveSession(options: ObserveSessionOptions): Promise<Obser
   const requestId = randomUUID()
 
   return new Promise<ObserveSessionResult>((resolve, reject) => {
+    // Shutdown can abort before this function is entered. Opening the socket
+    // anyway leaves an HTTP/2 session that nothing is waiting on.
+    if (options.signal?.aborted) {
+      resolve({ reason: 'aborted', frameCount: 0, durationMs: 0 })
+      return
+    }
+
     const splitter = new FrameSplitter()
     let frameCount = 0
     let handlerFailures = 0
@@ -267,7 +274,11 @@ export function runObserveSession(options: ObserveSessionOptions): Promise<Obser
       timer.unref?.()
     }
 
-    options.signal?.addEventListener('abort', onAbort, { once: true })
+    if (options.signal?.aborted) {
+      onAbort()
+    } else {
+      options.signal?.addEventListener('abort', onAbort, { once: true })
+    }
 
     // HTTP/2 emits `response` then `end` with no `error` for 401/403/5xx, so
     // without this handler a rejected token looks like Nest recycling a healthy

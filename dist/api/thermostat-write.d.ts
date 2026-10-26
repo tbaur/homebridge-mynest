@@ -55,6 +55,16 @@ export declare function buildThermostatSetpointWrite(resourceId: string, state: 
     targetTemperatureHighC: number;
 }>): ThermostatSetpointWrite;
 /**
+ * Nest state as it will be once a sent write lands.
+ *
+ * Nest echoes a write through Observe some time after BatchUpdateState
+ * returns. A second HomeKit change in between must build on the first one,
+ * or it re-sends the old mode or bound and undoes it.
+ */
+export declare function applySentWrite(state: ThermostatState, write: ThermostatSetpointWrite): ThermostatState;
+/** Whether Nest's reported state now shows the mode and bounds a write sent. */
+export declare function isSentWriteConfirmed(state: ThermostatState, write: ThermostatSetpointWrite): boolean;
+/**
  * Homebridge info line for a successful HomeKit-driven Nest write.
  *
  * Mode-aware so heat updates do not dump the unused cool bound Nest still

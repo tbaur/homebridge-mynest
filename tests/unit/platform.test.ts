@@ -7,7 +7,12 @@
  * @fileoverview Platform lifecycle: restore, publish, merge sync, stale removal.
  */
 
-import { Accessory, uuid } from '@homebridge/hap-nodejs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type * as Sqlite from 'node:sqlite'
+
+import { Accessory, Characteristic, Service, uuid } from '@homebridge/hap-nodejs'
 
 const Categories = (jest.requireActual('@homebridge/hap-nodejs') as {
   Categories: Record<string, number>
@@ -17,7 +22,7 @@ import { CircuitState } from '../../src/api/circuit-breaker'
 import type { NestTransportOptions, TransportStatus } from '../../src/api/transport'
 import type { TraitUpdate } from '../../src/api/protobuf'
 import type { BucketMap } from '../../src/types/nest'
-import { AuthenticationError, NetworkError } from '../../src/errors'
+import { AuthenticationError, NetworkError, SessionShapeError } from '../../src/errors'
 import {
   OBSERVE_SNAPSHOT_ABANDON_MS,
   PLATFORM_NAME,
@@ -154,6 +159,12 @@ jest.mock('../../src/api/transport', () => {
 })
 
 import { MyNestPlatform } from '../../src/platform'
+import { PAGERDUTY_STARTUP_LOG } from '../../src/nest-signals'
+
+const sqlite = typeof process.getBuiltinModule === 'function'
+  ? process.getBuiltinModule('node:sqlite') as typeof Sqlite | undefined
+  : undefined
+const describeWithSqlite = sqlite ? describe : describe.skip
 
 const THERMOSTAT_ID = 'THERM0001'
 const PROTECT_ID = 'PROTECT01'
@@ -168,7 +179,7 @@ const restBuckets: BucketMap = {
       co_status: 0,
       line_power_present: true,
       auto_away: false,
-      description: 'Hallway Protect',
+      description: 'Zone One Protect',
     },
   },
 }
@@ -238,8 +249,8 @@ describe('MyNestPlatform', () => {
 
     await launch()
 
-    expect(log.warns.join('\n')).toMatch(/Could not reach Nest at startup/)
-    expect(log.errors.join('\n')).not.toMatch(/Paste a fresh token/)
+    expect(log.warns.join('\n')).toMatch(/Nest unreachable at startup/)
+    expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
 
     // Backoff, then a successful second attempt.
     await jest.advanceTimersByTimeAsync(60_000)
@@ -253,7 +264,7 @@ describe('MyNestPlatform', () => {
 
     await launch()
 
-    expect(log.errors.join('\n')).toMatch(/Paste a fresh token/)
+    expect(log.errors.join('\n')).toMatch(/Get a new token/)
     expect(log.warns.join('\n')).not.toMatch(/retrying in the background/)
   })
 
@@ -375,7 +386,7 @@ describe('MyNestPlatform', () => {
     jest.advanceTimersByTime(60 * 60_000)
 
     expect(log.errors.length).toBeGreaterThan(initialErrors)
-    expect(log.errors.join('\n')).toMatch(/still failing/)
+    expect(log.errors.join('\n')).toMatch(/Still stopped/)
   })
 
   it('refuses a global Eco write when there are no thermostats', async () => {
@@ -412,9 +423,10 @@ describe('MyNestPlatform', () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('Nest 503'))
 
-    const sent = await platform.applyGlobalEcoWrite(true)
-    expect(sent).toBe(false)
-    expect(log.warns.join('\n')).toMatch(/failed — HomeKit left unchanged/)
+    await expect(platform.applyGlobalEcoWrite(true)).rejects.toThrow(/1 of 2/)
+    const warns = log.warns.join('\n')
+    expect(warns).toMatch(/THERM0002/)
+    expect(warns).not.toMatch(/HomeKit left unchanged/)
   })
 
   it('keeps Protect smoke/CO when the REST alarm feed becomes unavailable', async () => {
@@ -535,7 +547,7 @@ describe('MyNestPlatform', () => {
     await launch()
     flushSync()
 
-    expect(api.registered.some((accessory) => accessory.displayName.includes('Hallway')
+    expect(api.registered.some((accessory) => accessory.displayName.includes('Zone One')
       || (accessory.context as { deviceId?: string }).deviceId === PROTECT_ID)).toBe(true)
     expect(log.infos.join('\n')).toContain('Connected to Nest')
     expect(log.infos.join('\n')).toContain('Platform ready')
@@ -547,10 +559,70 @@ describe('MyNestPlatform', () => {
     await launch()
     flushSync()
 
-    const added = log.infos.filter((line) => line.startsWith('Added '))
+    const added = log.infos.filter((line) => line.startsWith('Adding '))
 
     expect(added.length).toBeGreaterThan(0)
     expect(added.join('\n')).toContain(`[${PROTECT_ID}]`)
+  })
+
+  it('refreshes a thermostat when the Temperature Sensor it follows changes', async () => {
+    await launch()
+    flushSync()
+
+    const thermostatResource = `DEVICE_${THERMOSTAT_ID}`
+    const sensorResource = 'DEVICE_SENSOR01'
+    harness.options.onTraits(decodeFrame(buildFrame([
+      ...heatingThermostatTraits(thermostatResource),
+      {
+        resourceId: thermostatResource,
+        key: 'remote_comfort_sensing_settings',
+        typeName: 'nest.trait.hvac.RemoteComfortSensingSettingsTrait',
+        value: {
+          activeRcsSelection: {
+            rcsSourceType: 'RCS_SOURCE_TYPE_SINGLE_SENSOR',
+            activeRcsSensor: { resourceId: sensorResource },
+          },
+        },
+      },
+      {
+        resourceId: sensorResource,
+        key: 'device_identity',
+        typeName: 'weave.trait.description.DeviceIdentityTrait',
+        value: { serialNumber: 'SENSOR01' },
+      },
+      {
+        resourceId: sensorResource,
+        key: 'label',
+        typeName: 'weave.trait.description.LabelSettingsTrait',
+        value: { label: 'Hall Sensor' },
+      },
+      {
+        resourceId: sensorResource,
+        key: 'temperature',
+        typeName: 'nest.trait.sensor.TemperatureTrait',
+        value: { temperature: { value: { value: 18 } } },
+      },
+    ])).traits)
+    flushSync()
+
+    const thermostat = api.registered.find(
+      (accessory) => (accessory.context as { deviceId?: string }).deviceId === THERMOSTAT_ID,
+    )
+    const current = thermostat!
+      .getService(Service.Thermostat)!
+      .getCharacteristic(Characteristic.CurrentTemperature)
+
+    expect(current.value).toBe(18)
+
+    harness.options.onTraits(decodeFrame(buildFrame([{
+      resourceId: sensorResource,
+      key: 'temperature',
+      typeName: 'nest.trait.sensor.TemperatureTrait',
+      value: { temperature: { value: { value: 22.5 } } },
+    }])).traits)
+    flushSync()
+
+    expect(current.value).toBe(22.5)
   })
 
   it('publishes Observe-only thermostats and Protects from the union', async () => {
@@ -593,8 +665,8 @@ describe('MyNestPlatform', () => {
 
   it('adopts a cached accessory instead of registering a duplicate', async () => {
     const cachedUuid = uuid.generate(`${UUID_PREFIX}${PROTECT_ID}`)
-    const cached = new Accessory('Hallway Protect', cachedUuid) as unknown as PlatformAccessory
-    cached.context = { deviceId: PROTECT_ID, kind: 'protect', displayName: 'Hallway Protect' }
+    const cached = new Accessory('Zone One Protect', cachedUuid) as unknown as PlatformAccessory
+    cached.context = { deviceId: PROTECT_ID, kind: 'protect', displayName: 'Zone One Protect' }
 
     const platform = new MyNestPlatform(
       log,
@@ -709,7 +781,7 @@ describe('MyNestPlatform', () => {
     )
     expect(removedIds).toContain(OBSERVE_ONLY_PROTECT_ID)
     expect(removedIds).not.toContain(THERMOSTAT_ID)
-    expect(log.infos.join('\n')).toMatch(/Observe dropped|Nest no longer reports/i)
+    expect(log.infos.join('\n')).toMatch(/no longer reported/i)
   })
 
   it('does not prune when a reconnect snapshot looks truncated', async () => {
@@ -813,11 +885,11 @@ describe('MyNestPlatform', () => {
 
   it('does not prune while the opening Observe burst is still landing', async () => {
     const cachedUuid = uuid.generate(`${UUID_PREFIX}${THERMOSTAT_ID}`)
-    const cached = new Accessory('Hallway Thermostat', cachedUuid) as unknown as PlatformAccessory
+    const cached = new Accessory('Zone One Thermostat', cachedUuid) as unknown as PlatformAccessory
     cached.context = {
       deviceId: THERMOSTAT_ID,
       kind: 'thermostat',
-      displayName: 'Hallway Thermostat',
+      displayName: 'Zone One Thermostat',
     }
 
     const platform = new MyNestPlatform(
@@ -848,7 +920,7 @@ describe('MyNestPlatform', () => {
     expect(api.unregistered).toHaveLength(0)
   })
 
-  it('removes stale accessories once an Observe snapshot has settled', async () => {
+  it('removes a never-seen cached accessory only after a second settled snapshot', async () => {
     const staleUuid = uuid.generate(`${UUID_PREFIX}GONE`)
     const stale = new Accessory('Gone Protect', staleUuid) as unknown as PlatformAccessory
     stale.context = { deviceId: 'GONE', kind: 'protect', displayName: 'Gone Protect' }
@@ -877,9 +949,60 @@ describe('MyNestPlatform', () => {
       knownObjects: 0,
     })
     await settleObserveSnapshot()
+    // One snapshot after a restart has no history for a cache-only device.
+    expect(api.unregistered).not.toContain(stale)
+
+    harness.options.onObserveSessionStart?.()
+    harness.options.onTraits(thermostatTraits())
+    setTransportStatus({
+      hasSession: true,
+      observeFrames: 2,
+      restCycles: 0,
+      knownObjects: 0,
+    })
+    await settleObserveSnapshot()
 
     expect(api.unregistered).toContain(stale)
     expect(log.infos.join('\n')).toContain('Gone Protect')
+  })
+
+  it('faults a cached Protect before Nest has connected', async () => {
+    const cachedUuid = uuid.generate(`${UUID_PREFIX}PROTECT01`)
+    const cached = new Accessory('Zone One Protect', cachedUuid) as unknown as PlatformAccessory
+    cached.context = { deviceId: 'PROTECT01', kind: 'protect', displayName: 'Zone One Protect' }
+    const smoke = cached.addService(api.hap.Service.SmokeSensor)
+    smoke.getCharacteristic(api.hap.Characteristic.SmokeDetected).updateValue(
+      api.hap.Characteristic.SmokeDetected.SMOKE_DETECTED,
+    )
+    smoke.getCharacteristic(api.hap.Characteristic.StatusActive).updateValue(true)
+    smoke.getCharacteristic(api.hap.Characteristic.StatusFault).updateValue(
+      api.hap.Characteristic.StatusFault.NO_FAULT,
+    )
+
+    const platform = new MyNestPlatform(
+      log,
+      { platform: PLATFORM_NAME, accessToken: 'b'.repeat(120) },
+      api.asApi(),
+    )
+    platform.configureAccessory(cached)
+
+    expect(smoke.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(false)
+    expect(smoke.getCharacteristic(api.hap.Characteristic.StatusFault).value)
+      .toBe(api.hap.Characteristic.StatusFault.GENERAL_FAULT)
+    await expect(smoke.getCharacteristic(api.hap.Characteristic.SmokeDetected).handleGetRequest())
+      .resolves.toBe(api.hap.Characteristic.SmokeDetected.SMOKE_DETECTED)
+    const detected = smoke.getCharacteristic(api.hap.Characteristic.SmokeDetected)
+    detected.iid = 1
+    const listed = await detected.toHAP(undefined as never, true)
+    expect(listed.value).toBe(api.hap.Characteristic.SmokeDetected.SMOKE_DETECTED)
+  })
+
+  it('does not tell the operator to paste a token when the session shape changed', async () => {
+    pendingStartFailures.push(new SessionShapeError(['userid']))
+    await launch()
+
+    expect(log.errors.join('\n')).toMatch(/session format/)
+    expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
   })
 
   it('keeps cached accessories when configuration is unusable', async () => {
@@ -902,8 +1025,65 @@ describe('MyNestPlatform', () => {
     await Promise.resolve()
 
     expect(api.unregistered).not.toContain(stale)
-    expect(log.errors.join('\n')).toContain('Configuration is not usable')
-    expect(log.errors.join('\n')).toContain('accessories were kept')
+    expect(log.errors.join('\n')).toContain('Access Token is required')
+  })
+
+  it('logs the raw topaz fields when a Protect object arrives', async () => {
+    await launch()
+    flushSync()
+
+    harness.options.onBuckets(restBuckets, [`topaz.${PROTECT_ID}`])
+
+    expect(log.infos.join('\n')).toContain(
+      'REST topaz auto_away=false smoke_status=0 co_status=0',
+    )
+  })
+
+  it('faults a temperature sensor when Observe device data goes stale', async () => {
+    await launch()
+    flushSync()
+
+    harness.options.onBuckets({
+      ...restBuckets,
+      kryptonite: {
+        SENSOR01: {
+          serial_number: 'SENSOR01',
+          current_temperature: 21,
+          battery_level: 80,
+          description: 'Study Sensor',
+        },
+      },
+    }, ['kryptonite.SENSOR01'])
+    flushSync()
+
+    harness.options.onObserveDeviceData?.(true)
+    flushSync()
+
+    const sensor = api.registered.find(
+      (accessory) => (accessory.context as { deviceId?: string }).deviceId === 'SENSOR01',
+    )
+    expect(sensor).toBeDefined()
+    expect(
+      sensor!.getService(api.hap.Service.TemperatureSensor)!
+        .getCharacteristic(api.hap.Characteristic.StatusFault).value,
+    ).toBe(api.hap.Characteristic.StatusFault.GENERAL_FAULT)
+  })
+
+  it('keeps the other accessories updating when one accessory throws', async () => {
+    const { NestAccessory } = await import('../../src/accessories/base')
+    await launch()
+    flushSync()
+
+    const spy = jest.spyOn(NestAccessory.prototype, 'update').mockImplementationOnce(() => {
+      throw new Error('protect blew up')
+    })
+
+    harness.options.onBuckets(restBuckets, [`topaz.${PROTECT_ID}`])
+    flushSync()
+
+    expect(log.errors.join('\n')).toContain('protect blew up')
+    expect(log.infos.join('\n')).toContain('REST topaz auto_away=false')
+    spy.mockRestore()
   })
 
   it('keeps published accessories when Nest authentication fails permanently', async () => {
@@ -920,17 +1100,106 @@ describe('MyNestPlatform', () => {
     expect(smoke).toBeDefined()
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(true)
 
-    harness.options.onFatal(new Error('Nest rejected the access token'))
+    harness.options.onFatal(new AuthenticationError('Nest rejected the access token'))
     await Promise.resolve()
 
     // Token expiry needs a manual paste + restart — not accessory churn.
     expect(api.unregistered).toHaveLength(0)
     expect(api.registered).toHaveLength(published)
     expect(log.errors.join('\n')).toMatch(/home\.nest\.com\/session/)
-    expect(log.errors.join('\n')).toMatch(/Accessories were kept/)
+    expect(log.errors.join('\n')).toMatch(/Nest token rejected/)
     // Last readings stay, but must not look like a live all-clear after auth dies.
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(false)
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusFault).value)
       .toBe(api.hap.Characteristic.StatusFault.GENERAL_FAULT)
+  })
+
+  describeWithSqlite('PagerDuty signals', () => {
+    let storagePath: string
+
+    const storeDir = (): string => join(storagePath, 'homebridge-pagerduty')
+
+    function readSignals(): Record<string, number> {
+      const db = new sqlite!.DatabaseSync(join(storeDir(), 'signals-2026-10-24', 'signals.sqlite'))
+      try {
+        const rows = db.prepare('SELECT signal, active FROM signals').all() as unknown as {
+          signal: string
+          active: number
+        }[]
+        return Object.fromEntries(rows.map((row) => [row.signal, row.active]))
+      } finally {
+        db.close()
+      }
+    }
+
+    const startupLines = (): string[] =>
+      log.infos.filter((line) => line.includes('homebridge-pagerduty support is enabled'))
+
+    beforeEach(() => {
+      storagePath = mkdtempSync(join(tmpdir(), 'mynest-platform-signals-'))
+      api.storagePath = storagePath
+    })
+
+    afterEach(() => {
+      api.emit('shutdown')
+      rmSync(storagePath, { recursive: true, force: true })
+    })
+
+    it('creates no store and logs no startup line when the setting is off', async () => {
+      await launch()
+      flushSync()
+
+      expect(existsSync(storeDir())).toBe(false)
+      expect(startupLines()).toEqual([])
+    })
+
+    it('logs the startup line once and writes every signal clear at startup', async () => {
+      await launch({ pagerdutySignals: true })
+      flushSync()
+
+      expect(startupLines()).toEqual([PAGERDUTY_STARTUP_LOG])
+      expect(readSignals()).toEqual({ 'smoke': 0, 'co': 0, 'alarm-feed-stale': 0, 'auth-failed': 0 })
+    })
+
+    it('raises smoke when a Protect reports an emergency', async () => {
+      await launch({ pagerdutySignals: true })
+      flushSync()
+
+      harness.options.onBuckets(
+        { topaz: { [PROTECT_ID]: { ...restBuckets.topaz![PROTECT_ID]!, smoke_status: 2 } } },
+        [`topaz.${PROTECT_ID}`],
+      )
+      flushSync()
+
+      expect(readSignals()).toEqual(expect.objectContaining({ smoke: 1, co: 0 }))
+    })
+
+    it('does not log the startup line again when startup retries', async () => {
+      pendingStartFailures.push(new NetworkError('Could not reach https://home.nest.com/session'))
+      await launch({ pagerdutySignals: true })
+      await jest.advanceTimersByTimeAsync(60_000)
+
+      expect(log.infos.join('\n')).toContain('Connected to Nest')
+      expect(startupLines()).toHaveLength(1)
+    })
+
+    it('raises auth-failed on a rejected token and keeps it through shutdown', async () => {
+      await launch({ pagerdutySignals: true })
+      flushSync()
+
+      harness.options.onFatal(new AuthenticationError('Nest rejected the access token'))
+      api.emit('shutdown')
+
+      expect(readSignals()).toEqual(expect.objectContaining({ 'auth-failed': 1, 'alarm-feed-stale': 0 }))
+    })
+
+    it('raises auth-failed when the configuration is unusable', async () => {
+      new MyNestPlatform(log, { platform: PLATFORM_NAME, pagerdutySignals: true }, api.asApi())
+      api.emit('didFinishLaunching')
+      await Promise.resolve()
+
+      expect(startupLines()).toHaveLength(1)
+      expect(readSignals()).toEqual({ 'auth-failed': 1, 'alarm-feed-stale': 0 })
+    })
   })
 })

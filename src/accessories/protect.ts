@@ -10,8 +10,8 @@
  * a PIR sensor, but neither Nest API publishes motion events: a 12.5-hour
  * capture of both transports on an occupied house recorded zero motion events
  * and zero occupancy changes. What is available is `auto_away`, Nest's own
- * verdict that nobody has been seen for roughly ten minutes, and only on
- * mains-powered units.
+ * verdict that nobody has been seen for roughly ten minutes, and omitted for
+ * a battery-powered Protect. Unknown power does not hide a boolean `auto_away`.
  *
  * So this accessory publishes occupancy only where that verdict exists, and
  * says why in the log when it does not. Presenting a ten-minute presence
@@ -19,10 +19,11 @@
  * automation built on it wrong.
  *
  * Smoke and CO come from REST `topaz` only. Observe streams safety traits, but
- * no public schema maps them and every captured sample reads all-clear, so an
- * Observe-only Protect deliberately gets no smoke/CO tiles. When REST later
- * goes stale, tiles stay published (so HomeKit rooms/automations survive) but
- * are marked inactive/faulted — never a live frozen all-clear. See `docs/PROTOCOL.md`.
+ * no public schema maps them and every captured sample reads all-clear, so
+ * those fields are not read. Every Protect still publishes both sensors. A
+ * missing number faults the sensor and does not write a clear. When REST later
+ * goes stale, tiles stay published (so HomeKit rooms and automations survive)
+ * but are marked inactive and faulted. See `docs/PROTOCOL.md`.
  */
 
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
@@ -41,6 +42,8 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
   #coService: Service | null = null
   #didLogMissingAlarms = false
   #didLogAlarmFeedStale = false
+  /** Last occupancy-omission sentence, so a repeating reason logs once. */
+  #occupancyOmission: string | null = null
 
   /** @internal Clears the process-wide occupancy hint flag (tests only). */
   static resetOccupancyHintForTests(): void {
@@ -73,110 +76,102 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
   }
 
   /**
-   * Publish smoke and CO when REST has reported alarm state.
+   * Publish smoke and CO for every Protect.
    *
-   * HAP defaults SmokeDetected to "not detected". Creating the service before
-   * Nest has said anything would show a working all-clear on no evidence.
-   * Once created, services stay through REST outages (rooms/automations keep
-   * their targets) and are marked inactive/faulted while the feed is stale.
+   * HAP defaults SmokeDetected to "not detected". A missing number therefore
+   * must not be written as a clear: the reader returns undefined, and the
+   * sensor is marked inactive and faulted. Services stay through REST outages
+   * so rooms and automations keep their targets.
    *
-   * Each sensor is gated on *its own* reading. Nest returns different topaz
+   * Each sensor is gated on its own reading. Nest returns different topaz
    * subsets per firmware, and a bucket carrying `smoke_status` without
-   * `co_status` must not produce a CO tile: its reader would return undefined,
-   * the binder would skip it, and HomeKit would show a CO detector resting at
-   * HAP's default "levels normal" with nothing behind it.
+   * `co_status` must not show a live CO clear.
    */
   #ensureAlarmServices(): void {
     const { Characteristic, Service: HapService } = this.platform
     const hasSmoke = this.state.smoke !== undefined
     const hasCarbonMonoxide = this.state.carbonMonoxide !== undefined
 
-    if (!hasSmoke && !hasCarbonMonoxide) {
-      this.removeService(HapService.SmokeSensor)
-      this.removeService(HapService.CarbonMonoxideSensor)
-      this.#smokeService = null
-      this.#coService = null
+    this.#smokeService = this.resolveService(HapService.SmokeSensor)
+    this.#smokeService.setCharacteristic(Characteristic.Name, `${this.identity.name} Smoke`)
+    this.binder.bind(
+      this.#smokeService,
+      Characteristic.SmokeDetected,
+      () => this.#toSmokeValue(this.state.smoke),
+    )
+    this.#bindAlarmHealth(this.#smokeService, () => this.#isLevelLive(this.state.smoke))
 
+    this.#coService = this.resolveService(HapService.CarbonMonoxideSensor)
+    this.#coService.setCharacteristic(Characteristic.Name, `${this.identity.name} CO`)
+    this.binder.bind(
+      this.#coService,
+      Characteristic.CarbonMonoxideDetected,
+      () => this.#toCarbonMonoxideValue(this.state.carbonMonoxide),
+    )
+    this.#bindAlarmHealth(this.#coService, () => this.#isLevelLive(this.state.carbonMonoxide))
+
+    // Battery lives on the alarm tiles. Those tiles always exist.
+    this.removeService(HapService.Battery)
+
+    if (!hasSmoke && !hasCarbonMonoxide && this.state.isAlarmFeedStale !== true) {
       if (!this.#didLogMissingAlarms) {
         this.#didLogMissingAlarms = true
-        this.log.info(
-          `${this.identity.name}: Observe-only — no Smoke/CO (REST has no alarm state); ${this.#describeNonAlarmPublish()}.`,
-        )
+        this.log.info(`${this.identity.name}: no smoke/CO reading yet`)
       }
-      return
+    } else {
+      this.#didLogMissingAlarms = false
     }
-
-    this.#didLogMissingAlarms = false
 
     if (this.state.isAlarmFeedStale) {
       if (!this.#didLogAlarmFeedStale) {
         this.#didLogAlarmFeedStale = true
-        this.log.warn(
-          `${this.identity.name}: REST alarm feed stale — Smoke/CO kept, marked inactive.`,
-        )
+        // The transport logs the house-wide outage once at warn.
+        this.log.debug(`${this.identity.name}: smoke/CO marked inactive`)
       }
     } else if (this.#didLogAlarmFeedStale) {
       this.#didLogAlarmFeedStale = false
-      this.log.info(
-        `${this.identity.name}: REST alarm feed restored — Smoke/CO live again.`,
-      )
+      this.log.debug(`${this.identity.name}: smoke/CO live again`)
     }
-
-    if (hasSmoke) {
-      this.#smokeService = this.resolveService(HapService.SmokeSensor)
-      this.#smokeService.setCharacteristic(Characteristic.Name, `${this.identity.name} Smoke`)
-      this.binder.bind(
-        this.#smokeService,
-        Characteristic.SmokeDetected,
-        () => this.#toSmokeValue(this.state.smoke),
-      )
-    } else {
-      this.removeService(HapService.SmokeSensor)
-      this.#smokeService = null
-    }
-
-    if (hasCarbonMonoxide) {
-      this.#coService = this.resolveService(HapService.CarbonMonoxideSensor)
-      this.#coService.setCharacteristic(Characteristic.Name, `${this.identity.name} CO`)
-      this.binder.bind(
-        this.#coService,
-        Characteristic.CarbonMonoxideDetected,
-        () => this.#toCarbonMonoxideValue(this.state.carbonMonoxide),
-      )
-    } else {
-      this.removeService(HapService.CarbonMonoxideSensor)
-      this.#coService = null
-    }
-
-    // Whichever tiles exist carry the shared health characteristics, so the
-    // Home app shows a flat battery, an offline device, or a stale REST feed.
-    for (const service of [this.#smokeService, this.#coService]) {
-      if (service) {
-        this.#bindHealth(service)
-      }
-    }
-
-    // Alarm tiles carry battery; the standalone Battery service is only for
-    // Observe-only Protects that have no smoke/CO yet.
-    this.removeService(HapService.Battery)
-  }
-
-  /** Battery plus liveness, for the alarm tiles. */
-  #bindHealth(service: Service): void {
-    this.binder.bind(
-      service,
-      this.platform.Characteristic.StatusLowBattery,
-      () => this.#toLowBatteryValue(),
-    )
-    this.#bindLiveness(service)
   }
 
   /**
-   * Mark a service inactive and faulted whenever its reading is not live.
-   *
-   * Shared by the alarm tiles and the occupancy tile: all three are backed by
-   * the same REST feed, so they go stale together.
+   * A clear is live only while Nest has supplied a number, the REST feed is
+   * fresh, Nest still reports the Protect, and Observe has not reported it
+   * offline. A fresh warning or emergency stays live when Observe reports the
+   * Protect offline.
    */
+  #isLevelLive(level: AlarmLevel | undefined): boolean {
+    if (level === undefined || this.state.isAlarmFeedStale === true || this.isUnreported) {
+      return false
+    }
+    if (level === 'warning' || level === 'emergency') {
+      return true
+    }
+    return this.state.isOnline !== false
+  }
+
+  /** Battery plus liveness, for one alarm tile. */
+  #bindAlarmHealth(service: Service, isLive: () => boolean): void {
+    const { Characteristic } = this.platform
+
+    if (this.state.isBatteryLow === true || this.state.isBatteryLow === false) {
+      this.binder.bind(
+        service,
+        Characteristic.StatusLowBattery,
+        () => this.#toLowBatteryValue(),
+      )
+    }
+    this.binder.bind(service, Characteristic.StatusActive, () => isLive())
+    this.binder.bind(
+      service,
+      Characteristic.StatusFault,
+      () => isLive()
+        ? Characteristic.StatusFault.NO_FAULT
+        : Characteristic.StatusFault.GENERAL_FAULT,
+    )
+  }
+
+  /** Used by the occupancy tile. Smoke and CO use `#bindAlarmHealth`. */
   #bindLiveness(service: Service): void {
     const { Characteristic } = this.platform
 
@@ -190,61 +185,22 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
     )
   }
 
-  /** Alarm readings are live only while online and the REST feed is fresh. */
+  /**
+   * Occupancy is live only while Nest still reports the Protect, Observe has
+   * not reported it offline, and the REST feed is fresh.
+   */
   #isAlarmReadingLive(): boolean {
-    return this.state.isOnline !== false && this.state.isAlarmFeedStale !== true
-  }
-
-  /** What an Observe-only Protect will still expose (for the missing-alarm log). */
-  #describeNonAlarmPublish(): string {
-    const parts: string[] = []
-    if (this.state.isBatteryLow !== undefined || this.state.batteryVolts !== undefined) {
-      parts.push('battery')
-    }
-    if (this.config.exposeProtectTemperature) {
-      if (this.state.temperatureC !== undefined) {
-        parts.push('temperature')
-      }
-      if (this.state.humidity !== undefined) {
-        parts.push('humidity')
-      }
-    }
-    return parts.length > 0
-      ? `publishing ${parts.join(' + ')} only`
-      : 'nothing else to publish yet'
+    return this.state.isOnline !== false && this.state.isAlarmFeedStale !== true && !this.isUnreported
   }
 
   /**
-   * Standalone battery for Protects that cannot publish smoke/CO yet.
+   * Battery is reported on the smoke and CO tiles.
    *
-   * Observe still reports battery and liveness for Observe-only units, so the
-   * accessory can appear in HomeKit without inventing alarm state.
+   * Those tiles always exist, so a second Battery service would show the same
+   * pack twice.
    */
   #ensureBatteryService(): void {
-    const { Characteristic, Service: HapService } = this.platform
-    const hasAlarms = this.state.smoke !== undefined || this.state.carbonMonoxide !== undefined
-    const hasBattery = this.state.isBatteryLow !== undefined || this.state.batteryVolts !== undefined
-
-    if (hasAlarms || !hasBattery) {
-      this.removeService(HapService.Battery)
-      return
-    }
-
-    const battery = this.resolveService(HapService.Battery)
-    battery.setCharacteristic(Characteristic.Name, `${this.identity.name} Battery`)
-    battery.setCharacteristic(
-      Characteristic.ChargingState,
-      this.state.isLinePowered
-        ? Characteristic.ChargingState.NOT_CHARGING
-        : Characteristic.ChargingState.NOT_CHARGEABLE,
-    )
-
-    this.binder.bind(battery, Characteristic.StatusLowBattery, () => this.#toLowBatteryValue())
-    this.binder.bind(
-      battery,
-      Characteristic.BatteryLevel,
-      () => this.#batteryLevelPercent(),
-    )
+    this.removeService(this.platform.Service.Battery)
   }
 
   /**
@@ -266,12 +222,24 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
     if (!isAvailable) {
       this.removeService(HapService.OccupancySensor)
 
-      if (this.config.exposeProtectOccupancy) {
-        this.log.debug(
-          `${this.identity.name}: no occupancy sensor — ${describeOccupancySource(this.state.occupancySource)}`,
-        )
+      const reason = this.config.exposeProtectOccupancy
+        ? describeOccupancySource(this.state.occupancySource)
+        : 'turned off in settings'
+      if (this.#occupancyOmission !== reason) {
+        this.#occupancyOmission = reason
+        this.log.info(`${this.identity.name}: no occupancy sensor (${reason})`)
       }
       return
+    }
+
+    if (this.state.occupancySource === 'unavailable_rest_stale') {
+      const reason = describeOccupancySource(this.state.occupancySource)
+      if (this.#occupancyOmission !== reason) {
+        this.#occupancyOmission = reason
+        this.log.info(`${this.identity.name}: ${reason}`)
+      }
+    } else {
+      this.#occupancyOmission = null
     }
 
     const service = this.resolveService(HapService.OccupancySensor)
@@ -291,7 +259,7 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
     if (!ProtectAccessory.#didLogOccupancyHint) {
       ProtectAccessory.#didLogOccupancyHint = true
       this.log.info(
-        `Protect occupancy is Nest ~${PROTECT_OCCUPANCY_HOLD_OFF_SEC / 60}-min presence (auto_away), not motion.`,
+        `Protect occupancy uses Nest auto-away (about ${PROTECT_OCCUPANCY_HOLD_OFF_SEC / 60} min), not motion`,
       )
     }
   }
@@ -361,23 +329,6 @@ export class ProtectAccessory extends NestAccessory<ProtectState> {
 
   #toLowBatteryValue(): CharacteristicValue | undefined {
     return this.toLowBatteryValue(this.state.isBatteryLow)
-  }
-
-  /**
-   * HomeKit wants 0–100; Nest REST reports millivolts as `battery_level`.
-   *
-   * A healthy Protect is about 5.2 V. Without a published discharge curve this
-   * is a coarse mapping: low battery → 10%, otherwise → 100%. Better than a
-   * fabricated percentage pretending precision we do not have.
-   */
-  #batteryLevelPercent(): number | undefined {
-    if (this.state.isBatteryLow === true) {
-      return 10
-    }
-    if (this.state.isBatteryLow === false) {
-      return 100
-    }
-    return undefined
   }
 
   protected describeState(): string {

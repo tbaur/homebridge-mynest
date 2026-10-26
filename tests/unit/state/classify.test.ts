@@ -21,16 +21,16 @@ import { buildFrame } from '../../helpers/observe-fixtures'
 
 describe('device id normalisation', () => {
   it('strips and restores the Observe prefix', () => {
-    // Observe reports `DEVICE_18B4300000ACC1AD` for the Protect that REST calls
-    // `topaz.18B4300000ACC1AD`. This correspondence is what makes the merge
+    // Observe reports `DEVICE_18B4300000000001` for the Protect that REST calls
+    // `topaz.18B4300000000001`. This correspondence is what makes the merge
     // possible at all.
-    expect(toDeviceId(`${OBSERVE_DEVICE_PREFIX}18B4300000ACC1AD`)).toBe('18B4300000ACC1AD')
-    expect(toResourceId('18B4300000ACC1AD')).toBe('DEVICE_18B4300000ACC1AD')
+    expect(toDeviceId(`${OBSERVE_DEVICE_PREFIX}18B4300000000001`)).toBe('18B4300000000001')
+    expect(toResourceId('18B4300000000001')).toBe('DEVICE_18B4300000000001')
   })
 
   it('is idempotent in both directions', () => {
-    expect(toDeviceId('18B4300000ACC1AD')).toBe('18B4300000ACC1AD')
-    expect(toResourceId('DEVICE_18B4300000ACC1AD')).toBe('DEVICE_18B4300000ACC1AD')
+    expect(toDeviceId('18B4300000000001')).toBe('18B4300000000001')
+    expect(toResourceId('DEVICE_18B4300000000001')).toBe('DEVICE_18B4300000000001')
   })
 })
 
@@ -86,13 +86,13 @@ describe('collectObserveRoomNames', () => {
       key: 'located_annotations',
       typeName: 'nest.trait.located.LocatedAnnotationsTrait',
       value: {
-        annotations: [{ info: { id: { value: 'room-1' }, name: { value: 'Hallway' } } }],
+        annotations: [{ info: { id: { value: 'room-1' }, name: { value: 'Zone One' } } }],
       },
     }])).traits)
 
     const names = collectObserveRoomNames(state)
 
-    expect(names.get('room-1')).toBe('Hallway')
+    expect(names.get('room-1')).toBe('Zone One')
   })
 
   it('returns nothing when no resource carries annotations', () => {
@@ -145,8 +145,8 @@ describe('resolveDeviceName hardening', () => {
       kind: 'protect',
       deviceId: 'ABCD1234',
       label: '\u0000\u0001  \t ',
-      roomName: 'Hallway',
-    })).toBe('Hallway Protect')
+      roomName: 'Zone One',
+    })).toBe('Zone One Protect')
   })
 })
 
@@ -157,7 +157,7 @@ describe('resolveDeviceName', () => {
       deviceId: 'ABC123',
       label: 'Nursery Alarm',
       description: 'Upstairs',
-      roomName: 'Hallway',
+      roomName: 'Zone One',
     })).toBe('Nursery Alarm')
   })
 
@@ -166,22 +166,22 @@ describe('resolveDeviceName', () => {
       kind: 'protect',
       deviceId: 'ABC123',
       description: 'Garage Protect',
-      roomName: 'Hallway',
+      roomName: 'Zone One',
     })).toBe('Garage Protect')
   })
 
   it('builds a name from the room when nothing was typed', () => {
-    expect(resolveDeviceName({ kind: 'thermostat', deviceId: 'ABC123', roomName: 'Hallway' }))
-      .toBe('Hallway Thermostat')
+    expect(resolveDeviceName({ kind: 'thermostat', deviceId: 'ABC123', roomName: 'Zone One' }))
+      .toBe('Zone One Thermostat')
     expect(resolveDeviceName({ kind: 'temperature_sensor', deviceId: 'ABC123', roomName: 'Study' }))
       .toBe('Study Temperature Sensor')
   })
 
   it('keeps two unnamed devices distinguishable', () => {
-    expect(resolveDeviceName({ kind: 'protect', deviceId: '18b4300000acc1ad' }))
-      .toBe('Protect C1AD')
-    expect(resolveDeviceName({ kind: 'protect', deviceId: '18b4300000acbfbd' }))
-      .toBe('Protect BFBD')
+    expect(resolveDeviceName({ kind: 'protect', deviceId: '18b4300000000001' }))
+      .toBe('Protect 0001')
+    expect(resolveDeviceName({ kind: 'protect', deviceId: '18b4300000000002' }))
+      .toBe('Protect 0002')
   })
 
   it('ignores whitespace-only names', () => {
@@ -189,7 +189,7 @@ describe('resolveDeviceName', () => {
       kind: 'protect',
       deviceId: 'ABC123',
       label: '   ',
-      roomName: 'Hallway',
-    })).toBe('Hallway Protect')
+      roomName: 'Zone One',
+    })).toBe('Zone One Protect')
   })
 })

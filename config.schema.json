@@ -39,7 +39,7 @@
         "title": "Expose Protect occupancy",
         "type": "boolean",
         "default": true,
-        "description": "Publish an occupancy sensor for mains-powered Protects that report Nest auto_away. This is ~10-minute presence, not motion."
+        "description": "Publish an occupancy sensor when Nest auto_away is a boolean and the Protect is not reported as battery-powered. Unknown power does not hide a boolean Nest already sent. This is ~10-minute presence, not motion."
       },
       "exposeProtectTemperature": {
         "title": "Expose Protect temperature",
@@ -55,7 +55,7 @@
         "items": {
           "type": "string",
           "title": "Device ID",
-          "placeholder": "e.g. 18B4300000ACBFBD"
+          "placeholder": "e.g. 18B4300000000002"
         }
       },
       "fieldTest": {
@@ -80,6 +80,12 @@
         "type": "boolean",
         "default": false,
         "description": "When diagnostics are enabled, also emit a machine-readable JSON line alongside each human-readable health report."
+      },
+      "pagerdutySignals": {
+        "title": "Send Signals to PagerDuty",
+        "type": "boolean",
+        "default": false,
+        "description": "Write this plugin's alert conditions to homebridge-pagerduty's signal store. Then allow homebridge-mynest to page in homebridge-pagerduty's settings. Needs Node 22.13 or later."
       },
       "debug": {
         "title": "Debug logging",
@@ -125,6 +131,7 @@
           "type": "number"
         },
         "structuredLogs",
+        "pagerdutySignals",
         "debug"
       ]
     }

@@ -15,8 +15,8 @@
  * nothing external will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PRODUCTIVE_SESSION_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
-exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = void 0;
+exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_DEVICE_DATA_STALE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.THERMOSTAT_WRITE_ECHO_MAX_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_C = void 0;
 exports.resolveEndpoints = resolveEndpoints;
 exports.appLaunchUrl = appLaunchUrl;
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -112,6 +112,12 @@ exports.APP_LAUNCH_TIMEOUT_MS = 120_000;
  */
 exports.BATCH_UPDATE_TIMEOUT_MS = 30_000;
 /**
+ * How long a sent thermostat write is the base for the next one when Nest has
+ * not echoed it back. After this, Nest's own state wins again, so a write Nest
+ * quietly altered or dropped cannot steer later writes for long.
+ */
+exports.THERMOSTAT_WRITE_ECHO_MAX_MS = 60_000;
+/**
  * How long to hold a REST `subscribe` long-poll open before aborting it.
  *
  * Nest parks the request until something changes, so the client decides the
@@ -133,8 +139,9 @@ exports.SUBSCRIBE_TIMEOUT_MS = 120_000;
  */
 exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = 0.5;
 /**
- * How long after the last successful REST cycle (including idle subscribe)
- * Protect smoke/CO may still be treated as live from cached topaz.
+ * How long after the last REST refresh Protect smoke/CO may still be treated
+ * as live from cached topaz. An unanswered idle subscribe counts as a refresh.
+ * A truncated `app_launch` does not. See `api/alarm-feed.ts`.
  *
  * Must exceed {@link SUBSCRIBE_TIMEOUT_MS}: a quiet house parks the long-poll
  * for the full client timeout without being unhealthy. Beyond this window,
@@ -154,13 +161,17 @@ exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_TIMEOUT_MS + 60_000;
  */
 exports.REST_PROOF_OF_LIFE_MS = 5 * 60_000;
 /**
- * How long after Nest's last actual response the alarm feed stops counting as
- * live, regardless of timed-out cycles.
+ * How long after Nest last answered a refresh the alarm feed stops counting as
+ * live, regardless of timed-out cycles. A truncated `app_launch` is an answer
+ * but not a refresh, so it does not reset this.
  *
- * Sits above {@link REST_PROOF_OF_LIFE_MS} so a successful proof-of-life read
- * always lands first on a healthy account; only a genuine outage reaches it.
+ * The proof-of-life check runs between subscribe cycles, so the answer age can
+ * pass {@link REST_PROOF_OF_LIFE_MS} just after a subscribe starts and grow by a
+ * full {@link SUBSCRIBE_TIMEOUT_MS} before the proof runs. The extra minute is
+ * time for that `app_launch` to answer, so on a healthy account the proof
+ * always lands first and only a genuine outage reaches this limit.
  */
-exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS + 2 * 60_000;
+exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS + exports.SUBSCRIBE_TIMEOUT_MS + 60_000;
 /**
  * How long a single Observe connection is held before being recycled.
  *
@@ -171,15 +182,6 @@ exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS + 2 * 60_000;
 exports.OBSERVE_SESSION_MS = 30 * 60_000;
 /** Interval between HTTP/2 pings that keep the Observe stream from idling out. */
 exports.OBSERVE_PING_INTERVAL_MS = 60_000;
-/**
- * How long a connection must last to count as productive rather than a flap.
- *
- * Nest sends a resource catalogue as the first frame of every connection, so
- * frame count alone cannot distinguish a working stream from a gateway that
- * accepts and immediately drops. Without a duration floor the latter resets
- * the reconnect backoff on every attempt.
- */
-exports.OBSERVE_PRODUCTIVE_SESSION_MS = 30_000;
 /**
  * Deadline for the Observe gateway to answer with response headers.
  *
@@ -196,6 +198,15 @@ exports.OBSERVE_CONNECT_TIMEOUT_MS = 30_000;
  * the failure mode that leaves HomeKit showing stale temperatures indefinitely.
  */
 exports.OBSERVE_IDLE_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How long Observe may go without a decoded device trait before temperature
+ * sensors are marked StatusFault.
+ *
+ * Thermostats do not get StatusFault in this HAP build. They keep their last
+ * values, and the transport logs the gap. Catalog frames and a socket that
+ * stays open do not count.
+ */
+exports.OBSERVE_DEVICE_DATA_STALE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS;
 /** Delay before the first reconnect attempt after a transport drops. */
 exports.RECONNECT_BASE_MS = 5_000;
 /** Upper bound on the reconnect backoff. */
@@ -239,11 +250,11 @@ exports.OBSERVE_SNAPSHOT_ABANDON_MS = 30_000;
 /**
  * Consecutive HTTP 403 responses on one transport before that loop gives up.
  *
- * A single 403 on a Nest edge host can be a WAF / bot-detection blip against
+ * A single 403 on a Nest edge host can be a WAF or bot-detection blip against
  * the pinned user agent. Counters are per-transport so REST blips cannot kill
- * a healthy Observe stream (and vice versa). The plugin only treats the token
- * as dead when *both* loops have exhausted this budget. 401 always means the
- * token is rejected immediately.
+ * a healthy Observe stream (and vice versa). After this many consecutive HTTP
+ * 403s that loop stops and probes again after the cooldown. A 403 is not a
+ * revoked token, on one transport or on both. HTTP 401 stops immediately.
  */
 exports.FORBIDDEN_FATAL_THRESHOLD = 3;
 /**

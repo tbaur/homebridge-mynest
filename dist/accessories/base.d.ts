@@ -39,11 +39,30 @@ export declare abstract class NestAccessory<TState> {
     protected readonly binder: CharacteristicBinder;
     protected identity: DeviceIdentity;
     protected state: TState;
+    /**
+     * True after Nest dropped this device from its inventory while HomeKit
+     * still shows it (removal is waiting on its own guards). Readings are then
+     * last-known only, so subclasses mark them inactive or faulted.
+     */
+    protected isUnreported: boolean;
     constructor(platform: MyNestPlatform, accessory: PlatformAccessory, device: {
         identity: DeviceIdentity;
         state: TState;
     }, log: Logger);
     get deviceId(): string;
+    get kind(): DeviceKind;
+    /**
+     * Nest no longer reports this device, but HomeKit cannot drop it yet.
+     *
+     * Pushes the current readers again so subclasses that consult
+     * {@link isUnreported} stop presenting the last values as live.
+     */
+    markUnreported(): void;
+    /**
+     * Remove every service this accessory published, before another kind of
+     * accessory takes over the same HomeKit accessory.
+     */
+    removeAllServices(): void;
     /**
      * Take new state and push it to HomeKit.
      *

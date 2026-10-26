@@ -285,7 +285,9 @@ export class ObjectList {
     }
 
     const previousCount = this.#byKey.size
-    if (previousCount > 0 && incoming.size * 2 < previousCount) {
+    // A real account always has at least its user and structure objects, so an
+    // empty enumeration is truncated even on the first read.
+    if (incoming.size === 0 || incoming.size * 2 < previousCount) {
       this.merge([...incoming.values()])
       for (const key of incoming.keys()) {
         this.#removalCandidates.delete(key)

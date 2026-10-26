@@ -58,7 +58,7 @@ const buckets: BucketMap = {
     [SENSOR_ID]: { serial_number: SENSOR_ID, battery_level: 55, current_temperature: 19 },
   },
   where: {
-    structure_1: { wheres: [{ where_id: 'where-hall', name: 'Hallway' }] },
+    structure_1: { wheres: [{ where_id: 'where-hall', name: 'Zone One' }] },
   },
 }
 
@@ -164,7 +164,7 @@ describe('buildInventory', () => {
       ignoredDeviceIds: empty,
     })
 
-    expect(inventory.protects.get(PROTECT_ID)?.identity.name).toBe('Hallway Protect')
+    expect(inventory.protects.get(PROTECT_ID)?.identity.name).toBe('Zone One Protect')
   })
 
   it('leaves out devices the user asked to ignore', () => {
@@ -192,7 +192,7 @@ describe('buildInventory', () => {
     // A REST-only thermostat is split across two buckets: `shared` carries the
     // setpoints, `device` carries the room, serial, and model. Reading only the
     // first match dropped the room assignment, so the device was published as
-    // "Thermostat 0001" instead of "Hallway Thermostat".
+    // "Thermostat 0001" instead of "Zone One Thermostat".
     const inventory = buildInventory({
       observe: new ObserveState(),
       buckets: {
@@ -217,7 +217,7 @@ describe('buildInventory', () => {
     })
     const thermostat = inventory.thermostats.get(THERMOSTAT_ID)
 
-    expect(thermostat?.identity.name).toBe('Hallway Thermostat')
+    expect(thermostat?.identity.name).toBe('Zone One Thermostat')
     expect(thermostat?.identity.serialNumber).toBe('TSTAT-LEGACY')
     expect(thermostat?.identity.whereId).toBe('where-hall')
     expect(thermostat?.identity.structureId).toBe('structure_1')

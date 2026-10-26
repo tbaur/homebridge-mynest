@@ -16,6 +16,7 @@ import { decodeFrame } from '../../../src/api/protobuf'
 import { ObserveState } from '../../../src/state/observe-state'
 import {
   describeOccupancySource,
+  formatTopazArrival,
   readProtectState,
   resolveOccupancy,
   toAlarmLevel,
@@ -106,9 +107,27 @@ describe('resolveOccupancy', () => {
       .toEqual({ occupancySource: 'unavailable_no_auto_away' })
   })
 
-  it('declines to report occupancy when mains power is unknown', () => {
+  it('reports occupancy from auto_away when mains power is unknown', () => {
     expect(resolveOccupancy({ topaz: { auto_away: false }, isLinePowered: undefined }))
-      .toEqual({ occupancySource: 'unavailable_power_unknown' })
+      .toEqual({ isOccupied: true, occupancySource: 'auto_away' })
+  })
+
+  it('omits occupancy when auto_away is absent, including when power is unknown', () => {
+    expect(resolveOccupancy({ topaz: { serial_number: 'X' }, isLinePowered: undefined }))
+      .toEqual({ occupancySource: 'unavailable_no_auto_away' })
+    expect(resolveOccupancy({ topaz: { serial_number: 'X' }, isLinePowered: true }))
+      .toEqual({ occupancySource: 'unavailable_no_auto_away' })
+  })
+
+  it('keeps last occupancy when the feed is stale and power is unknown', () => {
+    expect(resolveOccupancy({
+      topaz: { auto_away: true },
+      isLinePowered: undefined,
+      restAlarmFeedAvailable: false,
+    })).toEqual({
+      isOccupied: false,
+      occupancySource: 'unavailable_rest_stale',
+    })
   })
 
   it('keeps last occupancy when the REST alarm feed is unavailable', () => {
@@ -122,12 +141,12 @@ describe('resolveOccupancy', () => {
     })
   })
 
-  it('marks occupancy stale without a verdict when REST is down and topaz has no auto_away', () => {
+  it('names the missing auto_away when REST is down and there is no verdict to keep', () => {
     expect(resolveOccupancy({
       topaz: { serial_number: 'X' },
       isLinePowered: true,
       restAlarmFeedAvailable: false,
-    })).toEqual({ occupancySource: 'unavailable_rest_stale' })
+    })).toEqual({ occupancySource: 'unavailable_no_auto_away' })
   })
 })
 
@@ -278,15 +297,32 @@ describe('describeOccupancySource', () => {
   it('explains that auto away is presence, not motion', () => {
     const explanation = describeOccupancySource('auto_away')
 
-    expect(explanation).toContain('10 minutes')
-    expect(explanation).toContain('not motion detection')
+    expect(explanation).toContain('auto-away')
+    expect(explanation).toContain('not motion')
   })
 
   it('explains every reason occupancy can be missing', () => {
-    expect(describeOccupancySource('unsupported_battery_powered')).toContain('battery-powered')
+    expect(describeOccupancySource('unsupported_battery_powered')).toContain('battery powered')
     expect(describeOccupancySource('unavailable_observe_only')).toContain('REST')
-    expect(describeOccupancySource('unavailable_no_auto_away')).toContain('auto_away')
-    expect(describeOccupancySource('unavailable_power_unknown')).toContain('mains-powered')
-    expect(describeOccupancySource('unavailable_rest_stale')).toContain('not refreshing')
+    expect(describeOccupancySource('unavailable_no_auto_away')).toContain('auto-away')
+    expect(describeOccupancySource('unavailable_rest_stale')).toContain('alarm feed stale')
+  })
+})
+
+describe('formatTopazArrival', () => {
+  it('prints the raw bits, including a stuck occupied reading', () => {
+    expect(formatTopazArrival({
+      auto_away: false,
+      smoke_status: 0,
+      co_status: 0,
+    }, 'Front Hall Protect')).toBe(
+      'Front Hall Protect: REST topaz auto_away=false smoke_status=0 co_status=0',
+    )
+  })
+
+  it('says absent when Nest omitted a field', () => {
+    expect(formatTopazArrival({}, 'Protect A')).toBe(
+      'Protect A: REST topaz auto_away=absent smoke_status=absent co_status=absent',
+    )
   })
 })

@@ -13,6 +13,7 @@
  */
 
 import type { HvacActivity, HvacMode, ThermostatState } from '../types/device'
+import { toDeviceId, toResourceId } from './classify'
 import type { SharedBucket, DeviceBucket } from '../types/nest'
 import type { ObserveState } from './observe-state'
 import {
@@ -50,6 +51,32 @@ export function readComfortSource(state: ObserveState, resourceId: string): Comf
 
   const sensorResourceId = readString(settings, 'activeRcsSelection', 'activeRcsSensor', 'resourceId')
   return sensorResourceId ? { sensorResourceId } : {}
+}
+
+/**
+ * Thermostats whose displayed temperature comes from a device in `changedIds`.
+ *
+ * An Observe patch names the sensor that changed. The thermostat is a
+ * different device, and its HomeKit tile reads that sensor. Skipping it
+ * leaves the thermostat on the previous temperature until some later trait
+ * of its own arrives.
+ */
+export function thermostatIdsForChangedComfortSensors(
+  observe: ObserveState,
+  thermostatIds: readonly string[],
+  changedIds: ReadonlySet<string>,
+): string[] {
+  const linked: string[] = []
+  for (const thermostatId of thermostatIds) {
+    if (changedIds.has(thermostatId)) {
+      continue
+    }
+    const { sensorResourceId } = readComfortSource(observe, toResourceId(thermostatId))
+    if (sensorResourceId && changedIds.has(toDeviceId(sensorResourceId))) {
+      linked.push(thermostatId)
+    }
+  }
+  return linked
 }
 
 /**

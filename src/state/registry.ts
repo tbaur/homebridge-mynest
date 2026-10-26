@@ -67,6 +67,12 @@ export interface BuildInventoryOptions {
    * values. Defaults to true.
    */
   restAlarmFeedAvailable?: boolean
+  /**
+   * When true, `isObserveStale` is set on thermostats and temperature sensors.
+   * Only temperature sensors publish Status Fault. Thermostats keep their last
+   * values. Defaults to false.
+   */
+  observeDataStale?: boolean
 }
 
 /**
@@ -81,6 +87,7 @@ export function buildInventory(options: BuildInventoryOptions): DeviceInventory 
     buckets,
     ignoredDeviceIds,
     restAlarmFeedAvailable = true,
+    observeDataStale = false,
   } = options
 
   const kinds = collectDeviceKinds(observe, buckets)
@@ -92,7 +99,14 @@ export function buildInventory(options: BuildInventoryOptions): DeviceInventory 
   const sensors = new Map<string, Extract<NestDevice, { identity: { kind: 'temperature_sensor' } }>>()
 
   for (const [deviceId, kind] of kinds) {
-    const context = { observe, buckets, deviceId, roomNames, restAlarmFeedAvailable }
+    const context = {
+      observe,
+      buckets,
+      deviceId,
+      roomNames,
+      restAlarmFeedAvailable,
+      observeDataStale,
+    }
     let device: NestDevice
 
     switch (kind) {
@@ -140,6 +154,7 @@ interface BuildContext {
   deviceId: string
   roomNames: RoomNames
   restAlarmFeedAvailable: boolean
+  observeDataStale: boolean
 }
 
 /**
@@ -162,7 +177,11 @@ function collectDeviceKinds(observe: ObserveState, buckets: BucketMap): Map<stri
     for (const id of Object.keys(buckets[bucket] ?? {})) {
       // Observe classification wins: it sees the device's real trait set,
       // whereas the REST bucket name is only a hint about what it should be.
-      if (!kinds.has(id)) {
+      // The exception is a Protect whose temperature trait arrived before its
+      // Protect trait: Observe briefly calls it a temperature sensor, and a
+      // `topaz` bucket proves it is a Protect.
+      const observed = kinds.get(id)
+      if (observed === undefined || (kind === 'protect' && observed === 'temperature_sensor')) {
         kinds.set(id, kind)
       }
     }
@@ -290,7 +309,7 @@ function buildIdentity(context: BuildContext, kind: DeviceKind): DeviceIdentity 
  * different halves of its identity: `shared` has only the setpoints and a name,
  * while `where_id`, `serial_number`, `structure_id`, and the model live in
  * `device`. Taking the first match would silently drop the room assignment, so
- * the device would be published as "Thermostat ABCD" instead of "Hallway
+ * the device would be published as "Thermostat ABCD" instead of "Zone One
  * Thermostat". Earlier buckets win on conflict, matching the previous
  * first-match precedence.
  */
@@ -323,9 +342,10 @@ function buildThermostat(
     buckets.device?.[deviceId] as DeviceBucket | undefined,
   )
 
+  const state = mergeThermostatState(fromObserve, fromRest)
   return {
     identity: buildIdentity(context, 'thermostat') as DeviceIdentity & { kind: 'thermostat' },
-    state: mergeThermostatState(fromObserve, fromRest),
+    state: context.observeDataStale ? { ...state, isObserveStale: true } : state,
   }
 }
 
@@ -348,15 +368,16 @@ function buildTemperatureSensor(
 ): Extract<NestDevice, { identity: { kind: 'temperature_sensor' } }> {
   const { observe, buckets, deviceId } = context
 
+  const state = readTemperatureSensorState({
+    state: observe,
+    resourceId: toResourceId(deviceId),
+    kryptonite: buckets.kryptonite?.[deviceId] as KryptoniteBucket | undefined,
+  })
   return {
     identity: buildIdentity(context, 'temperature_sensor') as DeviceIdentity & {
       kind: 'temperature_sensor'
     },
-    state: readTemperatureSensorState({
-      state: observe,
-      resourceId: toResourceId(deviceId),
-      kryptonite: buckets.kryptonite?.[deviceId] as KryptoniteBucket | undefined,
-    }),
+    state: context.observeDataStale ? { ...state, isObserveStale: true } : state,
   }
 }
 

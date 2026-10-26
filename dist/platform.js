@@ -18,12 +18,16 @@ const settings_1 = require("./settings");
 const device_1 = require("./types/device");
 const errors_1 = require("./errors");
 const transport_1 = require("./api/transport");
+const nest_signals_1 = require("./nest-signals");
+const pagerduty_signals_1 = require("./pagerduty-signals");
 const thermostat_write_1 = require("./api/thermostat-write");
 const collector_1 = require("./diagnostics/collector");
 const format_1 = require("./diagnostics/format");
 const classify_1 = require("./state/classify");
 const observe_state_1 = require("./state/observe-state");
+const protect_state_1 = require("./state/protect-state");
 const registry_1 = require("./state/registry");
+const thermostat_state_1 = require("./state/thermostat-state");
 const validators_1 = require("./utils/validators");
 const logger_1 = require("./utils/logger");
 const retry_1 = require("./utils/retry");
@@ -62,6 +66,19 @@ const UPDATE_COALESCE_MS = 250;
  * only remaining signal that HomeKit's values are frozen.
  */
 const FATAL_REMINDER_MS = 60 * 60_000;
+const TOKEN_REJECTED_MESSAGE = 'Nest token rejected. Get a new token from https://home.nest.com/session and restart Homebridge.';
+function stopReasonFor(error) {
+    if (error instanceof errors_1.SessionShapeError) {
+        return 'session';
+    }
+    return error instanceof errors_1.ConfigurationError ? 'config' : 'token';
+}
+/** Device kinds as they read in the log. */
+const KIND_LABELS = {
+    thermostat: 'thermostat',
+    protect: 'Protect',
+    temperature_sensor: 'temperature sensor',
+};
 /**
  * Concurrent Nest writes allowed when setting Eco across the whole house.
  *
@@ -80,19 +97,6 @@ function isParseableJson(value) {
         return false;
     }
 }
-/**
- * Whether a startup failure is genuinely unrecoverable without user action.
- *
- * Only a rejected credential or a config/contract problem qualifies. Everything
- * else — DNS, TLS, timeouts, 5xx, an open breaker — is a transient condition the
- * run loops already recover from, so the boot path must retry rather than give
- * up and blame the token.
- */
-function isFatalStartupError(error) {
-    return error instanceof errors_1.AuthenticationError
-        || error instanceof errors_1.ConfigurationError
-        || error instanceof errors_1.SessionShapeError;
-}
 class MyNestPlatform {
     Service;
     Characteristic;
@@ -108,14 +112,15 @@ class MyNestPlatform {
     /** Optional house-wide Eco switch (not a Nest device). */
     #globalEco = null;
     #observe = new observe_state_1.ObserveState((cap) => {
-        this.#log.warn(`Observe is tracking ${cap} resources — further ones are being dropped. `
-            + 'Nest may be emitting identifiers this plugin does not model.');
+        this.#log.warn(`Observe: tracking ${cap} resources, ignoring the rest`);
     });
     #buckets = {};
     #transport = null;
     #pendingUpdate = null;
     #pendingChangedIds = null;
     #bucketsChanged = false;
+    /** True after 10 minutes with no decoded Observe device trait. */
+    #observeDeviceDataStale = false;
     #isShuttingDown = false;
     #hasFatal = false;
     #startedAt = 0;
@@ -145,6 +150,18 @@ class MyNestPlatform {
     #observeRemovalCandidates = new Map();
     /** Complete, non-truncated Observe snapshots seen this session. */
     #observeSnapshotSequence = 0;
+    /** Device ids that have appeared in the merged inventory since startup. */
+    #seenDeviceIds = new Set();
+    /**
+     * Cached accessories not seen since startup, keyed by UUID, with the
+     * snapshot sequence at which pruning first found them missing.
+     *
+     * A device seen this session only leaves the inventory through the Observe
+     * and REST two-strike guards. A cached one that has not been seen has no
+     * such history, so one settled snapshot after a restart is not enough to
+     * remove it. It must still be missing after the next one.
+     */
+    #unseenCachedStrikes = new Map();
     /**
      * Inventory from the most recent sync, reused by the diagnostics gauges.
      *
@@ -160,6 +177,8 @@ class MyNestPlatform {
     #lastDiagnosticsHealth = null;
     /** One-shot startup line after the first HomeKit inventory sync. */
     #hasLoggedPlatformReady = false;
+    /** House-level PagerDuty signals. Absent unless pagerdutySignals is on. */
+    #signals = null;
     constructor(log, config, api) {
         this.api = api;
         this.Service = api.hap.Service;
@@ -167,6 +186,15 @@ class MyNestPlatform {
         this.#rawLog = log;
         const raw = config;
         this.#log = (0, logger_1.createScopedLogger)(log, settings_1.PLATFORM_NAME, raw.debug === true);
+        // Read from the raw block so an invalid config can still page.
+        if (raw.pagerdutySignals === true) {
+            this.#log.info(nest_signals_1.PAGERDUTY_STARTUP_LOG);
+            this.#signals = new nest_signals_1.NestSignals(new pagerduty_signals_1.PagerDutySignals({
+                plugin: settings_1.PLUGIN_NAME,
+                storagePath: api.user.storagePath(),
+                log: this.#log,
+            }));
+        }
         try {
             const { config: resolved, warnings } = (0, validators_1.validateConfig)(raw);
             this.#config = resolved;
@@ -205,6 +233,9 @@ class MyNestPlatform {
     configureAccessory(accessory) {
         this.#log.debug(`Restoring ${accessory.displayName} from cache`);
         this.#cachedAccessories.set(accessory.UUID, accessory);
+        // A cached Protect can still be smoke/CO clear and active from the last
+        // good session. No handler exists until Nest answers, so fault it now.
+        this.#holdUnpublishedProtectAlarms();
     }
     async #start() {
         if (!this.#config) {
@@ -215,13 +246,16 @@ class MyNestPlatform {
             // because HomeKit treats the re-registered accessories as new devices.
             // A config error is less severe than a revoked token, so it cannot
             // warrant a more destructive response.
-            this.#log.error('Configuration is not usable — accessories were kept but will not update. '
-                + 'Fix the configuration and restart Homebridge.');
+            this.#log.error('Invalid configuration; accessories kept but will not update until it is corrected.');
+            this.#holdUnpublishedProtectAlarms();
+            this.#signals?.noteStopped('config');
             return;
         }
+        this.#holdUnpublishedProtectAlarms();
+        this.#signals?.start();
         this.#startedAt = Date.now();
         if (this.#config.allowThermostatControl) {
-            this.#log.info('Thermostat control enabled (Nest BatchUpdateState).');
+            this.#log.info('Thermostat control enabled');
         }
         const diagnostics = this.#diagnostics;
         const transport = new transport_1.NestTransport({
@@ -229,7 +263,12 @@ class MyNestPlatform {
             endpoints: (0, settings_1.resolveEndpoints)(this.#config.fieldTest),
             log: this.#log,
             onTraits: (traits) => this.#applyTraits(traits),
-            onBuckets: (buckets) => this.#applyBuckets(buckets),
+            onBuckets: (buckets, updatedKeys) => this.#applyBuckets(buckets, updatedKeys),
+            onObserveDeviceData: (stale) => {
+                this.#observeDeviceDataStale = stale;
+                this.#bucketsChanged = true;
+                this.#scheduleUpdate();
+            },
             onObserveSessionStart: () => this.#beginObserveSnapshot(),
             onFatal: (error) => this.#handleFatal(error),
             onCircuitOpen: () => diagnostics?.breakerTrip(),
@@ -262,11 +301,15 @@ class MyNestPlatform {
             // what a Raspberry Pi that boots before its network is up would see.
             // Steady state already classifies these correctly; this is the boot path
             // catching up.
-            if (isFatalStartupError(error)) {
+            if ((0, errors_1.isFatalTransportError)(error)) {
                 this.#handleFatal(error instanceof Error ? error : new Error(String(error)));
                 return;
             }
-            this.#log.warn(`Could not reach Nest at startup (${(0, sanitizers_1.sanitizeError)(error)}); retrying in the background.`);
+            // Shutdown aborts the in-flight start; no retry follows, so do not announce one.
+            if (this.#isShuttingDown) {
+                return;
+            }
+            this.#log.warn(`Nest unreachable at startup (${(0, sanitizers_1.sanitizeError)(error)}), retrying`);
             this.#scheduleStartRetry();
             return;
         }
@@ -274,7 +317,8 @@ class MyNestPlatform {
         this.#startDiagnostics();
         // REST is up; Observe usually follows within a second. Naming both avoids
         // implying thermostats are already live when only app_launch succeeded.
-        this.#log.info('Connected to Nest (REST up; Observe connecting)');
+        this.#log.info('Connected to Nest');
+        this.#signals?.noteConnected();
     }
     /**
      * Retry `#start` with backoff after a transient startup failure.
@@ -289,6 +333,7 @@ class MyNestPlatform {
         }
         this.#transport?.stop();
         this.#transport = null;
+        this.#holdUnpublishedProtectAlarms();
         this.#startRetryAttempt++;
         const delayMs = (0, retry_1.computeBackoffMs)(this.#startRetryAttempt);
         this.#startRetryTimer = setTimeout(() => {
@@ -334,6 +379,7 @@ class MyNestPlatform {
         this.#globalEco?.dispose();
         this.#transport?.stop();
         this.#transport = null;
+        this.#signals?.close();
     }
     /**
      * A failure nothing can recover from without a config change — almost always
@@ -353,10 +399,13 @@ class MyNestPlatform {
             return;
         }
         this.#hasFatal = true;
-        this.#log.error(`${error.message} Paste a fresh token from https://home.nest.com/session and restart. Accessories were kept.`);
+        const isSessionShape = error instanceof errors_1.SessionShapeError;
+        this.#log.error(error instanceof errors_1.AuthenticationError ? TOKEN_REJECTED_MESSAGE : error.message);
+        this.#signals?.noteStopped(stopReasonFor(error));
         // Mark Protect smoke/CO inactive/faulted while handlers can still refresh.
         // `#stop` sets `#isShuttingDown` and drops `#scheduleUpdate`, so the
         // transport's onRestAlarmFeedChange callback would not reach HomeKit.
+        this.#holdUnpublishedProtectAlarms();
         try {
             this.#syncAccessories({
                 changedIds: null,
@@ -373,9 +422,11 @@ class MyNestPlatform {
         // transport heartbeat and the diagnostics timer, so without this the plugin
         // emits nothing ever again while HomeKit keeps serving frozen readings, and
         // the single error line above scrolls out of the log within hours.
+        const reminder = isSessionShape
+            ? 'Still stopped: unsupported Nest session format. Readings are frozen.'
+            : `Still stopped: ${TOKEN_REJECTED_MESSAGE}`;
         this.#fatalReminderTimer = setInterval(() => {
-            this.#log.error('Nest authentication is still failing — readings are frozen. '
-                + 'Paste a fresh token from https://home.nest.com/session and restart Homebridge.');
+            this.#log.error(reminder);
         }, FATAL_REMINDER_MS);
         this.#fatalReminderTimer.unref?.();
     }
@@ -470,7 +521,7 @@ class MyNestPlatform {
             for (const id of snapshotIds) {
                 this.#observeRemovalCandidates.delete(id);
             }
-            this.#log.warn(`Observe reconnect incomplete (${snapshotIds.size} devices, had ${previousCount}) — keeping prior state`);
+            this.#log.warn(`Observe: incomplete reconnect (${snapshotIds.size} of ${previousCount} devices), keeping prior state`);
             return;
         }
         // A non-empty, non-truncated burst is enough to allow HomeKit prune — even
@@ -504,7 +555,7 @@ class MyNestPlatform {
             const live = new Set(knownDeviceIds.filter((id) => !toRemove.has(id)));
             const removed = this.#observe.retainDeviceResources(live);
             if (removed.length > 0) {
-                this.#log.info(`Observe dropped ${removed.length} device(s) — removing from HomeKit`);
+                this.#log.info(`Observe: ${removed.length} device(s) no longer reported`);
             }
         }
         // Always sync after a settled burst so HomeKit prune (gated on
@@ -513,10 +564,36 @@ class MyNestPlatform {
         this.#bucketsChanged = true;
         this.#scheduleUpdate();
     }
-    #applyBuckets(buckets) {
+    #applyBuckets(buckets, updatedKeys) {
         this.#buckets = buckets;
         this.#bucketsChanged = true;
+        this.#logTopazArrivals(buckets, updatedKeys);
         this.#scheduleUpdate();
+    }
+    /**
+     * Log the raw Protect alarm fields whenever a topaz object arrives.
+     *
+     * The accessory summary stays quiet when the HomeKit sentence is unchanged,
+     * which hides a stuck `auto_away`.
+     */
+    #logTopazArrivals(buckets, updatedKeys) {
+        if (!updatedKeys) {
+            return;
+        }
+        for (const key of updatedKeys) {
+            if (!key.startsWith('topaz.')) {
+                continue;
+            }
+            const id = key.slice('topaz.'.length);
+            const value = buckets.topaz?.[id];
+            if (!value || typeof value !== 'object') {
+                continue;
+            }
+            const topaz = value;
+            const knownName = this.#lastInventory?.protects.get(id)?.identity.name;
+            const description = (0, classify_1.cleanName)(topaz.description);
+            this.#log.info((0, protect_state_1.formatTopazArrival)(topaz, knownName ?? description ?? id));
+        }
     }
     /** Collapse a burst of transport updates into one HomeKit refresh. */
     #scheduleUpdate() {
@@ -548,42 +625,61 @@ class MyNestPlatform {
         if (!options.bucketsChanged && options.changedIds && options.changedIds.size === 0) {
             return;
         }
+        const isFeedAvailable = options.restAlarmFeedAvailable
+            ?? this.#transport?.status.isRestAlarmFeedAvailable
+            ?? false;
         const inventory = (0, registry_1.buildInventory)({
             observe: this.#observe,
             buckets: this.#buckets,
             ignoredDeviceIds: this.#config.ignoredDeviceIds,
-            restAlarmFeedAvailable: options.restAlarmFeedAvailable
-                ?? this.#transport?.status.isRestAlarmFeedAvailable
-                ?? false,
+            restAlarmFeedAvailable: isFeedAvailable,
+            observeDataStale: this.#observeDeviceDataStale,
         });
         this.#lastInventory = inventory;
         // A reconnect snapshot names every device; a typical patch names one.
         // Refresh only the affected accessories unless REST buckets changed (which
         // can add/remove devices) or the change set is large.
         const devices = (0, registry_1.listDevices)(inventory);
+        this.#signals?.update(devices.filter((device) => (0, device_1.isDeviceOfKind)(device, 'protect')).map((device) => device.state), isFeedAvailable);
+        // A sensor patch does not name the thermostat that is displaying it.
+        if (options.changedIds && !options.bucketsChanged) {
+            const thermostatIds = devices
+                .filter((device) => device.identity.kind === 'thermostat')
+                .map((device) => device.identity.id);
+            for (const id of (0, thermostat_state_1.thermostatIdsForChangedComfortSensors)(this.#observe, thermostatIds, options.changedIds)) {
+                options.changedIds.add(id);
+            }
+        }
         const refreshAll = options.bucketsChanged
             || !options.changedIds
             || options.changedIds.size >= Math.max(8, Math.ceil(devices.length / 2));
         let pushedUpdates = 0;
         for (const device of devices) {
-            const handler = this.#handlers.get(device.identity.id);
-            if (handler) {
-                if (refreshAll || options.changedIds?.has(device.identity.id)) {
-                    handler.update(device);
+            this.#seenDeviceIds.add(device.identity.id);
+            try {
+                const handler = this.#adoptHandler(device);
+                if (handler) {
+                    if (refreshAll || options.changedIds?.has(device.identity.id)) {
+                        handler.update(device);
+                        pushedUpdates++;
+                    }
+                }
+                else {
+                    this.#publish(device);
                     pushedUpdates++;
                 }
             }
-            else {
-                this.#publish(device);
-                pushedUpdates++;
+            catch (error) {
+                this.#log.error(`Could not update ${device.identity.name}: ${(0, sanitizers_1.sanitizeError)(error)}`);
             }
         }
         if (pushedUpdates > 0) {
             this.#diagnostics?.externalChange();
         }
+        this.#markUnreportedHandlers(devices);
         this.#removeStaleAccessories(inventory);
         this.#syncGlobalEco(inventory);
-        if (!this.#hasLoggedPlatformReady) {
+        if (!this.#hasLoggedPlatformReady && !this.#hasFatal) {
             this.#hasLoggedPlatformReady = true;
             this.#log.info('Platform ready');
         }
@@ -602,6 +698,39 @@ class MyNestPlatform {
     // Temperature Sensor state that `readComfortTemperatures` reads, which made a
     // thermostat's reported temperature flap between its paired sensor and its
     // own backplate.
+    /**
+     * The live handler for a device, or `undefined` when one must be published.
+     *
+     * A device can change kind after it was published. Observe can deliver a
+     * Protect's temperature trait before its Protect trait, which classifies it
+     * as a temperature sensor first. The old handler cannot grow smoke and CO
+     * services, so its services are removed and the caller publishes the right
+     * kind onto the same HomeKit accessory.
+     */
+    #adoptHandler(device) {
+        const handler = this.#handlers.get(device.identity.id);
+        if (!handler || handler.kind === device.identity.kind) {
+            return handler;
+        }
+        this.#log.info(`${device.identity.name}: now a ${KIND_LABELS[device.identity.kind]}, rebuilding services`);
+        handler.removeAllServices();
+        this.#handlers.delete(device.identity.id);
+        return undefined;
+    }
+    /**
+     * Stop presenting last values as live for devices Nest dropped.
+     *
+     * Removal from HomeKit waits for Observe to settle, so a Protect that left
+     * the inventory could otherwise keep a live all-clear indefinitely.
+     */
+    #markUnreportedHandlers(devices) {
+        const reported = new Set(devices.map((device) => device.identity.id));
+        for (const [deviceId, handler] of this.#handlers) {
+            if (!reported.has(deviceId)) {
+                handler.markUnreported();
+            }
+        }
+    }
     /** Create or adopt the HomeKit accessory for a device seen for the first time. */
     #publish(device) {
         const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${device.identity.id}`);
@@ -627,15 +756,9 @@ class MyNestPlatform {
             accessory.context = context;
             this.#cachedAccessories.set(uuid, accessory);
             this.api.registerPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
-            const via = device.identity.sources.observe && device.identity.sources.rest
-                ? 'Observe and REST'
-                : device.identity.sources.observe
-                    ? 'Observe only'
-                    : 'REST only';
             // The id is here because config.schema.json points at this line as the way
             // to find a value for ignoredDeviceIds; there is no other route to it.
-            this.#log.info(`Added ${device.identity.kind} "${device.identity.name}" `
-                + `[${device.identity.id}] (via ${via})`);
+            this.#log.info(`Adding ${KIND_LABELS[device.identity.kind]} "${device.identity.name}" [${device.identity.id}]`);
         }
         const log = (0, logger_1.createScopedLogger)(this.#rawLog, device.identity.name, this.#config?.debug === true);
         this.#handlers.set(device.identity.id, this.#createHandler(accessory, device, log));
@@ -705,8 +828,8 @@ class MyNestPlatform {
      * Set Eco on every published Nest thermostat.
      *
      * @returns `true` only when every targeted thermostat accepted the write.
-     *   `false` when control is off, there are no thermostats, or any write failed
-     *   (partial failures are logged; HomeKit must not flip the global switch).
+     *   `false` when control is off or there are no thermostats. Any failed
+     *   write throws, including when some thermostats already accepted it.
      */
     async applyGlobalEcoWrite(ecoOn) {
         if (!this.#config?.allowThermostatControl) {
@@ -738,21 +861,51 @@ class MyNestPlatform {
                 await transport.updateEcoMode((0, classify_1.toResourceId)(deviceId), ecoOn);
             })));
         }
-        let failed = 0;
+        const failedIds = [];
         for (const [index, result] of results.entries()) {
-            if (result.status === 'rejected') {
-                failed++;
-                this.#log.warn(`Nest Eco Mode: ${deviceIds[index]} failed: ${(0, sanitizers_1.sanitizeError)(result.reason)}`);
+            const deviceId = deviceIds[index];
+            if (deviceId && result.status === 'rejected') {
+                failedIds.push(deviceId);
+                this.#log.warn(`Nest Eco Mode: ${deviceId} failed: ${(0, sanitizers_1.sanitizeError)(result.reason)}`);
             }
         }
-        if (failed > 0) {
-            if (failed === results.length) {
-                throw new Error(`Eco update failed on all ${failed} thermostat(s)`);
-            }
-            this.#log.warn(`Nest Eco Mode: ${failed}/${results.length} thermostat(s) failed — HomeKit left unchanged`);
-            return false;
+        if (failedIds.length > 0) {
+            throw new Error(`${failedIds.length} of ${deviceIds.length} thermostats failed`);
         }
         return true;
+    }
+    /**
+     * Fault cached Protect smoke and CO that do not have a live handler yet.
+     *
+     * Homebridge will answer a paired read from the persisted characteristics
+     * until a handler exists. After a healthy run those are a live all-clear.
+     * The real accessory replaces these handlers when Nest publishes the device.
+     */
+    #holdUnpublishedProtectAlarms() {
+        const { Characteristic } = this.api.hap;
+        for (const accessory of this.#cachedAccessories.values()) {
+            const context = accessory.context;
+            if (context?.kind !== 'protect') {
+                continue;
+            }
+            if (context.deviceId && this.#handlers.has(context.deviceId)) {
+                continue;
+            }
+            for (const service of [
+                accessory.getService(this.Service.SmokeSensor),
+                accessory.getService(this.Service.CarbonMonoxideSensor),
+                accessory.getService(this.Service.OccupancySensor),
+            ]) {
+                if (!service) {
+                    continue;
+                }
+                // Do not install a throwing getter. The accessory list catches that
+                // throw and substitutes the characteristic default, which is a clear.
+                service.getCharacteristic(Characteristic.StatusActive).updateValue(false);
+                service.getCharacteristic(Characteristic.StatusFault)
+                    .updateValue(Characteristic.StatusFault.GENERAL_FAULT);
+            }
+        }
     }
     /**
      * Drop accessories Nest no longer reports — never because a transport is down.
@@ -763,6 +916,10 @@ class MyNestPlatform {
      * devices leave inventory via the transport's two-strike `app_launch` guard;
      * Observe-only devices leave via the two-strike reconnect snapshot prune.
      * The union inventory then makes them absent here.
+     *
+     * A cached accessory that Nest has not named since the restart has no strike
+     * history, so one settled snapshot cannot prove it gone. It goes only when a
+     * later snapshot also omits it.
      */
     #removeStaleAccessories(inventory) {
         const status = this.#transport?.status;
@@ -795,18 +952,39 @@ class MyNestPlatform {
                 continue;
             }
             if (context?.deviceId && known.has(context.deviceId)) {
+                this.#unseenCachedStrikes.delete(uuid);
                 continue;
             }
-            this.#log.info(`Removing ${accessory.displayName} — Nest no longer reports it`);
+            if (!this.#isRemovalConfirmed(uuid, context?.deviceId)) {
+                continue;
+            }
+            this.#unseenCachedStrikes.delete(uuid);
+            this.#log.info(`Removing ${accessory.displayName}, no longer reported by Nest`);
             this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
             this.#cachedAccessories.delete(uuid);
         }
     }
+    /** Whether an accessory missing from the inventory has enough evidence to go. */
+    #isRemovalConfirmed(uuid, deviceId) {
+        if (deviceId && this.#seenDeviceIds.has(deviceId)) {
+            return true;
+        }
+        const struckAt = this.#unseenCachedStrikes.get(uuid);
+        if (struckAt === undefined) {
+            this.#unseenCachedStrikes.set(uuid, this.#observeSnapshotSequence);
+            return false;
+        }
+        return this.#observeSnapshotSequence > struckAt;
+    }
     /**
      * Publish or refresh the optional house-wide Eco switch.
      *
-     * On when every Nest thermostat is in Eco; Off otherwise. Turning it on/off
-     * writes Eco to each thermostat (requires `allowThermostatControl`).
+     * On when every Observe thermostat has reported Eco. REST-only thermostats
+     * are left out because they never get an Eco trait. Off when there is no
+     * Observe thermostat or any observed one reports Eco off. Until the Observe
+     * snapshot settles and every observed thermostat has reported Eco, the
+     * switch keeps its value. Turning it on/off writes Eco to each thermostat
+     * (requires `allowThermostatControl`).
      */
     #syncGlobalEco(inventory) {
         if (!this.#config?.exposeGlobalEcoSwitch) {
@@ -814,11 +992,21 @@ class MyNestPlatform {
             return;
         }
         const thermostats = (0, registry_1.listDevices)(inventory).filter((device) => (0, device_1.isDeviceOfKind)(device, 'thermostat'));
-        const allEco = thermostats.length > 0
-            && thermostats.every((device) => device.state.isEcoActive === true);
         if (!this.#globalEco) {
             this.#publishGlobalEco();
         }
+        // REST-only thermostats never get an Eco trait. They must not block the
+        // house switch for the life of the process. Until Observe has settled, and
+        // while any Observe thermostat has not reported Eco, the aggregate is
+        // unknown rather than Off, so the switch keeps what it shows.
+        const observed = thermostats.filter((device) => device.identity.sources.observe);
+        const isAggregateUnknown = !this.#hasSettledObserveSnapshot
+            || observed.some((device) => device.state.isEcoActive === undefined);
+        if (isAggregateUnknown) {
+            return;
+        }
+        const allEco = observed.length > 0
+            && observed.every((device) => device.state.isEcoActive === true);
         this.#globalEco?.updateAllEco(allEco);
     }
     #publishGlobalEco() {
@@ -838,7 +1026,7 @@ class MyNestPlatform {
             accessory.context = context;
             this.#cachedAccessories.set(uuid, accessory);
             this.api.registerPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
-            this.#log.info(`Added ${displayName} (controls Eco on all thermostats)`);
+            this.#log.info(`Adding ${displayName}`);
         }
         else {
             accessory.context = context;
@@ -853,7 +1041,7 @@ class MyNestPlatform {
         const uuid = this.api.hap.uuid.generate(`${settings_1.UUID_PREFIX}${settings_1.GLOBAL_ECO_DEVICE_ID}`);
         const accessory = this.#cachedAccessories.get(uuid);
         if (accessory) {
-            this.#log.info(`Removing ${accessory.displayName} — global Eco switch disabled in config`);
+            this.#log.info(`Removing ${accessory.displayName}, turned off in settings`);
             this.api.unregisterPlatformAccessories(settings_1.PLUGIN_NAME, settings_1.PLATFORM_NAME, [accessory]);
             this.#cachedAccessories.delete(uuid);
         }
@@ -958,6 +1146,7 @@ class MyNestPlatform {
                 buckets: this.#buckets,
                 ignoredDeviceIds: this.#config.ignoredDeviceIds,
                 restAlarmFeedAvailable: this.#transport?.status.isRestAlarmFeedAvailable ?? false,
+                observeDataStale: this.#observeDeviceDataStale,
             })
             : null);
         if (inventory) {

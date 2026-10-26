@@ -14,9 +14,9 @@
  *    exists and every sample ever captured on this account reads all-clear, so
  *    there is nothing to validate a guessed field mapping against. Inferring
  *    "no smoke" from an unverified enum is the one mistake in this plugin that
- *    could matter to somebody's safety, so it is not made: a Protect that REST
- *    does not report gets no smoke or CO sensor in HomeKit at all, and the user
- *    is told why. See `docs/PROTOCOL.md`.
+ *    could matter to somebody's safety, so it is not made. A Protect with no
+ *    decoded alarm number still publishes both sensors, marked inactive, and
+ *    does not write a clear. See `docs/PROTOCOL.md`.
  *
  * 2. **A Protect does not report motion.** It has a PIR sensor, but neither API
  *    exposes its events: `ambient_motion` carries no state at rest, and a
@@ -29,6 +29,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toAlarmLevel = toAlarmLevel;
 exports.resolveOccupancy = resolveOccupancy;
 exports.readProtectState = readProtectState;
+exports.formatTopazArrival = formatTopazArrival;
 exports.describeOccupancySource = describeOccupancySource;
 const traits_1 = require("./traits");
 /**
@@ -91,8 +92,8 @@ function readBatteryLow(state, resourceId, topaz) {
 /**
  * Whether the Protect is running on mains power.
  *
- * Matters beyond diagnostics: Nest only computes `auto_away` for wired units,
- * so this is what decides whether occupancy can be offered at all.
+ * `false` omits occupancy. Unknown power does not: a boolean `auto_away` is
+ * already Nest's verdict.
  */
 function readLinePowered(state, resourceId, topaz) {
     if (typeof topaz?.line_power_present === 'boolean') {
@@ -118,15 +119,15 @@ function resolveOccupancy(options) {
     if (!restAlarmFeedAvailable) {
         // Keep last auto_away when we have it so the occupancy service is not torn
         // down for a Nest outage; the accessory marks the tile faulted/inactive.
+        // Unknown power is not a veto: the boolean is already Nest's verdict.
         if (topaz
-            && isLinePowered === true
+            && isLinePowered !== false
             && typeof topaz.auto_away === 'boolean') {
             return {
                 isOccupied: !topaz.auto_away,
                 occupancySource: 'unavailable_rest_stale',
             };
         }
-        return { occupancySource: 'unavailable_rest_stale' };
     }
     if (!topaz) {
         return { occupancySource: 'unavailable_observe_only' };
@@ -134,12 +135,9 @@ function resolveOccupancy(options) {
     if (isLinePowered === false) {
         return { occupancySource: 'unsupported_battery_powered' };
     }
-    // Nest only computes auto_away for wired Protects. When power is unknown,
-    // publishing occupancy would invent a mains-powered verdict.
-    if (isLinePowered !== true) {
-        return { occupancySource: 'unavailable_power_unknown' };
-    }
     if (typeof topaz.auto_away !== 'boolean') {
+        // Unknown power is not a veto once Nest has sent the boolean. A missing
+        // boolean is the reason the sensor is omitted, whether or not power is known.
         return { occupancySource: 'unavailable_no_auto_away' };
     }
     // Inverted: Nest's flag means "nobody has been detected", HomeKit's means
@@ -152,9 +150,9 @@ function readProtectState(options) {
     const isLinePowered = readLinePowered(state, resourceId, topaz);
     const isAlarmFeedStale = !restAlarmFeedAvailable && topaz !== undefined;
     return {
-        // Observe-only (no topaz): leave undefined so the accessory never creates
-        // smoke/CO tiles. REST-known Protects keep last topaz levels when the feed
-        // goes stale; `isAlarmFeedStale` tells the accessory to fault them.
+        // Missing numbers stay undefined. The accessory still publishes the sensor
+        // and faults it, and does not write a clear. REST-known Protects keep last
+        // topaz levels when the feed goes stale; `isAlarmFeedStale` faults them.
         smoke: toAlarmLevel(topaz?.smoke_status),
         carbonMonoxide: toAlarmLevel(topaz?.co_status),
         isAlarmFeedStale: isAlarmFeedStale || undefined,
@@ -176,20 +174,31 @@ function readPlausibleRestTemperature(value) {
         ? value
         : undefined;
 }
+/**
+ * One info line for a REST Protect object, including when HomeKit's sentence
+ * would be unchanged.
+ *
+ * `auto_away` false is Occupied. A stuck Occupied is invisible if the plugin
+ * only logs the summary when that word changes.
+ */
+function formatTopazArrival(topaz, label) {
+    const autoAway = typeof topaz.auto_away === 'boolean' ? String(topaz.auto_away) : 'absent';
+    const smoke = typeof topaz.smoke_status === 'number' ? String(topaz.smoke_status) : 'absent';
+    const co = typeof topaz.co_status === 'number' ? String(topaz.co_status) : 'absent';
+    return `${label}: REST topaz auto_away=${autoAway} smoke_status=${smoke} co_status=${co}`;
+}
 /** A user-facing explanation for why occupancy is or is not published. */
 function describeOccupancySource(source) {
     switch (source) {
         case 'auto_away':
-            return 'occupancy comes from Nest\'s own "auto away" verdict, which changes about 10 minutes after the room empties and is not motion detection';
+            return 'uses Nest auto-away, not motion';
         case 'unsupported_battery_powered':
-            return 'Nest does not compute occupancy for battery-powered Protects, so no occupancy sensor is published';
+            return 'battery powered';
         case 'unavailable_observe_only':
-            return 'this Protect is not in the account\'s REST device list, which is the only place Nest publishes occupancy, so no occupancy sensor is published';
+            return 'not in the Nest REST device list';
         case 'unavailable_no_auto_away':
-            return 'Nest listed this Protect over REST but did not publish an auto_away verdict, so no occupancy sensor is published';
-        case 'unavailable_power_unknown':
-            return 'Nest did not report whether this Protect is mains-powered, so occupancy is not published';
+            return 'Nest sent no auto-away value';
         case 'unavailable_rest_stale':
-            return 'Nest REST is not refreshing alarm state, so occupancy is a cached reading marked inactive until REST recovers';
+            return 'alarm feed stale, occupancy marked inactive';
     }
 }

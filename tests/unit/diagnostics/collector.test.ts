@@ -23,6 +23,7 @@ const baseConfig = (): ResolvedConfig => ({
   ignoredDeviceIds: new Set(['ABC']),
   diagnosticsInterval: 60,
   structuredLogs: false,
+  pagerdutySignals: false,
   debug: false,
 })
 
@@ -139,7 +140,7 @@ describe('DiagnosticsCollector', () => {
     m.fatalActive.value = true
     expect(collector.rollup(m.readers)).toEqual({
       health: 'degraded',
-      reasons: expect.arrayContaining(['fatalAuth']),
+      reasons: expect.arrayContaining(['fatalStop']),
     })
 
     m.fatalActive.value = false

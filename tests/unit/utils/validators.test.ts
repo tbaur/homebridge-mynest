@@ -44,6 +44,7 @@ describe('validateConfig', () => {
       exposeProtectTemperature: false,
       diagnosticsInterval: 0,
       structuredLogs: false,
+      pagerdutySignals: false,
       debug: false,
     })
     expect(config.ignoredDeviceIds.size).toBe(0)
@@ -143,11 +144,11 @@ describe('validateConfig', () => {
   it('accepts an ignore list in either id form', () => {
     // The Nest app shows the bare serial; the Observe stream prefixes it.
     const { config } = validateConfig(base({
-      ignoredDeviceIds: ['DEVICE_18B4300000ACC1AD', '18b4300000acbfbd', '  '],
+      ignoredDeviceIds: ['DEVICE_18B4300000000001', '18b4300000000002', '  '],
     }))
 
     expect([...config.ignoredDeviceIds].sort())
-      .toEqual(['18B4300000ACBFBD', '18B4300000ACC1AD'])
+      .toEqual(['18B4300000000001', '18B4300000000002'])
   })
 
   it('warns and carries on when the ignore list is not a list', () => {

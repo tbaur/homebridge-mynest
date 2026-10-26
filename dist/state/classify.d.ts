@@ -19,9 +19,9 @@ export declare const OBSERVE_DEVICE_PREFIX = "DEVICE_";
 /**
  * Reduce an Observe resource id to the id the REST buckets use.
  *
- * Confirmed on a live account: Observe reports `DEVICE_18B4300000ACC1AD` for
- * the same Protect that REST reports as `topaz.18B4300000ACC1AD`. This exact
- * correspondence is what makes merging the two transports possible at all.
+ * Observe reports `DEVICE_0000000000000001` for the same Protect that REST
+ * reports as `topaz.0000000000000001`. That correspondence is what makes
+ * merging the two transports possible.
  */
 export declare function toDeviceId(resourceId: string): string;
 /** Expand a REST bucket id into the Observe resource id for the same device. */
@@ -44,6 +44,17 @@ export type RoomNames = ReadonlyMap<string, string>;
  * than from one assumed location.
  */
 export declare function collectObserveRoomNames(state: ObserveState): RoomNames;
+/**
+ * Make a Nest-supplied name safe to publish and to log.
+ *
+ * Names come from the Nest `label` trait or a REST `description`, so they are
+ * remote input. Control characters are stripped because Homebridge logs are the
+ * primary support artifact and get pasted into public issue trackers — a device
+ * named with an embedded newline can forge log lines. The value is also
+ * type-checked rather than trusted: TypeScript only claims these are strings.
+ */
+/** Strip control characters so a Nest name cannot forge a log line. */
+export declare function cleanName(value: unknown): string | undefined;
 /**
  * Choose the name to publish to HomeKit.
  *

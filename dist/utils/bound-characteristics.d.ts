@@ -54,6 +54,17 @@ export declare class CharacteristicBinder {
      */
     bind(service: Service, type: CharacteristicType, read: CharacteristicReader, options?: {
         write?: CharacteristicWriter;
+        /**
+         * Throws when the reader has no value. The accessory list turns a throw
+         * into the characteristic default, so smoke and CO must not use this.
+         * They return null, and HAP keeps the cached value.
+         */
+        unavailable?: () => never;
+        /**
+         * HomeKit read to use when the reader has no value. `refresh` still
+         * skips the push, so a missing value does not overwrite the cache.
+         */
+        whenMissing?: () => CharacteristicValue;
     }): Characteristic;
     /**
      * Drop every binding that belongs to a service about to be removed.

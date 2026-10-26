@@ -274,6 +274,12 @@ describe('ObjectList', () => {
     expect(list.size).toBe(2)
   })
 
+  it('treats an empty app_launch as truncated on the first read too', () => {
+    // Every real account has user and structure objects, so an empty body is
+    // a broken answer and must not count as a Protect alarm refresh.
+    expect(new ObjectList().applyAppLaunchSnapshot([]).truncated).toBe(true)
+  })
+
   it('clears a removal candidate when a later complete snapshot names the object', () => {
     const list = new ObjectList()
     list.merge([topaz, gone])

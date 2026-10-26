@@ -22,13 +22,14 @@ HomeKit accessories are unregistered only when Nest has confirmed a device is go
 | Signal | Behaviour |
 | --- | --- |
 | Failed REST / Observe request | Keep last inventory; no unregister |
-| REST `app_launch` empty or under half prior size | Treat as truncated; merge present keys; keep missing |
+| REST `app_launch` empty or under half prior size | Treat as truncated; merge present keys; keep missing. Does not refresh the Protect alarm-feed clock |
 | REST `app_launch` omits a key | Two consecutive complete omissions before drop |
 | Observe reconnect empty or under half prior devices | Treat as incomplete; keep prior Observe state |
 | Observe omits a `DEVICE_*` | Two consecutive complete snapshots before prune |
 | Observe never connected this session | Do not unregister (REST-only view cannot prove thermostats are gone) |
+| Cached accessory not named by Nest since the restart | Two settled Observe snapshots that both omit it before prune |
 | Device absent from the Observe ∪ REST inventory after the above | Unregister from HomeKit |
-| Expired / revoked access token (or both transports exhausted on HTTP 403) | Stop updates; **keep** accessories — Nest Account auth is a manually pasted session token, so unregistering would bounce rooms/automations until the user pastes a fresh one and restarts |
+| Expired or revoked access token (HTTP 401, or a session this plugin cannot use) | Stop updates; **keep** accessories. HTTP 403 does not stop the plugin, including when both transports exhaust their budget. Each transport probes again after the cooldown. Nest Account auth is a manually pasted session token, so unregistering would bounce rooms and automations until the user pastes a fresh token and restarts |
 
 Unusable plugin config at startup (missing/invalid token shape, etc.) **keeps** the cached accessories, for the same reason an expired token does. A typo, a half-edited `config.json`, or a truncated token would otherwise destroy every room assignment, scene membership, and automation target in the Home app — and fixing the config does not bring them back, because HomeKit treats the re-registered accessories as new devices. A config error cannot warrant a more destructive response than a revoked token. The plugin logs why and publishes nothing until it is restarted with a usable config.
 
@@ -58,17 +59,17 @@ A transient failure at startup (DNS, TLS, a timeout, a 5xx) is **not** fatal: it
 
 A Protect has a PIR sensor, but neither API exposes usable motion events in practice. A ~12.5-hour capture of both transports on an occupied house recorded zero REST `auto_away` flips and zero nonempty Observe `ambient_motion` deltas. Many false "MOTION" banners in naive parsers were reconnect baselines containing the schema string `AmbientMotionEvent`, not live PIR.
 
-What Nest does publish is `auto_away` on mains-powered Protects in REST `topaz`: roughly a ten-minute presence hold-off (`auto_away_decision_time_secs` is the window constant, not a timestamp). HomeKit occupancy is therefore:
+What Nest does publish is `auto_away` in REST `topaz`: roughly a ten-minute presence hold-off (`auto_away_decision_time_secs` is the window constant, not a timestamp). HomeKit occupancy is therefore:
 
-- Published only when REST `auto_away` exists **and** the unit is confirmed mains-powered (`line_power_present` / Observe `wall_power`).
-- Unavailable when power is unknown, for battery Protects, and for Observe-only Protects until a real event path is proven.
+- Published when REST `auto_away` is a boolean and the Protect is not reported as battery-powered. Power comes from REST `line_power_present` when it is a boolean. Otherwise it comes from the Observe `wall_power` trait: a reported trait without `present: true` means battery-powered, because proto3 omits a false field. Unknown power (neither source) does not hide a boolean Nest already sent.
+- Unavailable for battery Protects, when `auto_away` is missing, and for Observe-only Protects until REST sends the boolean.
 - Documented as presence, not pathlight-speed motion.
 
 ## Protect smoke / CO
 
 Alarm status is taken from REST `topaz` (`smoke_status` / `co_status`), and only while the REST feed can refresh it. Observe streams `safety_alarm_*` traits, but no public schema maps them and captured samples have all been all-clear. Inferring "no smoke" from an unverified enum is refused.
 
-An Observe-only Protect gets no smoke/CO HomeKit services until REST reports alarm state. If REST later becomes unavailable (circuit breaker open, HTTP 403 budget exhausted, or no successful subscribe/`app_launch` within the stale window), smoke/CO services stay published with last-known values but `StatusActive=false` and `StatusFault=GENERAL_FAULT` — leaving a frozen clear that still looks live would be dishonest, and tearing services down would break HomeKit rooms and automations on every Nest blip. Battery / online may still appear from Observe.
+Every Protect gets smoke and CO HomeKit services. A missing `smoke_status` or `co_status` leaves that sensor inactive and faulted and does not write a clear. REST counts as unavailable when any of these is true: the subscribe circuit breaker is not closed (open or half-open), the HTTP 403 budget is exhausted, the REST loop has exited, no subscribe return or complete `app_launch` arrived in the last 3 minutes, or Nest has not actually answered (a complete `app_launch` or a subscribe that got an HTTP response) in the last 8 minutes. A subscribe that the client timed out still counts toward the 3-minute clock but not the 8-minute one. On a quiet house the plugin runs an `app_launch` after 5 minutes without an answer, so a healthy account never reaches the 8-minute limit. When REST is unavailable, smoke and CO services stay published with last-known values but `StatusActive=false` and `StatusFault=GENERAL_FAULT`. An incomplete `app_launch` moves neither clock, and an empty one counts as incomplete. `app_launch` has its own circuit breaker, so an outage on its host does not stop the subscribe that carries alarms. Leaving a frozen clear that still looks live would be dishonest, and tearing services down would break HomeKit rooms and automations on every Nest blip. Battery-low status can still come from Observe. The smoke and CO tiles stay inactive while that sensor has no REST number or the REST feed is stale, including when Observe says the Protect is online. HTTP 403 does not mean the token is revoked. The plugin keeps probing.
 
 ## Thermostat writes
 
@@ -84,6 +85,8 @@ HVAC state updates arrive over Observe (`target_temperature_settings` / `hvac_co
 
 Plugin flag: `allowThermostatControl` (default **off**). Manual HomeKit setpoint/mode writes clear Nest Eco (`eco_mode_state` OFF) in the same batch when Eco was active.
 
+HomeKit sends a scene's mode and setpoints as separate writes in the same request. The plugin merges the changes that arrive together into one Nest write. A later change builds on the last sent write until Nest reports the sent mode and setpoints, or 60s pass, so it does not resend Nest's older values.
+
 > The encode shape was confirmed against a live account with a maintainer-only probe kit (`nest-probe`), which is **not part of this repository** and is not something a user or contributor can run. Treat references to it as provenance for where these findings came from, not as a step to reproduce.
 
 ### Eco Mode (on / off)
@@ -96,7 +99,7 @@ HomeKit has no Eco thermostat mode, so the plugin exposes Eco as a Switch (per t
 
 Eco-only writes were never confirmed against a live account the way setpoints were; enable `allowThermostatControl` only if you are comfortable with live Nest writes on your account.
 
-The optional house-wide switch (`exposeGlobalEcoSwitch`) posts Eco to every live thermostat accessory. It reports success only when every write succeeds; HomeKit stays optimistic until Nest's all-Eco aggregate matches (or 45s elapses and Nest truth wins).
+The optional house-wide switch (`exposeGlobalEcoSwitch`) posts Eco to every live thermostat accessory. It reports success only when every write succeeds. A partial failure is a HomeKit error. HomeKit stays optimistic until Nest's all-Eco aggregate matches, or 45s elapses and the latest Nest aggregate wins. If Nest has not reported an aggregate by then, the switch keeps the written value. Nest has an aggregate only after the Observe snapshot settles and every Observe thermostat has reported Eco. REST-only thermostats are left out of it. Until then the switch keeps its cached value.
 
 ## Homebridge 2 update path
 

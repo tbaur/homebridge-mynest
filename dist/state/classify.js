@@ -19,6 +19,7 @@ exports.toDeviceId = toDeviceId;
 exports.toResourceId = toResourceId;
 exports.classifyResource = classifyResource;
 exports.collectObserveRoomNames = collectObserveRoomNames;
+exports.cleanName = cleanName;
 exports.resolveDeviceName = resolveDeviceName;
 const traits_1 = require("./traits");
 /** Prefix Nest puts on every device resource id on the Observe stream. */
@@ -26,9 +27,9 @@ exports.OBSERVE_DEVICE_PREFIX = 'DEVICE_';
 /**
  * Reduce an Observe resource id to the id the REST buckets use.
  *
- * Confirmed on a live account: Observe reports `DEVICE_18B4300000ACC1AD` for
- * the same Protect that REST reports as `topaz.18B4300000ACC1AD`. This exact
- * correspondence is what makes merging the two transports possible at all.
+ * Observe reports `DEVICE_0000000000000001` for the same Protect that REST
+ * reports as `topaz.0000000000000001`. That correspondence is what makes
+ * merging the two transports possible.
  */
 function toDeviceId(resourceId) {
     return resourceId.startsWith(exports.OBSERVE_DEVICE_PREFIX)
@@ -105,6 +106,7 @@ const MAX_DEVICE_NAME_LENGTH = 64;
  * named with an embedded newline can forge log lines. The value is also
  * type-checked rather than trusted: TypeScript only claims these are strings.
  */
+/** Strip control characters so a Nest name cannot forge a log line. */
 function cleanName(value) {
     if (typeof value !== 'string') {
         return undefined;

@@ -23,6 +23,8 @@ import {
   OBSERVE_IDLE_TIMEOUT_MS,
   OBSERVE_SNAPSHOT_SETTLE_MS,
   REST_ALARM_FEED_STALE_MS,
+  REST_PROOF_OF_LIFE_MS,
+  REST_RESPONSE_STALE_MS,
   SUBSCRIBE_TIMEOUT_MS,
   appLaunchUrl,
   resolveEndpoints,
@@ -75,6 +77,14 @@ describe('constants that constrain each other', () => {
     // without being unhealthy; a shorter stale window would fault every
     // Protect tile on an ordinary idle cycle.
     expect(REST_ALARM_FEED_STALE_MS).toBeGreaterThan(SUBSCRIBE_TIMEOUT_MS)
+  })
+
+  it('leaves the proof-of-life app_launch time to answer before the feed goes stale', () => {
+    // The proof check runs between subscribes. A subscribe that starts just
+    // before the proof is due delays it by a full long-poll, and the launch
+    // itself still needs time to answer after that.
+    expect(REST_RESPONSE_STALE_MS - REST_PROOF_OF_LIFE_MS)
+      .toBeGreaterThan(SUBSCRIBE_TIMEOUT_MS)
   })
 
   it('waits longer than the platform coalesce window before pruning a snapshot', () => {

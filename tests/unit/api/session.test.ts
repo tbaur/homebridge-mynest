@@ -8,7 +8,7 @@
  */
 
 import { authenticatedHeaders, openSession } from '../../../src/api/session'
-import { AuthenticationError, SessionShapeError } from '../../../src/errors'
+import { SessionShapeError } from '../../../src/errors'
 import { resolveEndpoints } from '../../../src/settings'
 import { createRecordingLogger } from '../../helpers/logger'
 import { jsonFetch } from '../../helpers/fetch'
@@ -79,8 +79,9 @@ describe('openSession', () => {
       urls: { transport_url: 'https://attacker.example.com' },
     }).promise.catch((caught: unknown) => caught)
 
-    expect(error).toBeInstanceOf(AuthenticationError)
+    expect(error).toBeInstanceOf(SessionShapeError)
     expect((error as Error).message).toContain('attacker.example.com')
+    expect((error as Error).message).not.toMatch(/paste/i)
   })
 
   it.each([
@@ -97,7 +98,7 @@ describe('openSession', () => {
       urls: { transport_url: transportUrl },
     }).promise.catch((caught: unknown) => caught)
 
-    expect(error).toBeInstanceOf(AuthenticationError)
+    expect(error).toBeInstanceOf(SessionShapeError)
   })
 
   it('records the expiry Nest reports so it can beat the fixed refresh cadence', async () => {
@@ -117,14 +118,14 @@ describe('openSession', () => {
     await expect(open({
       ...validSession,
       urls: { transport_url: 'http://czfe123.transport.home.nest.com' },
-    }).promise).rejects.toThrow(AuthenticationError)
+    }).promise).rejects.toThrow(SessionShapeError)
   })
 
   it('refuses a transport URL that will not parse', async () => {
     await expect(open({
       ...validSession,
       urls: { transport_url: 'not a url' },
-    }).promise).rejects.toThrow(AuthenticationError)
+    }).promise).rejects.toThrow(SessionShapeError)
   })
 
   it('accepts Nest\'s other production domain', async () => {

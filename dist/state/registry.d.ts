@@ -27,6 +27,12 @@ export interface BuildInventoryOptions {
      * values. Defaults to true.
      */
     restAlarmFeedAvailable?: boolean;
+    /**
+     * When true, `isObserveStale` is set on thermostats and temperature sensors.
+     * Only temperature sensors publish Status Fault. Thermostats keep their last
+     * values. Defaults to false.
+     */
+    observeDataStale?: boolean;
 }
 /**
  * Merge both transports into the device list the platform publishes.

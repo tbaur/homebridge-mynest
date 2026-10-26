@@ -63,7 +63,9 @@ export class AuthenticationError extends NestError {
  *
  * Retryable with backoff: on the per-account transport host a 403 can be a WAF
  * or bot-detection blip against the pinned browser user agent, not a dead
- * token. The transport escalates to fatal only after several consecutive 403s.
+ * token. The transport does not treat HTTP 403 as a dead token. After several
+ * consecutive 403s that loop stops and probes again later. HTTP 401 is the
+ * auth failure that stops.
  */
 export class ForbiddenError extends NestError {
   readonly code = 'FORBIDDEN_ERROR'
@@ -85,9 +87,14 @@ export class SessionShapeError extends NestError {
   readonly code = 'SESSION_SHAPE_ERROR'
   readonly isRetryable = false
 
-  constructor(missing: readonly string[], options?: { cause?: Error }) {
+  /**
+   * @param problem Missing field names, or a sentence fragment describing the
+   *   unusable value (completes "The Nest session response …").
+   */
+  constructor(problem: readonly string[] | string, options?: { cause?: Error }) {
+    const detail = typeof problem === 'string' ? problem : `is missing ${problem.join(', ')}`
     super(
-      `The Nest session response is missing ${missing.join(', ')}. Nest may have changed its session format; please report this.`,
+      `The Nest session response ${detail}. Nest may have changed its session format; please report this.`,
       options,
     )
   }
@@ -178,6 +185,19 @@ export class CircuitBreakerError extends NestError {
 }
 
 /**
+ * Whether a failure cannot clear without user action or a plugin update.
+ *
+ * A rejected credential, a config problem, or a session this plugin cannot
+ * use. Everything else (DNS, TLS, timeouts, 5xx, 403, an open breaker) is
+ * transient, and the loops recover from it.
+ */
+export function isFatalTransportError(error: unknown): boolean {
+  return error instanceof AuthenticationError
+    || error instanceof ConfigurationError
+    || error instanceof SessionShapeError
+}
+
+/**
  * Whether a failure should count toward opening a Nest transport breaker.
  *
  * Auth, 403, and rate-limit paths have their own handling and must not trip
@@ -263,9 +283,9 @@ export function parseRetryAfterMs(header: string | null | undefined): number | u
 /**
  * Map an HTTP status to the appropriate error type.
  *
- * Nest answers a bad or expired token with 401. A 403 on the transport host is
- * sometimes the same, but can also be a transient edge refusal, so it becomes
- * {@link ForbiddenError} and is only treated as fatal after repeated hits.
+ * Nest answers a bad or expired token with 401. A 403 on the transport host
+ * becomes {@link ForbiddenError}. Repeated 403s stop that loop until the
+ * cooldown. They are not a fatal auth failure.
  */
 export function createApiError(
   status: number,

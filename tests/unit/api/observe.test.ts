@@ -48,6 +48,15 @@ function start(overrides: Partial<Parameters<typeof runObserveSession>[0]> = {})
 }
 
 describe('runObserveSession', () => {
+  it('does not open a connection when the signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { http2, promise } = start({ signal: controller.signal })
+
+    await expect(promise).resolves.toMatchObject({ reason: 'aborted', frameCount: 0 })
+    expect(http2.origins).toEqual([])
+  })
+
   it('connects to the gRPC gateway with the headers Nest requires', async () => {
     const { http2, promise } = start()
     const connection = await http2.session()

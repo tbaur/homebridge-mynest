@@ -45,6 +45,14 @@ function toPublishedSetpoint(celsius) {
 class ThermostatAccessory extends base_1.NestAccessory {
     #service;
     #ecoService = null;
+    /** Last Eco boolean Nest sent. Keeps a HomeKit read off `null`. */
+    #lastEco = undefined;
+    /** Changes that arrived since the last write started. */
+    #queuedWrite = null;
+    /** Serializes writes so each builds on the one before it. */
+    #writeChain = Promise.resolve();
+    /** Last write Nest accepted but has not echoed through Observe yet. */
+    #unconfirmedWrite = null;
     constructor(platform, accessory, device, log) {
         super(platform, accessory, device, log);
         this.bindCharacteristics();
@@ -58,7 +66,10 @@ class ThermostatAccessory extends base_1.NestAccessory {
             .setPrimaryService?.(this.#service);
         // Required Thermostat characteristics must never return null from onGet —
         // HomeKit marks the accessory "No Response" and hides room tiles.
-        this.#bindRequired(Characteristic.CurrentTemperature, () => this.state.currentTemperatureC, 20);
+        // HAP's CurrentTemperature default is 0, which is a legal room temperature.
+        // Until Nest has sent a reading, that default is not one. A cached value
+        // other than 0 is a previous reading and stays.
+        this.#bindRequired(Characteristic.CurrentTemperature, () => this.state.currentTemperatureC, 20, { untouchedDefault: 0 });
         this.#bindRequired(Characteristic.CurrentHeatingCoolingState, () => this.#currentHeatingCoolingState(), Characteristic.CurrentHeatingCoolingState.OFF);
         // OFF, not HEAT: the fallback is used before Nest reports a mode, and it
         // must be a member of every set #supportedTargetStates() can return. A
@@ -93,8 +104,8 @@ class ThermostatAccessory extends base_1.NestAccessory {
                 await this.#write({ targetTemperatureHighC: value });
             },
         });
-        // Nest owns what the device's own screen shows; HomeKit is always given
-        // Celsius regardless.
+        // Temperature values are always Celsius. The display-unit characteristic
+        // follows the Nest screen.
         this.#bindRequired(Characteristic.TemperatureDisplayUnits, () => this.state.displayUnit === 'F'
             ? Characteristic.TemperatureDisplayUnits.FAHRENHEIT
             : Characteristic.TemperatureDisplayUnits.CELSIUS, Characteristic.TemperatureDisplayUnits.CELSIUS);
@@ -150,24 +161,84 @@ class ThermostatAccessory extends base_1.NestAccessory {
      * pushes a value a tick later: HAP resets the error status on both paths, so
      * the failure cannot settle into a sticky "No Response".
      */
-    async #write(patch) {
-        try {
-            const write = await this.platform.applyThermostatWrite(this.deviceId, this.state, patch);
-            if (!write) {
-                this.log.warn(`${this.identity.name}: ignoring HomeKit change — enable Allow thermostat control in config.`);
-                this.#revertHomeKitValues();
+    #write(patch) {
+        // HomeKit sends a scene's mode and setpoint as separate `onSet` calls in
+        // the same tick. Merged here, they become one Nest write; sent apart, each
+        // carries the other's old value and the last one to land wins.
+        return new Promise((resolve, reject) => {
+            const settle = (failure) => {
+                if (failure) {
+                    reject(failure);
+                }
+                else {
+                    resolve();
+                }
+            };
+            if (this.#queuedWrite) {
+                this.#queuedWrite.patch = { ...this.#queuedWrite.patch, ...patch };
+                this.#queuedWrite.settlers.push(settle);
                 return;
             }
+            this.#queuedWrite = { patch: { ...patch }, settlers: [settle] };
+            setImmediate(() => {
+                this.#writeChain = this.#writeChain.then(() => this.#flushQueuedWrite());
+            });
+        });
+    }
+    async #flushQueuedWrite() {
+        const queued = this.#queuedWrite;
+        this.#queuedWrite = null;
+        if (!queued) {
+            return;
+        }
+        const failure = await this.#sendWrite(queued.patch);
+        for (const settle of queued.settlers) {
+            settle(failure);
+        }
+    }
+    /** @returns The HAP error for HomeKit when the write failed; `undefined` otherwise. */
+    async #sendWrite(patch) {
+        try {
+            const write = await this.platform.applyThermostatWrite(this.deviceId, this.#writeBaseState(), patch);
+            if (!write) {
+                this.log.warn(`${this.identity.name}: thermostat control is off, change ignored`);
+                this.#revertHomeKitValues();
+                return undefined;
+            }
+            this.#unconfirmedWrite = { write, sentAtMs: Date.now() };
             this.log.info(`${this.identity.name}: ${(0, thermostat_write_1.formatThermostatUpdateLog)(write)}`);
+            return undefined;
         }
         catch (error) {
-            this.log.warn(`${this.identity.name}: thermostat update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
+            this.log.warn(`${this.identity.name}: update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
             this.#revertHomeKitValues();
             // `HapStatusError` rather than the Nest error: rethrowing that would put a
             // stack trace in the Homebridge log through HAP's unhandled-error path,
             // and Nest's message is already logged above without the token in it.
             const { HAPStatus, HapStatusError } = this.platform.api.hap;
-            throw new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
+            return new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
+        }
+    }
+    update(device) {
+        super.update(device);
+        // Checked on every report, not only at the next write: a report after the
+        // echo can be a change made in the Nest app, and it must not be masked.
+        this.#forgetSettledWrite();
+    }
+    /** Nest state with the last accepted, not yet echoed write applied. */
+    #writeBaseState() {
+        this.#forgetSettledWrite();
+        const unconfirmed = this.#unconfirmedWrite;
+        return unconfirmed ? (0, thermostat_write_1.applySentWrite)(this.state, unconfirmed.write) : this.state;
+    }
+    #forgetSettledWrite() {
+        const unconfirmed = this.#unconfirmedWrite;
+        if (!unconfirmed) {
+            return;
+        }
+        const isExpired = Date.now() - unconfirmed.sentAtMs > settings_1.THERMOSTAT_WRITE_ECHO_MAX_MS;
+        if (isExpired || (0, thermostat_write_1.isSentWriteConfirmed)(this.state, unconfirmed.write)) {
+            this.#unconfirmedWrite = null;
         }
     }
     /**
@@ -204,7 +275,18 @@ class ThermostatAccessory extends base_1.NestAccessory {
                 ?? this.accessory.addService(HapService.Switch, 'Eco Mode', 'eco');
             this.#ecoService.setCharacteristic(Characteristic.Name, 'Eco Mode');
         }
-        this.binder.bind(this.#ecoService, Characteristic.On, () => this.state.isEcoActive === true, {
+        this.binder.bind(this.#ecoService, Characteristic.On, () => {
+            if (this.state.isEcoActive !== undefined) {
+                this.#lastEco = this.state.isEcoActive;
+            }
+            return this.state.isEcoActive;
+        }, {
+            whenMissing: () => {
+                if (this.#lastEco !== undefined) {
+                    return this.#lastEco;
+                }
+                return this.#ecoService?.getCharacteristic(Characteristic.On).value === true;
+            },
             write: async (value) => {
                 await this.#writeEco(value === true || value === 1);
             },
@@ -219,11 +301,11 @@ class ThermostatAccessory extends base_1.NestAccessory {
         try {
             const sent = await this.platform.applyEcoWrite(this.deviceId, ecoOn);
             if (!sent) {
-                this.log.warn(`${this.identity.name}: ignoring HomeKit Eco change — enable Allow thermostat control in config.`);
+                this.log.warn(`${this.identity.name}: thermostat control is off, Eco change ignored`);
                 this.#revertHomeKitValues();
                 return;
             }
-            this.log.info(`${this.identity.name}: ${ecoOn ? 'Updating to Eco' : 'Clearing Eco'}`);
+            this.log.info(`${this.identity.name}: Eco ${ecoOn ? 'on' : 'off'}`);
         }
         catch (error) {
             this.log.warn(`${this.identity.name}: Eco update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
@@ -235,20 +317,33 @@ class ThermostatAccessory extends base_1.NestAccessory {
     /**
      * Bind a required characteristic that must never answer `onGet` with null.
      *
-     * Prefer Nest's value, then the last HAP value, then a typed fallback. Refresh
-     * still skips undefined Nest readings so we do not push placeholders as if
-     * they were live — only `onGet` needs a non-null answer for HomeKit.
+     * Prefer Nest's value, then the last HAP value, then a typed fallback. The
+     * same reader serves `onGet` and refresh, so before Nest reports, refresh
+     * pushes the fallback too. That is deliberate for CurrentTemperature: HAP's
+     * untouched default of 0 °C would otherwise read as a real temperature.
      */
     #bindRequired(type, read, fallback, options = {}) {
+        let nestHasReported = false;
         const characteristic = this.binder.bind(this.#service, type, () => {
             const value = read();
             if (value !== undefined && value !== null) {
+                nestHasReported = true;
                 return value;
             }
             const current = this.#service.getCharacteristic(type).value;
+            if (!nestHasReported
+                && options.untouchedDefault !== undefined
+                && (current === options.untouchedDefault || current === null || current === undefined)) {
+                return fallback;
+            }
             return current !== undefined && current !== null ? current : fallback;
         }, options.write ? { write: options.write } : {});
-        if (characteristic.value === null || characteristic.value === undefined) {
+        const current = characteristic.value;
+        if (current === null
+            || current === undefined
+            || (!nestHasReported
+                && options.untouchedDefault !== undefined
+                && current === options.untouchedDefault)) {
             characteristic.updateValue(fallback);
         }
     }

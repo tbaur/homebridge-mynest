@@ -14,6 +14,7 @@ import {
   readComfortSource,
   readThermostatFromObserve,
   readThermostatFromRest,
+  thermostatIdsForChangedComfortSensors,
 } from '../../../src/state/thermostat-state'
 import { buildFrame, heatingThermostatTraits, type TraitFixture } from '../../helpers/observe-fixtures'
 
@@ -194,6 +195,59 @@ describe('readComfortSource', () => {
 
   it('names no sensor when the trait is absent', () => {
     expect(readComfortSource(new ObserveState(), RESOURCE_ID)).toEqual({})
+  })
+})
+
+describe('thermostatIdsForChangedComfortSensors', () => {
+  const thermostatId = 'THERM01'
+
+  function linkedToSensor(): ObserveState {
+    return observeWith([{
+      resourceId: RESOURCE_ID,
+      key: 'remote_comfort_sensing_settings',
+      typeName: 'nest.trait.hvac.RemoteComfortSensingSettingsTrait',
+      value: {
+        activeRcsSelection: {
+          rcsSourceType: 'RCS_SOURCE_TYPE_SINGLE_SENSOR',
+          activeRcsSensor: { resourceId: 'DEVICE_SENSOR01' },
+        },
+      },
+    }])
+  }
+
+  it('includes a thermostat when its comfort sensor changed', () => {
+    const ids = thermostatIdsForChangedComfortSensors(
+      linkedToSensor(),
+      [thermostatId],
+      new Set(['SENSOR01']),
+    )
+
+    expect(ids).toEqual([thermostatId])
+  })
+
+  it('skips a thermostat that is already in the change set', () => {
+    const ids = thermostatIdsForChangedComfortSensors(
+      linkedToSensor(),
+      [thermostatId],
+      new Set(['THERM01', 'SENSOR01']),
+    )
+
+    expect(ids).toEqual([])
+  })
+
+  it('skips a thermostat that reads its own backplate', () => {
+    const state = observeWith([{
+      resourceId: RESOURCE_ID,
+      key: 'remote_comfort_sensing_settings',
+      typeName: 'nest.trait.hvac.RemoteComfortSensingSettingsTrait',
+      value: { activeRcsSelection: { rcsSourceType: 'RCS_SOURCE_TYPE_BACKPLATE' } },
+    }])
+
+    expect(thermostatIdsForChangedComfortSensors(
+      state,
+      [thermostatId],
+      new Set(['SENSOR01']),
+    )).toEqual([])
   })
 })
 

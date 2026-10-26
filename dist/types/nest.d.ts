@@ -93,8 +93,12 @@ export interface TopazBucket {
     where_id?: string;
     description?: string;
     model?: string;
-    /** `0` is clear; anything else is an alarm. */
+    /**
+     * `0` is clear, `1` is heads-up, and any greater integer is emergency.
+     * A negative number, a non-integer, or a missing value is not an alarm.
+     */
     smoke_status?: number;
+    /** Same scale as `smoke_status`. */
     co_status?: number;
     /** `0` is OK; anything else means replace the battery. */
     battery_health_state?: number;

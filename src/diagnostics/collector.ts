@@ -59,7 +59,7 @@ export interface ApiRequestMetricOptions {
 export interface DiagnosticsReaders {
   transport: () => TransportGauges
   devices: () => DeviceGauges
-  /** Platform has permanently stopped after Nest auth failure. */
+  /** Platform has stopped updates after HTTP 401 or a session it cannot use. */
   fatalActive: () => boolean
   /** Wall-clock seconds since platform start (for Observe connecting grace). */
   uptimeSec: () => number
@@ -228,7 +228,7 @@ export class DiagnosticsCollector {
     const transport = readers.transport()
 
     if (readers.fatalActive()) {
-      reasons.push('fatalAuth')
+      reasons.push('fatalStop')
     }
 
     if (transport.observeState === 'forbidden_dead') {
@@ -426,6 +426,7 @@ function redactConfig(config: ResolvedConfig): Record<string, unknown> {
     exposeGlobalEcoSwitch: config.exposeGlobalEcoSwitch,
     exposeProtectOccupancy: config.exposeProtectOccupancy,
     exposeProtectTemperature: config.exposeProtectTemperature,
+    pagerdutySignals: config.pagerdutySignals,
     ignoredDeviceIds: config.ignoredDeviceIds.size,
     debug: config.debug,
   }

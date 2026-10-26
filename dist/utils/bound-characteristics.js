@@ -73,10 +73,35 @@ class CharacteristicBinder {
             return characteristic;
         }
         characteristic.onGet(() => {
-            const value = read();
-            // `null` tells HAP "not available yet" and leaves the cached value in
-            // place, which is the honest answer before the first Nest update lands.
-            return value ?? null;
+            try {
+                const value = read();
+                if (value === null || value === undefined) {
+                    if (options.unavailable) {
+                        options.unavailable();
+                    }
+                    if (options.whenMissing) {
+                        return options.whenMissing();
+                    }
+                    // Returning null makes HAP log an illegal-value warning and, on the
+                    // accessory list, a thrown getter is replaced with the default.
+                    // The cached value is the honest answer when Nest has not sent a new one.
+                    if (characteristic.value !== null && characteristic.value !== undefined) {
+                        return characteristic.value;
+                    }
+                    return null;
+                }
+                return value;
+            }
+            catch (error) {
+                if (isHapStatusError(error)) {
+                    throw error;
+                }
+                // HAP already catches a throw from onGet and, on the accessory list,
+                // replaces it with the characteristic default. Returning null makes
+                // the read succeed with the previous value when one exists.
+                this.#noteReadFailure(name, error);
+                return null;
+            }
         });
         if (options.write) {
             characteristic.onSet(async (value) => {
@@ -113,20 +138,7 @@ class CharacteristicBinder {
                 value = binding.read();
             }
             catch (error) {
-                // Warned for the first few, then dropped to debug. A state-mapping bug
-                // throws on every refresh forever, and `createScopedLogger` discards
-                // debug entirely unless the operator enabled it — so at debug only, an
-                // accessory silently stopped updating and the log said nothing.
-                this.#readFailures++;
-                const message = `${this.#label}: could not compute ${binding.name} `
-                    + `(${this.#readFailures} failure(s)): `
-                    + `${error instanceof Error ? error.message : String(error)}`;
-                if (this.#readFailures <= MAX_READ_FAILURE_WARNINGS) {
-                    this.#log.warn(message);
-                }
-                else {
-                    this.#log.debug(message);
-                }
+                this.#noteReadFailure(binding.name, error);
                 continue;
             }
             if (value === null || value === undefined) {
@@ -139,8 +151,38 @@ class CharacteristicBinder {
     get size() {
         return this.#bindings.length;
     }
+    /**
+     * Warned for the first few, then dropped to debug.
+     *
+     * A state-mapping bug throws on every refresh forever, and
+     * `createScopedLogger` discards debug entirely unless the operator enabled
+     * it. At debug only, an accessory silently stopped updating and the log
+     * said nothing.
+     */
+    #noteReadFailure(name, error) {
+        this.#readFailures++;
+        const message = `${this.#label}: could not compute ${name} `
+            + `(${this.#readFailures} failure(s)): `
+            + `${error instanceof Error ? error.message : String(error)}`;
+        if (this.#readFailures <= MAX_READ_FAILURE_WARNINGS) {
+            this.#log.warn(message);
+        }
+        else {
+            this.#log.debug(message);
+        }
+    }
 }
 exports.CharacteristicBinder = CharacteristicBinder;
+/**
+ * Homebridge exports HapStatusError as a type only, and the instance's
+ * `name` is `Error`. The status code lives on `hapStatus`.
+ */
+function isHapStatusError(error) {
+    return typeof error === 'object'
+        && error !== null
+        && 'hapStatus' in error
+        && typeof error.hapStatus === 'number';
+}
 /**
  * A readable name for a characteristic, for log messages.
  *

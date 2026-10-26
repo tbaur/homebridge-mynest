@@ -8,12 +8,13 @@
  */
 
 import { EventEmitter } from 'node:events'
-import { Accessory, Characteristic, Service, uuid } from '@homebridge/hap-nodejs'
+import { Accessory, Characteristic, HapStatusError, Service, uuid } from '@homebridge/hap-nodejs'
 import type { API, Logging, PlatformAccessory } from 'homebridge'
 
 const hapActual = jest.requireActual('@homebridge/hap-nodejs') as {
   Perms: Record<string, string>
   Categories: Record<string, number>
+  HAPStatus: { SERVICE_COMMUNICATION_FAILURE: number }
 }
 const hapPerms = hapActual.Perms
 const hapCategories = hapActual.Categories
@@ -26,8 +27,13 @@ export class FakeHomebridgeApi extends EventEmitter {
     uuid,
     Perms: hapPerms,
     Categories: hapCategories,
+    HAPStatus: hapActual.HAPStatus,
+    HapStatusError,
   }
   readonly platformAccessory = Accessory
+  /** What `api.user.storagePath()` returns. Tests that write signals point it at a temp dir. */
+  storagePath = '/nonexistent/homebridge-storage'
+  readonly user = { storagePath: (): string => this.storagePath }
 
   readonly registered: PlatformAccessory[] = []
   readonly unregistered: PlatformAccessory[] = []

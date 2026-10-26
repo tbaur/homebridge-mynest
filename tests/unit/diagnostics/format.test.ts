@@ -98,7 +98,7 @@ describe('formatDiagnosticLine', () => {
       transport: { ...base.transport, observeState: 'forbidden_dead', restState: 'stopped' },
     })
 
-    expect(line).toContain('obs auth-failed rest stopped')
+    expect(line).toContain('obs blocked-403 rest stopped')
   })
 
   it('reports connecting as-is rather than claiming a live stream', () => {

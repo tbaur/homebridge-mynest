@@ -60,7 +60,7 @@ jest.mock('../../src/api/transport', () => {
                 co_status: 0,
                 line_power_present: true,
                 auto_away: false,
-                description: 'Hallway',
+                description: 'Zone One',
               },
             },
           })

@@ -27,12 +27,18 @@ describe('computeBackoffMs', () => {
     expect(computeBackoffMs(50, 1000, 30_000, () => 1)).toBe(30_000)
   })
 
-  it('never drops below the base delay', () => {
-    // Full jitter over [0, exponential] would mean waiting almost no time after
-    // a failure, which is an immediate retry with extra steps.
-    for (const attempt of [1, 2, 5, 10]) {
-      expect(computeBackoffMs(attempt, 1000, 60_000, () => 0)).toBeGreaterThanOrEqual(1000)
-    }
+  it('never drops below half the step', () => {
+    // Jitter over [0, step] would mean waiting almost no time after a failure,
+    // which is an immediate retry with extra steps.
+    expect([1, 2, 5, 10].map((attempt) => computeBackoffMs(attempt, 1000, 60_000, () => 0)))
+      .toEqual([500, 1000, 8000, 30_000])
+  })
+
+  it('jitters the first attempt too', () => {
+    // Every install's first reconnect after a shared outage otherwise lands on
+    // the same instant.
+    expect(computeBackoffMs(1, 1000, 60_000, () => 0)).toBe(500)
+    expect(computeBackoffMs(1, 1000, 60_000, () => 0.5)).toBe(750)
   })
 
   it('spreads retries across the window', () => {
@@ -54,7 +60,7 @@ describe('computeBackoffMs', () => {
   it('uses the plugin defaults when none are given', () => {
     const delay = computeBackoffMs(1)
 
-    expect(delay).toBeGreaterThanOrEqual(RECONNECT_BASE_MS)
+    expect(delay).toBeGreaterThanOrEqual(RECONNECT_BASE_MS / 2)
     expect(delay).toBeLessThanOrEqual(RECONNECT_MAX_MS)
   })
 })

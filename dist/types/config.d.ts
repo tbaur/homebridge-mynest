@@ -51,6 +51,8 @@ export interface MyNestPlatformConfig {
      * alongside each human-readable health report.
      */
     structuredLogs?: unknown;
+    /** Write alert conditions to homebridge-pagerduty's signal store. Off by default. */
+    pagerdutySignals?: unknown;
     /** Emit verbose diagnostics, including per-trait Observe updates. */
     debug?: unknown;
 }
@@ -74,6 +76,7 @@ export interface ResolvedConfig {
     /** Seconds between health heartbeats; `0` disables. */
     diagnosticsInterval: number;
     structuredLogs: boolean;
+    pagerdutySignals: boolean;
     debug: boolean;
 }
 /** Outcome of validating user configuration. */

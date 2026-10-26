@@ -18,6 +18,7 @@ import {
   FORBIDDEN_FATAL_THRESHOLD,
   FRAME_DECODE_WINDOW,
   OBSERVE_IDLE_TIMEOUT_MS,
+  REDISCOVERY_INTERVAL_MS,
   REST_ALARM_FEED_STALE_MS,
   REST_RESPONSE_STALE_MS,
   resolveEndpoints,
@@ -262,8 +263,8 @@ describe('NestTransport', () => {
     }
     transport.stop()
 
-    expect(log.warns.join('\n')).toContain('could not be')
-    expect(log.warns.join('\n')).toContain('decoded')
+    expect(log.warns.join('\n')).toContain('updates unreadable')
+    expect(log.warns.join('\n')).toContain('unreadable')
   })
 
   it('merges and publishes buckets when subscribe reports a change', async () => {
@@ -310,17 +311,16 @@ describe('NestTransport', () => {
     const { transport, log } = createTransport({ statusHeartbeatMs: 5 })
     await transport.start()
 
-    await waitUntil(() => log.infos.some((line) => line.includes('Nest transport:')))
+    await waitUntil(() => log.infos.some((line) => line.includes('Status:')))
     transport.stop()
 
-    const line = log.infos.find((entry) => entry.includes('Nest transport:'))!
+    const line = log.infos.find((entry) => entry.includes('Status:'))!
     // Deltas rather than cumulative totals, plus the ages and states an
     // operator would otherwise have to diff across two lines to recover.
-    expect(line).toMatch(/\+\d+ Observe frame\(s\)/)
-    expect(line).toMatch(/\+\d+ REST cycle\(s\)/)
-    expect(line).toMatch(/last Observe .* ago/)
+    expect(line).toMatch(/Observe \+\d+ \(last/)
+    expect(line).toMatch(/REST \+\d+ \(last/)
+    expect(line).toMatch(/ago\)/)
     expect(line).toMatch(/alarm feed (live|STALE)/)
-    expect(line).toMatch(/breaker rest=\w+ obs=\w+/)
   })
 
   it('keeps warning while a connected Observe stream stays silent', async () => {
@@ -343,7 +343,7 @@ describe('NestTransport', () => {
 
       await waitUntil(() => log.warns.some((line) => line.includes('no frames for')))
 
-      expect(log.warns.join('\n')).toMatch(/Observe has delivered no frames for \d+s/)
+      expect(log.warns.join('\n')).toMatch(/Observe: no data for \d+s/)
     } finally {
       jest.restoreAllMocks()
       transport.stop()
@@ -387,7 +387,7 @@ describe('NestTransport', () => {
 
     await waitUntil(() => transport.status.restState === 'forbidden_dead')
     expect(transport.status.restState).toBe('forbidden_dead')
-    expect(log.errors.join('\n')).toMatch(/giving up after 3 HTTP 403s/)
+    expect(log.errors.join('\n')).toMatch(/blocked by Nest \(HTTP 403\)/)
     expect(log.errors.join('\n')).toMatch(/retrying in \d+ min/)
 
     transport.stop()
@@ -406,7 +406,7 @@ describe('NestTransport', () => {
     // lifetime of the process.
     await waitUntil(() => log.infos.some((line) => line.includes('Re-probing REST')))
 
-    expect(log.infos.join('\n')).toMatch(/Re-probing REST after HTTP 403 cooldown/)
+    expect(log.infos.join('\n')).toMatch(/REST: retrying after HTTP 403 cooldown/)
     transport.stop()
   })
 
@@ -423,7 +423,7 @@ describe('NestTransport', () => {
     }
 
     await waitUntil(() => log.infos.some((line) => line.includes('Re-probing Observe')))
-    expect(log.infos.join('\n')).toMatch(/Re-probing Observe after HTTP 403 cooldown/)
+    expect(log.infos.join('\n')).toMatch(/Observe: retrying after HTTP 403 cooldown/)
 
     transport.stop()
   })
@@ -446,14 +446,14 @@ describe('NestTransport', () => {
     // A one-shot log line scrolls away; the flag is what reaches the health
     // rollup, which is the only thing that keeps reporting the condition.
     expect(transport.status.isDecodeDegraded).toBe(true)
-    expect(log.warns.join('\n')).toContain('could not be')
+    expect(log.warns.join('\n')).toContain('updates unreadable')
 
     // Recovery is announced and clears the flag.
     for (let i = 0; i < FRAME_DECODE_WINDOW + 5; i++) {
       connection.push(buildFrame(heatingThermostatTraits()))
     }
     expect(transport.status.isDecodeDegraded).toBe(false)
-    expect(log.infos.join('\n')).toContain('decoding again')
+    expect(log.infos.join('\n')).toContain('readable again')
 
     transport.stop()
   })
@@ -484,7 +484,7 @@ describe('NestTransport', () => {
 
     expect(batchCalls).toHaveLength(1)
     expect(batchCalls[0]).toContain('/nestlabs.gateway.v1.TraitBatchApi/BatchUpdateState')
-    expect(log.infos.join('\n')).not.toMatch(/Updating Heat/)
+    expect(log.infos.join('\n')).not.toMatch(/set Heat/)
 
     transport.stop()
   })
@@ -638,6 +638,27 @@ describe('NestTransport', () => {
     expect(fatals[0]?.message).toMatch(/access token|HTTP 401/i)
   })
 
+  it('faults when no device trait arrives and clears when one does', async () => {
+    const events: boolean[] = []
+    const { transport, http2, log } = createTransport({
+      observeDataStaleMs: 20,
+      onObserveDeviceData: (stale) => events.push(stale),
+    })
+    await transport.start()
+
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(events).toEqual([true])
+    expect(log.warns.join('\n')).toContain('no device updates for 10 min')
+
+    const connection = await http2.session()
+    connection.push(buildFrame(heatingThermostatTraits('DEVICE_THERM01')))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(events).toEqual([true, false])
+    expect(log.infos.join('\n')).toContain('Observe: device updates resumed')
+    transport.stop()
+  })
+
   it('stops the Observe loop after repeated HTTP 403 without killing a healthy REST path', async () => {
     const { transport, http2, fatals, log } = createTransport()
     await transport.start()
@@ -653,7 +674,7 @@ describe('NestTransport', () => {
     // One transport giving up must not fatal — REST may still be updating Protects.
     expect(fatals).toHaveLength(0)
     expect(log.warns.join('\n')).toContain('HTTP 403')
-    expect(log.errors.join('\n')).toMatch(/giving up.*other transport/i)
+    expect(log.errors.join('\n')).toMatch(/blocked by Nest/)
   })
 
   it('does not fatal when REST alone returns repeated HTTP 403 while Observe is healthy', async () => {
@@ -671,11 +692,11 @@ describe('NestTransport', () => {
     transport.stop()
 
     expect(fatals).toHaveLength(0)
-    expect(log.warns.join('\n')).toContain('REST subscribe')
-    expect(log.errors.join('\n')).toMatch(/giving up.*other transport/i)
+    expect(log.warns.join('\n')).toContain('REST: HTTP 403')
+    expect(log.errors.join('\n')).toMatch(/blocked by Nest/)
   })
 
-  it('fatals only after both REST and Observe exhaust their HTTP 403 budgets', async () => {
+  it('does not fatal when both REST and Observe exhaust their HTTP 403 budgets', async () => {
     const { fetch } = createNestFetch({ subscribeStatus: 403 })
     const { transport, http2, fatals, log } = createTransport({ fetchImpl: fetch })
     await transport.start()
@@ -689,8 +710,9 @@ describe('NestTransport', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     transport.stop()
 
-    expect(fatals.length).toBeGreaterThanOrEqual(1)
-    expect(fatals[0]?.message).toMatch(/both REST and Observe/i)
+    expect(fatals).toHaveLength(0)
+    expect(log.errors.join('\n')).toMatch(/blocked by Nest \(HTTP 403\)/)
+    expect(log.errors.join('\n')).not.toMatch(/paste a fresh token/)
     expect(log.warns.join('\n')).toContain('HTTP 403')
   })
 
@@ -714,7 +736,7 @@ describe('NestTransport', () => {
 
     expect(opens).toContain('rest')
     expect(restBreaker.state).toBe(CircuitState.OPEN)
-    expect(log.warns.join('\n')).toMatch(/Circuit breaker \(REST\).*OPEN/)
+    expect(log.warns.join('\n')).toMatch(/REST: paused after repeated failures/)
   })
 
   it('does not trip the REST breaker on HTTP 403 subscribe failures', async () => {
@@ -762,7 +784,7 @@ describe('NestTransport', () => {
     expect(restBreaker.state).toBe(CircuitState.OPEN)
     expect(transport.status.isRestAlarmFeedAvailable).toBe(false)
     expect(feedChanges).toContain(false)
-    expect(log.warns.join('\n')).toMatch(/REST alarm feed unavailable/i)
+    expect(log.warns.join('\n')).toMatch(/Protect alarm feed unavailable/)
   })
 
   it('marks the REST alarm feed unavailable after REST gives up on HTTP 403', async () => {
@@ -823,6 +845,238 @@ describe('NestTransport', () => {
       sleep.sleep.mockImplementation(
         () => new Promise<void>((resolve) => setImmediate(resolve)),
       )
+    }
+  })
+
+  it('does not treat a truncated app_launch as a Protect alarm refresh', async () => {
+    const sleep = jest.requireMock('../../../src/utils/retry') as {
+      sleep: jest.Mock
+    }
+    sleep.sleep.mockImplementation(
+      (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    )
+
+    jest.useFakeTimers()
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0)
+    let launches = 0
+    const fetch = (async (url: unknown, init: RequestInit = {}) => {
+      const target = String(url)
+      if (target.includes('/session')) {
+        return new Response(JSON.stringify(SESSION_BODY), { status: 200 })
+      }
+      if (target.includes('app_launch')) {
+        launches++
+        const ids = launches === 1 ? ['A', 'B', 'C'] : ['A']
+        return new Response(JSON.stringify({
+          updated_buckets: ids.map((id) => ({
+            object_key: `topaz.${id}`,
+            object_revision: 1,
+            object_timestamp: 1,
+            value: { smoke_status: 0 },
+          })),
+        }), { status: 200 })
+      }
+      // Client timeout: Nest never answers the long-poll. That still refreshes
+      // the success clock, which is why a short app_launch must not refresh
+      // the response clock.
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted')
+          error.name = 'AbortError'
+          reject(error)
+        })
+      })
+    }) as unknown as FetchLike
+
+    const { transport, log } = createTransport({ fetchImpl: fetch })
+
+    try {
+      const startPromise = transport.start()
+      await jest.advanceTimersByTimeAsync(0)
+      await Promise.resolve()
+      await jest.advanceTimersByTimeAsync(0)
+
+      expect(transport.status.isRestAlarmFeedAvailable).toBe(true)
+
+      await jest.advanceTimersByTimeAsync(REST_RESPONSE_STALE_MS + 60_000)
+
+      expect(launches).toBeGreaterThan(1)
+      expect(log.warns.join('\n')).toMatch(/REST: incomplete device list/)
+      expect(transport.status.isRestAlarmFeedAvailable).toBe(false)
+
+      transport.stop()
+      await jest.advanceTimersByTimeAsync(0)
+      await startPromise.catch(() => undefined)
+    } finally {
+      random.mockRestore()
+      jest.useRealTimers()
+      sleep.sleep.mockImplementation(
+        () => new Promise<void>((resolve) => setImmediate(resolve)),
+      )
+    }
+  })
+})
+
+describe('NestTransport loop recovery', () => {
+  const retryMock = jest.requireMock('../../../src/utils/retry') as { sleep: jest.Mock }
+
+  /** A fetch with per-endpoint handlers; unhandled subscribes park until aborted. */
+  function routedFetch(routes: {
+    session?: () => Response
+    appLaunch?: (call: number) => Response | Promise<Response>
+    subscribe?: (call: number) => Response
+  }) {
+    const counts = { session: 0, appLaunch: 0, subscribe: 0 }
+    const fetch = (async (url: unknown, init: RequestInit = {}) => {
+      const target = String(url)
+      if (target.includes('/session')) {
+        counts.session++
+        return routes.session?.() ?? new Response(JSON.stringify(SESSION_BODY), { status: 200 })
+      }
+      if (target.includes('app_launch')) {
+        counts.appLaunch++
+        return routes.appLaunch?.(counts.appLaunch)
+          ?? new Response(JSON.stringify({ updated_buckets: [TOPAZ] }), { status: 200 })
+      }
+      counts.subscribe++
+      const answer = routes.subscribe?.(counts.subscribe)
+      if (answer) {
+        return answer
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted')
+          error.name = 'AbortError'
+          reject(error)
+        })
+      })
+    }) as unknown as FetchLike
+    return { fetch, counts }
+  }
+
+  /** Shift `Date.now()` forward without fake timers. */
+  function shiftableClock() {
+    const realNow = Date.now.bind(Date)
+    let offsetMs = 0
+    const spy = jest.spyOn(Date, 'now').mockImplementation(() => realNow() + offsetMs)
+    return {
+      advance: (ms: number) => { offsetMs += ms },
+      restore: () => spy.mockRestore(),
+    }
+  }
+
+  beforeEach(() => {
+    // `resetMocks` clears the module mock before each test; a `sleep` that
+    // returns undefined lets an answering subscribe loop spin on microtasks.
+    retryMock.sleep.mockImplementation(() => new Promise<void>((resolve) => setImmediate(resolve)))
+  })
+
+  it('stops both loops when a later session open returns a shape it cannot use', async () => {
+    // An expiry inside the refresh margin makes every loop call re-open the session.
+    const { fetch, counts } = routedFetch({
+      session: () => new Response(JSON.stringify(
+        counts.session <= 2
+          ? { ...SESSION_BODY, expires_in: 1 }
+          : { userid: '5551234', urls: SESSION_BODY.urls },
+      ), { status: 200 }),
+    })
+    const { transport, fatals } = createTransport({ fetchImpl: fetch })
+
+    await transport.start()
+    await waitUntil(() => fatals.length > 0)
+    const opensAtFatal = counts.session
+    await waitUntil(() => counts.session > opensAtFatal + 3, 20)
+    transport.stop()
+
+    expect(fatals.map((error) => error.name)).toContain('SessionShapeError')
+    expect(counts.session).toBeLessThanOrEqual(opensAtFatal + 1)
+  })
+
+  it('keeps the base reconnect delay after productive Observe sessions that reset', async () => {
+    jest.spyOn(Math, 'random').mockReturnValue(1)
+    retryMock.sleep.mockClear()
+    const { transport, http2 } = createTransport()
+
+    await transport.start()
+    for (let session = 1; session <= 3; session++) {
+      await waitUntil(() => http2.origins.length === session)
+      const connection = await http2.session()
+      connection.push(buildFrame(heatingThermostatTraits('DEVICE_0001')))
+      connection.failStream('stream reset')
+      await waitUntil(() => retryMock.sleep.mock.calls.length === session)
+    }
+    transport.stop()
+
+    expect(retryMock.sleep.mock.calls.map(([ms]) => ms as number)).toEqual([5_000, 5_000, 5_000])
+  })
+
+  it.each([
+    ['answers HTTP 400', false],
+    ['has its circuit breaker open', true],
+  ])('keeps subscribing while a rediscovery app_launch %s', async (_label, isBreakerOpen) => {
+    const clock = shiftableClock()
+    const appLaunchBreaker = new CircuitBreaker({ failureThreshold: 1, resetTimeoutMs: 60_000 })
+    const { fetch, counts } = routedFetch({
+      appLaunch: (call) => call === 1
+        ? new Response(JSON.stringify({ updated_buckets: [TOPAZ] }), { status: 200 })
+        : new Response('bad request', { status: 400 }),
+      subscribe: (call) => {
+        if (call === 1) {
+          clock.advance(REDISCOVERY_INTERVAL_MS)
+          if (isBreakerOpen) {
+            appLaunchBreaker.recordFailure()
+          }
+        }
+        return new Response(JSON.stringify({ objects: [] }), { status: 200 })
+      },
+    })
+    const { transport } = createTransport({ fetchImpl: fetch, appLaunchCircuitBreaker: appLaunchBreaker })
+
+    try {
+      await transport.start()
+      await waitUntil(() => counts.subscribe >= 5)
+      const status = transport.status
+      transport.stop()
+
+      expect(counts.subscribe).toBeGreaterThanOrEqual(5)
+      expect(counts.appLaunch).toBe(isBreakerOpen ? 1 : 2)
+      expect(status.circuitBreaker.rest.state).toBe(CircuitState.CLOSED)
+      expect(status.isRestAlarmFeedAvailable).toBe(true)
+    } finally {
+      clock.restore()
+    }
+  })
+
+  it('does not report an alarm-feed outage when shutdown aborts a rediscovery app_launch', async () => {
+    const clock = shiftableClock()
+    let isRediscoveryInFlight = false
+    const { fetch } = routedFetch({
+      appLaunch: (call) => {
+        if (call === 1) {
+          return new Response(JSON.stringify({ updated_buckets: [TOPAZ] }), { status: 200 })
+        }
+        isRediscoveryInFlight = true
+        return new Promise<Response>(() => undefined)
+      },
+      subscribe: (call) => {
+        if (call === 1) {
+          clock.advance(REDISCOVERY_INTERVAL_MS)
+        }
+        return new Response(JSON.stringify({ objects: [] }), { status: 200 })
+      },
+    })
+    const { transport, log } = createTransport({ fetchImpl: fetch })
+
+    try {
+      await transport.start()
+      await waitUntil(() => isRediscoveryInFlight)
+      expect(transport.status.isRestAlarmFeedAvailable).toBe(true)
+      transport.stop()
+      await waitUntil(() => false, 5)
+
+      expect(log.warns.join('\n')).not.toMatch(/REST alarm feed unavailable/)
+    } finally {
+      clock.restore()
     }
   })
 })
