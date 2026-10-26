@@ -40,6 +40,32 @@ const errors_1 = require("../errors");
 const framing_1 = require("./framing");
 const protobuf_1 = require("./protobuf");
 /**
+ * Peer resets that mean this stream is over.
+ *
+ * Nest drains a live Observe stream with `RST_STREAM` `INTERNAL_ERROR`. Node
+ * reports that as "Stream closed with error code NGHTTP2_INTERNAL_ERROR".
+ * A stream that already delivered data clears the failure streak, so rejecting
+ * here made every recycle log "failed 1x in a row" at warning level. A clean
+ * `end` for the same recycle stays at debug. `NO_ERROR`, `CANCEL`,
+ * `REFUSED_STREAM`, and `STREAM_CLOSED` are the same kind of close. Protocol
+ * and flow-control errors still fail the session.
+ */
+const PEER_RESET = /(?:Stream|Session) closed with error code (NGHTTP2_(?:NO_ERROR|INTERNAL_ERROR|STREAM_CLOSED|REFUSED_STREAM|CANCEL))\b/;
+/**
+ * Classify a socket error as a peer reset or a real stream failure.
+ *
+ * @see PEER_RESET
+ */
+function classifySocketError(error, requestId, label) {
+    const code = PEER_RESET.exec(error.message)?.[1];
+    if (code !== undefined) {
+        return { reason: 'reset', detail: `${code} [request-id ${requestId}]` };
+    }
+    return {
+        error: new errors_1.ObserveStreamError(`${label} [request-id ${requestId}]: ${error.message}`, { cause: error }),
+    };
+}
+/**
  * Headers the Nest gateway requires on an Observe request.
  *
  * `X-Accept-Response-Streaming` is what asks for the long-lived stream rather
@@ -95,9 +121,9 @@ function runObserveSession(options) {
         const client = connect(options.endpoints.grpcOrigin, { maxOutstandingPings: 2 });
         // Registered before anything can throw: an unhandled `error` on an
         // Http2Session is a hard process crash.
-        client.on('error', (error) => settle({
-            error: new errors_1.ObserveStreamError(`Observe connection failed [request-id ${requestId}]: ${error.message}`, { cause: error }),
-        }));
+        client.on('error', (error) => {
+            settle(classifySocketError(error, requestId, 'Observe connection failed'));
+        });
         let request;
         try {
             request = client.request(observeHeaders(options.session, options.endpoints, requestId));
@@ -160,6 +186,7 @@ function runObserveSession(options) {
                 reason: outcome.reason,
                 frameCount,
                 durationMs: Date.now() - startedAt,
+                ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
             });
         };
         const onAbort = () => settle({ reason: 'aborted' });
@@ -272,9 +299,9 @@ function runObserveSession(options) {
             }
         });
         request.on('end', () => settle({ reason: 'ended' }));
-        request.on('error', (error) => settle({
-            error: new errors_1.ObserveStreamError(`Observe stream failed [request-id ${requestId}]: ${error.message}`, { cause: error }),
-        }));
+        request.on('error', (error) => {
+            settle(classifySocketError(error, requestId, 'Observe stream failed'));
+        });
         client.on('close', () => settle({ reason: 'ended' }));
         resetIdleTimer();
         request.end(traitsRequest);

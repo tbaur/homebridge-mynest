@@ -173,6 +173,38 @@ describe('runObserveSession', () => {
     await expect(promise).rejects.toThrow(ObserveStreamError)
   })
 
+  it('treats a Nest HTTP/2 stream reset as a normal end', async () => {
+    // INTERNAL_ERROR is how the gateway drains a live stream. Rejecting it
+    // made every recycle a warning, because a productive session had just
+    // cleared the failure streak.
+    const { http2, promise } = start()
+    const connection = await http2.session()
+    connection.failStream('Stream closed with error code NGHTTP2_INTERNAL_ERROR')
+
+    const result = await promise
+    expect(result.reason).toBe('reset')
+    expect(result.detail).toMatch(/^NGHTTP2_INTERNAL_ERROR \[request-id [0-9a-f-]{36}\]$/)
+  })
+
+  it('treats a Nest HTTP/2 session reset as a normal end', async () => {
+    const { http2, promise } = start()
+    const connection = await http2.session()
+    connection.failSession('Session closed with error code NGHTTP2_CANCEL')
+
+    await expect(promise).resolves.toMatchObject({
+      reason: 'reset',
+      detail: expect.stringContaining('NGHTTP2_CANCEL'),
+    })
+  })
+
+  it('reports an HTTP/2 protocol error as an Observe error', async () => {
+    const { http2, promise } = start()
+    const connection = await http2.session()
+    connection.failStream('Stream closed with error code NGHTTP2_PROTOCOL_ERROR')
+
+    await expect(promise).rejects.toThrow(/NGHTTP2_PROTOCOL_ERROR/)
+  })
+
   it('reports a connection failure as an Observe error', async () => {
     const { http2, promise } = start()
     const connection = await http2.session()
