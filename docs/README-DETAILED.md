@@ -84,7 +84,7 @@ Unknown power is not a reason to omit occupancy when `auto_away` is already a bo
 
 If REST later goes stale, a last occupancy reading stays published but is marked inactive and faulted.
 
-Every REST object for a Protect logs one info line, `REST topaz auto_away=... smoke_status=... co_status=...`, including when the HomeKit summary sentence did not change. `absent` means Nest did not send that field.
+Each Protect logs a summary at info when its state changes, such as `Zone One Protect: Smoke ok, CO ok, Occupied`. With `debug` on, every REST object for a Protect also logs the raw fields, `REST topaz auto_away=... smoke_status=... co_status=...`. `absent` means Nest did not send that field.
 
 ## Smoke and CO honesty
 
@@ -142,8 +142,8 @@ Each signal covers the whole house. The summary does not name the Protect, so ch
 2. **Thermostat missing.** Modern thermostats are Observe-only on some accounts. With default logging the plugin warns within about a minute if Observe produced no frames, and again every five minutes if a connected stream goes quiet. Set `debug: true` for stream detail. From a git checkout you can also run `npm run verify` against the live account. See [DEVELOPMENT.md](../DEVELOPMENT.md).
 3. **Thermostat in Settings but no room tile.** Remove and re-add the **MyNest** child bridge in the Home app (or whatever you set as **Name**), then assign rooms again. Same-UUID republish does not clear Apple Home's stuck presentation.
 4. **Eco / setpoint changes snap back.** Enable **Allow thermostat control**. With control off, HomeKit can still move the UI (required for tiles), but the plugin does not send the change to Nest and moves the tile back.
-5. **Protect smoke or CO shows a fault.** REST has no number for that sensor yet, or the REST feed is stale. The tile stays. Search the log for `REST topaz` to see the raw `smoke_status` and `co_status`.
-6. **No occupancy, or Occupied in an empty room.** Occupancy is `auto_away` inverted. It is omitted for a battery Protect, a missing `auto_away`, an Observe-only Protect, or `exposeProtectOccupancy` off. A room that stays Occupied has `auto_away=false` on each later `REST topaz` line, or no later line at all. See [Protect occupancy](#protect-occupancy).
+5. **Protect smoke or CO shows a fault.** REST has no number for that sensor yet, or the REST feed is stale. The tile stays. Turn on `debug` and search the log for `REST topaz` to see the raw `smoke_status` and `co_status`.
+6. **No occupancy, or Occupied in an empty room.** Occupancy is `auto_away` inverted. It is omitted for a battery Protect, a missing `auto_away`, an Observe-only Protect, or `exposeProtectOccupancy` off. A room that stays Occupied never logs a later summary with `Unoccupied`. With `debug` on, each `REST topaz` line for it shows `auto_away=false`. See [Protect occupancy](#protect-occupancy).
 
 Restart Homebridge after any `config.json` edit.
 

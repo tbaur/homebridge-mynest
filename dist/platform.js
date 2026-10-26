@@ -592,7 +592,7 @@ class MyNestPlatform {
             const topaz = value;
             const knownName = this.#lastInventory?.protects.get(id)?.identity.name;
             const description = (0, classify_1.cleanName)(topaz.description);
-            this.#log.info((0, protect_state_1.formatTopazArrival)(topaz, knownName ?? description ?? id));
+            this.#log.debug((0, protect_state_1.formatTopazArrival)(topaz, knownName ?? description ?? id));
         }
     }
     /** Collapse a burst of transport updates into one HomeKit refresh. */
