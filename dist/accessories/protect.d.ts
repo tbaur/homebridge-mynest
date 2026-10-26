@@ -10,8 +10,8 @@
  * a PIR sensor, but neither Nest API publishes motion events: a 12.5-hour
  * capture of both transports on an occupied house recorded zero motion events
  * and zero occupancy changes. What is available is `auto_away`, Nest's own
- * verdict that nobody has been seen for roughly ten minutes, and only on
- * mains-powered units.
+ * verdict that nobody has been seen for roughly ten minutes, and omitted for
+ * a battery-powered Protect. Unknown power does not hide a boolean `auto_away`.
  *
  * So this accessory publishes occupancy only where that verdict exists, and
  * says why in the log when it does not. Presenting a ten-minute presence
@@ -19,10 +19,11 @@
  * automation built on it wrong.
  *
  * Smoke and CO come from REST `topaz` only. Observe streams safety traits, but
- * no public schema maps them and every captured sample reads all-clear, so an
- * Observe-only Protect deliberately gets no smoke/CO tiles. When REST later
- * goes stale, tiles stay published (so HomeKit rooms/automations survive) but
- * are marked inactive/faulted — never a live frozen all-clear. See `docs/PROTOCOL.md`.
+ * no public schema maps them and every captured sample reads all-clear, so
+ * those fields are not read. Every Protect still publishes both sensors. A
+ * missing number faults the sensor and does not write a clear. When REST later
+ * goes stale, tiles stay published (so HomeKit rooms and automations survive)
+ * but are marked inactive and faulted. See `docs/PROTOCOL.md`.
  */
 import type { PlatformAccessory } from 'homebridge';
 import type { NestDevice, ProtectState } from '../types/device';

@@ -29,7 +29,7 @@ function formatTransportState(state) {
         case 'running':
             return 'live';
         case 'forbidden_dead':
-            return 'auth-failed';
+            return 'blocked-403';
         default:
             // `connecting` and `stopped` are already the words an operator wants.
             return state;

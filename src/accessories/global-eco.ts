@@ -7,7 +7,9 @@
  * @fileoverview House-wide Eco Mode switch (all Nest thermostats).
  *
  * HomeKit has no Eco thermostat mode, so Eco is a Switch. This accessory turns
- * Eco on or off for every published thermostat at once.
+ * Eco on or off for every published thermostat at once. What the switch shows
+ * is decided by `state/global-eco-state.ts`; this class owns HomeKit, the
+ * expiry timer, and the log lines.
  */
 
 import type { PlatformAccessory, Service } from 'homebridge'
@@ -16,16 +18,18 @@ import {
   GLOBAL_ECO_DISPLAY_NAME as DISPLAY_NAME,
   MANUFACTURER,
 } from '../settings'
+import {
+  PENDING_ECO_MAX_MS,
+  initialGlobalEcoState,
+  reduceGlobalEco,
+  type GlobalEcoEvent,
+  type GlobalEcoOutcome,
+  type GlobalEcoState,
+} from '../state/global-eco-state'
 import type { Logger } from '../utils/logger'
 import { CharacteristicBinder } from '../utils/bound-characteristics'
 import { sanitizeError } from '../utils/sanitizers'
 import type { MyNestPlatform } from '../platform'
-
-/**
- * How long a successful HomeKit Eco write may ignore Nest aggregates that have
- * not yet matched. After this, Nest truth wins (Nest app / failed Observe).
- */
-const PENDING_ECO_MAX_MS = 45_000
 
 /** Optional Switch that drives Eco on every thermostat. */
 export class GlobalEcoAccessory {
@@ -33,20 +37,12 @@ export class GlobalEcoAccessory {
   readonly #accessory: PlatformAccessory
   readonly #log: Logger
   readonly #binder: CharacteristicBinder
-  #allEco = false
-  /**
-   * Desired aggregate after a successful HomeKit write. While set, Nest sync
-   * must not push a partial aggregate (staggered Eco confirms) or unrelated
-   * inventory traffic will snap the switch back.
-   */
-  #pendingAllEco: boolean | null = null
-  #pendingSinceMs: number | null = null
+  #state: GlobalEcoState
   /**
    * Backstop for {@link PENDING_ECO_MAX_MS}.
    *
-   * The age check in {@link updateAllEco} only runs when Nest sends another
-   * update. If Observe dies right after a successful write, nothing would ever
-   * clear the optimistic value and the switch would hold it indefinitely.
+   * The age check on a Nest report only runs when Nest sends another one. If
+   * Observe goes quiet right after a write, nothing else would expire it.
    */
   #pendingTimer: NodeJS.Timeout | null = null
 
@@ -57,31 +53,16 @@ export class GlobalEcoAccessory {
     this.#binder = new CharacteristicBinder(log, DISPLAY_NAME)
 
     this.#applyAccessoryInformation()
+    const cachedOn = this.#accessory.getService(this.#platform.Service.Switch)
+      ?.getCharacteristic(this.#platform.Characteristic.On).value
+    this.#state = initialGlobalEcoState(cachedOn === true)
     this.#bindSwitch()
     this.#binder.refresh()
   }
 
-  /**
-   * Reflect whether every Nest thermostat is currently in Eco.
-   *
-   * While a HomeKit write is pending confirmation, ignore Nest aggregates that
-   * do not yet match the desired value (partial Eco reports). If Nest never
-   * matches within {@link PENDING_ECO_MAX_MS}, take Nest truth.
-   */
+  /** Reflect whether every Nest thermostat is currently in Eco. */
   updateAllEco(allEco: boolean): void {
-    if (this.#pendingAllEco !== null) {
-      if (allEco === this.#pendingAllEco) {
-        this.#clearPending()
-      } else if (
-        this.#pendingSinceMs !== null
-        && Date.now() - this.#pendingSinceMs >= PENDING_ECO_MAX_MS
-      ) {
-        this.#expirePending()
-      } else {
-        return
-      }
-    }
-    this.#allEco = allEco
+    this.#dispatch({ type: 'nest_report', allEco, nowMs: Date.now() })
     this.#binder.refresh()
   }
 
@@ -93,41 +74,55 @@ export class GlobalEcoAccessory {
    * still fire up to 45s later and refresh a torn-down accessory.
    */
   dispose(): void {
-    this.#clearPending()
+    this.#clearTimer()
   }
 
-  #clearPending(): void {
-    this.#pendingAllEco = null
-    this.#pendingSinceMs = null
+  #dispatch(event: GlobalEcoEvent): void {
+    const { state, outcome } = reduceGlobalEco(this.#state, event)
+    this.#state = state
+    this.#logOutcome(outcome)
+    if (state.pending === null) {
+      this.#clearTimer()
+    } else if (event.type === 'write_sent') {
+      this.#armTimer()
+    }
+  }
+
+  #logOutcome(outcome: GlobalEcoOutcome): void {
+    const prefix = `${DISPLAY_NAME}: Eco change not confirmed in ${PENDING_ECO_MAX_MS / 1000}s`
+    if (outcome === 'expired_to_nest') {
+      this.#log.warn(`${prefix}, showing Nest state`)
+    } else if (outcome === 'expired_without_report') {
+      this.#log.warn(prefix)
+    }
+  }
+
+  #armTimer(): void {
+    this.#clearTimer()
+    this.#pendingTimer = setTimeout(() => {
+      this.#pendingTimer = null
+      this.#dispatch({ type: 'expire' })
+      this.#binder.refresh()
+    }, PENDING_ECO_MAX_MS)
+    // Homebridge owns the process lifetime; this must not hold Node open.
+    this.#pendingTimer.unref?.()
+  }
+
+  #clearTimer(): void {
     if (this.#pendingTimer) {
       clearTimeout(this.#pendingTimer)
       this.#pendingTimer = null
     }
   }
 
-  /** Give up on an unconfirmed write and let Nest's own value stand. */
-  #expirePending(): void {
-    this.#log.warn(
-      `${DISPLAY_NAME}: Nest did not confirm Eco change within ${PENDING_ECO_MAX_MS / 1000}s — following Nest`,
-    )
-    this.#clearPending()
-  }
-
-  /** Start the backstop that gives Nest the last word even if it goes quiet. */
-  #armPending(ecoOn: boolean): void {
-    this.#clearPending()
-    this.#pendingAllEco = ecoOn
-    this.#pendingSinceMs = Date.now()
-    this.#pendingTimer = setTimeout(() => {
-      this.#pendingTimer = null
-      if (this.#pendingAllEco === null) {
-        return
-      }
-      this.#expirePending()
-      this.#binder.refresh()
-    }, PENDING_ECO_MAX_MS)
-    // Homebridge owns the process lifetime; this must not hold Node open.
-    this.#pendingTimer.unref?.()
+  /**
+   * Push the switch after `onSet` returns.
+   *
+   * HAP writes the requested On value after the setter resolves, so a refresh
+   * inside the setter is overwritten.
+   */
+  readonly #refreshSwitch = (): void => {
+    this.#binder.refresh()
   }
 
   #bindSwitch(): void {
@@ -142,7 +137,7 @@ export class GlobalEcoAccessory {
     this.#binder.bind(
       service,
       Characteristic.On,
-      () => this.#allEco,
+      () => this.#state.shown,
       {
         write: async (value) => {
           await this.#setEco(value === true || value === 1)
@@ -152,38 +147,35 @@ export class GlobalEcoAccessory {
   }
 
   async #setEco(ecoOn: boolean): Promise<void> {
+    const startedAtMs = Date.now()
+    let sent: boolean
     try {
-      const sent = await this.#platform.applyGlobalEcoWrite(ecoOn)
-      if (!sent) {
-        this.#clearPending()
-        if (!this.#platform.resolvedConfig.allowThermostatControl) {
-          this.#log.warn(
-            `${DISPLAY_NAME}: ignoring HomeKit change — enable Allow thermostat control in config.`,
-          )
-        }
-        // HAP assigns On after onSet; revert to Nest-derived `#allEco`.
-        setImmediate(() => this.#binder.refresh())
-        return
-      }
-      this.#log.info(
-        `${DISPLAY_NAME}: ${ecoOn ? 'Updating all thermostats to Eco' : 'Clearing Eco on all thermostats'}`,
-      )
-      // Optimistic until Nest's all-Eco aggregate matches; do not refresh here
-      // or HAP's post-onSet value is overwritten by a stale read.
-      this.#armPending(ecoOn)
-      this.#allEco = ecoOn
+      sent = await this.#platform.applyGlobalEcoWrite(ecoOn)
     } catch (error) {
-      this.#clearPending()
-      this.#log.warn(`${DISPLAY_NAME}: Eco update failed: ${sanitizeError(error)}`)
-      setImmediate(() => this.#binder.refresh())
-
-      // Same distinction the thermostat draws: a refusal above resolves, but a
-      // write that reached Nest and failed is reported so the user is not left
+      // Same distinction the thermostat draws: a refusal resolves, but a write
+      // that reached Nest and failed is reported so the user is not left
       // watching a switch flip back with no stated reason. The deferred refresh
       // clears HAP's error status a tick later, so it cannot stick.
+      this.#log.warn(`${DISPLAY_NAME}: Eco update failed: ${sanitizeError(error)}`)
+      setImmediate(this.#refreshSwitch)
       const { HAPStatus, HapStatusError } = this.#platform.api.hap
       throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
     }
+
+    if (!sent) {
+      if (!this.#platform.resolvedConfig.allowThermostatControl) {
+        this.#log.warn(`${DISPLAY_NAME}: thermostat control is off, change ignored`)
+      }
+      setImmediate(this.#refreshSwitch)
+      return
+    }
+
+    this.#log.info(
+      `${DISPLAY_NAME}: Eco ${ecoOn ? 'on' : 'off'} for all thermostats`,
+    )
+    // Optimistic until Nest's aggregate matches. No refresh here: HAP is about
+    // to write the same value.
+    this.#dispatch({ type: 'write_sent', ecoOn, startedAtMs, nowMs: Date.now() })
   }
 
   #applyAccessoryInformation(): void {

@@ -7,7 +7,7 @@
  * @fileoverview The Protect accessory.
  *
  * The occupancy behaviour is the part that matters. Nest publishes a
- * ten-minute presence verdict, not motion, and only for mains-powered units, so
+ * ten-minute presence verdict, not motion, and omitted for a battery-powered Protect, so
  * these tests pin down both what is published and what deliberately is not.
  */
 
@@ -26,14 +26,14 @@ import type { ResolvedConfig } from '../../../src/types/config'
 
 function build(state: ProtectState, config: Partial<ResolvedConfig> = {}) {
   const platform = createPlatformStub(config)
-  const accessory = createAccessory('Hallway Protect')
+  const accessory = createAccessory('Zone One Protect')
   const log = createRecordingLogger()
 
   const device: DeviceOfKind<'protect'> = {
     identity: {
       id: 'PROTECT01',
       kind: 'protect',
-      name: 'Hallway Protect',
+      name: 'Zone One Protect',
       sources: { observe: true, rest: true },
       model: 'Topaz-2.7',
       serialNumber: 'PROTECT01',
@@ -63,13 +63,19 @@ describe('ProtectAccessory', () => {
     ProtectAccessory.resetOccupancyHintForTests()
   })
 
-  it('publishes a smoke and a CO sensor', () => {
-    const { read } = build(clear)
+  it('publishes a smoke and a CO sensor', async () => {
+    const { accessory, read } = build(clear)
 
     expect(read(Service.SmokeSensor, Characteristic.SmokeDetected))
       .toBe(Characteristic.SmokeDetected.SMOKE_NOT_DETECTED)
     expect(read(Service.CarbonMonoxideSensor, Characteristic.CarbonMonoxideDetected))
       .toBe(Characteristic.CarbonMonoxideDetected.CO_LEVELS_NORMAL)
+
+    const smoke = accessory.getService(Service.SmokeSensor)!
+      .getCharacteristic(Characteristic.SmokeDetected)
+    await expect(smoke.handleGetRequest()).resolves.toBe(
+      Characteristic.SmokeDetected.SMOKE_NOT_DETECTED,
+    )
   })
 
   it('raises the alarm for an emergency', () => {
@@ -93,11 +99,10 @@ describe('ProtectAccessory', () => {
       .toBe(Characteristic.CarbonMonoxideDetected.CO_LEVELS_ABNORMAL)
   })
 
-  it('publishes only the sensor Nest actually reported', () => {
+  it('faults the sensor Nest did not report', () => {
     // Nest returns different topaz subsets per firmware. A bucket with
-    // smoke_status and no co_status must not grow a CO tile: nothing would ever
-    // write to it, so it would rest at HAP's default "levels normal" — a
-    // working-looking CO detector reporting all-clear on no evidence.
+    // smoke_status and no co_status still has a CO tile, inactive, so HomeKit
+    // does not treat HAP's default "levels normal" as a live clear.
     const { accessory, read } = build({
       ...clear,
       smoke: 'ok',
@@ -105,52 +110,111 @@ describe('ProtectAccessory', () => {
     })
 
     expect(hasService(accessory, Service.SmokeSensor)).toBe(true)
-    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(false)
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
     expect(read(Service.SmokeSensor, Characteristic.SmokeDetected))
       .toBe(Characteristic.SmokeDetected.SMOKE_NOT_DETECTED)
+    expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(true)
+    expect(read(Service.CarbonMonoxideSensor, Characteristic.StatusActive)).toBe(false)
+    expect(read(Service.CarbonMonoxideSensor, Characteristic.StatusFault))
+      .toBe(Characteristic.StatusFault.GENERAL_FAULT)
   })
 
-  it('publishes only the CO sensor when Nest reported CO alone', () => {
-    const { accessory } = build({ ...clear, smoke: undefined, carbonMonoxide: 'ok' })
+  it('faults smoke when Nest reported CO alone', () => {
+    const { accessory, read } = build({ ...clear, smoke: undefined, carbonMonoxide: 'ok' })
 
-    expect(hasService(accessory, Service.SmokeSensor)).toBe(false)
+    expect(hasService(accessory, Service.SmokeSensor)).toBe(true)
     expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
+    expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(false)
+    expect(read(Service.CarbonMonoxideSensor, Characteristic.StatusActive)).toBe(true)
   })
 
-  it('drops a sensor when Nest stops reporting that level', () => {
-    const { handler, accessory, device } = build(clear)
+  it('keeps a sensor and faults it when Nest stops reporting that level', () => {
+    const { handler, accessory, device, read } = build(clear)
 
     expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
 
     handler.update({ ...device, state: { ...clear, carbonMonoxide: undefined } })
 
     expect(hasService(accessory, Service.SmokeSensor)).toBe(true)
-    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(false)
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
+    expect(read(Service.CarbonMonoxideSensor, Characteristic.StatusActive)).toBe(false)
+    expect(read(Service.CarbonMonoxideSensor, Characteristic.StatusFault))
+      .toBe(Characteristic.StatusFault.GENERAL_FAULT)
+    expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(true)
   })
 
-  it('publishes no smoke or CO sensor when alarm state is unknown', () => {
-    // HAP's default for SmokeDetected is "not detected". Creating the service
-    // would show a working all-clear on no evidence, so Observe-only Protects
-    // get neither tile until REST reports alarm state.
-    const { accessory, log } = build({
+  it('publishes faulted smoke and CO sensors when alarm state is unknown', async () => {
+    const { accessory, log, read } = build({
       occupancySource: 'unavailable_observe_only',
       isBatteryLow: false,
     })
 
-    expect(hasService(accessory, Service.SmokeSensor)).toBe(false)
-    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(false)
-    expect(hasService(accessory, Service.Battery)).toBe(true)
-    expect(log.infos.join('\n')).toMatch(/Observe-only — no Smoke\/CO/)
-    expect(log.infos.join('\n')).toMatch(/publishing battery only/)
+    expect(hasService(accessory, Service.SmokeSensor)).toBe(true)
+    expect(hasService(accessory, Service.CarbonMonoxideSensor)).toBe(true)
+    expect(hasService(accessory, Service.Battery)).toBe(false)
+    expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(false)
+    expect(read(Service.SmokeSensor, Characteristic.StatusFault))
+      .toBe(Characteristic.StatusFault.GENERAL_FAULT)
+    expect(log.infos.join('\n')).toMatch(/no smoke\/CO reading yet/)
+
+    const smoke = accessory.getService(Service.SmokeSensor)!
+      .getCharacteristic(Characteristic.SmokeDetected)
+    await expect(smoke.handleGetRequest()).resolves.toBe(
+      Characteristic.SmokeDetected.SMOKE_NOT_DETECTED,
+    )
   })
 
-  it('grows smoke and CO sensors when REST alarm state arrives later', () => {
+  it('keeps a cached smoke detection when Nest later omits the number', async () => {
+    const { accessory, handler, device } = build({
+      ...clear,
+      smoke: 'emergency',
+      carbonMonoxide: 'emergency',
+    })
+    const smoke = accessory.getService(Service.SmokeSensor)!
+      .getCharacteristic(Characteristic.SmokeDetected)
+    const carbonMonoxide = accessory.getService(Service.CarbonMonoxideSensor)!
+      .getCharacteristic(Characteristic.CarbonMonoxideDetected)
+
+    handler.update({
+      ...device,
+      state: { ...clear, smoke: undefined, carbonMonoxide: undefined },
+    })
+
+    await expect(smoke.handleGetRequest()).resolves.toBe(
+      Characteristic.SmokeDetected.SMOKE_DETECTED,
+    )
+    await expect(carbonMonoxide.handleGetRequest()).resolves.toBe(
+      Characteristic.CarbonMonoxideDetected.CO_LEVELS_ABNORMAL,
+    )
+    smoke.iid = 1
+    const listed = await smoke.toHAP(undefined as never, true)
+    expect(listed.value).toBe(Characteristic.SmokeDetected.SMOKE_DETECTED)
+    expect(accessory.getService(Service.SmokeSensor)!
+      .getCharacteristic(Characteristic.StatusActive).value).toBe(false)
+  })
+
+  it('keeps a cached low battery when Nest later omits the verdict', async () => {
+    const { accessory, handler, device } = build({ ...clear, isBatteryLow: true })
+    const battery = accessory.getService(Service.SmokeSensor)!
+      .getCharacteristic(Characteristic.StatusLowBattery)
+
+    handler.update({ ...device, state: { ...clear, isBatteryLow: undefined } })
+
+    await expect(battery.handleGetRequest()).resolves.toBe(
+      Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW,
+    )
+    battery.iid = 2
+    const listed = await battery.toHAP(undefined as never, true)
+    expect(listed.value).toBe(Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW)
+  })
+
+  it('marks smoke and CO live when REST alarm state arrives later', () => {
     const { handler, accessory, device, read } = build({
       occupancySource: 'unavailable_observe_only',
       isBatteryLow: false,
     })
 
-    expect(hasService(accessory, Service.SmokeSensor)).toBe(false)
+    expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(false)
 
     handler.update({
       ...device,
@@ -196,7 +260,7 @@ describe('ProtectAccessory', () => {
       .toBe(Characteristic.StatusFault.GENERAL_FAULT)
     expect(hasService(accessory, Service.OccupancySensor)).toBe(true)
     expect(read(Service.OccupancySensor, Characteristic.StatusActive)).toBe(false)
-    expect(log.warns.join('\n')).toMatch(/Smoke\/CO kept, marked inactive/)
+    expect(log.debugs.join('\n')).toMatch(/smoke\/CO marked inactive/)
   })
 
   it('marks smoke and CO live again when the REST alarm feed recovers', () => {
@@ -223,7 +287,7 @@ describe('ProtectAccessory', () => {
     expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(true)
     expect(read(Service.SmokeSensor, Characteristic.StatusFault))
       .toBe(Characteristic.StatusFault.NO_FAULT)
-    expect(log.infos.join('\n')).toMatch(/Smoke\/CO live again/)
+    expect(log.debugs.join('\n')).toMatch(/smoke\/CO live again/)
   })
 
   it('grows an occupancy sensor when REST auto_away arrives later', () => {
@@ -243,12 +307,28 @@ describe('ProtectAccessory', () => {
     expect(hasService(accessory, Service.OccupancySensor)).toBe(true)
   })
 
-  it('reports an offline Protect as inactive and faulted', () => {
+  it('reports an offline clear Protect as inactive and faulted', () => {
     const { read } = build({ ...clear, isOnline: false })
 
     expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(false)
     expect(read(Service.SmokeSensor, Characteristic.StatusFault))
       .toBe(Characteristic.StatusFault.GENERAL_FAULT)
+  })
+
+  it('keeps a fresh smoke alarm active when Observe says the Protect is offline', () => {
+    const { read } = build({
+      ...clear,
+      isOnline: false,
+      smoke: 'emergency',
+      carbonMonoxide: 'ok',
+    })
+
+    expect(read(Service.SmokeSensor, Characteristic.SmokeDetected))
+      .toBe(Characteristic.SmokeDetected.SMOKE_DETECTED)
+    expect(read(Service.SmokeSensor, Characteristic.StatusActive)).toBe(true)
+    expect(read(Service.SmokeSensor, Characteristic.StatusFault))
+      .toBe(Characteristic.StatusFault.NO_FAULT)
+    expect(read(Service.CarbonMonoxideSensor, Characteristic.StatusActive)).toBe(false)
   })
 
   it('reports a flat battery on both sensors', () => {
@@ -293,12 +373,12 @@ describe('ProtectAccessory', () => {
       return new ProtectAccessory(platform, accessory, device, log)
     }
 
-    make('Hallway Protect', 'PROTECT01')
-    make('Basement Protect', 'PROTECT02')
+    make('Zone One Protect', 'PROTECT01')
+    make('Zone Two Protect', 'PROTECT02')
 
     const hints = log.infos.filter((line) => line.includes('Protect occupancy'))
     expect(hints).toHaveLength(1)
-    expect(hints[0]).toMatch(/~10-min presence \(auto_away\), not motion/)
+    expect(hints[0]).toMatch(/auto-away \(about 10 min\), not motion/)
   })
 
   it('publishes no occupancy sensor for a battery-powered Protect', () => {
@@ -311,7 +391,7 @@ describe('ProtectAccessory', () => {
     })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
-    expect(log.debugs.join('\n')).toContain('battery-powered')
+    expect(log.infos.join('\n')).toContain('battery powered')
   })
 
   it('publishes no occupancy sensor for a Protect missing from REST', () => {
@@ -322,13 +402,14 @@ describe('ProtectAccessory', () => {
     })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
-    expect(log.debugs.join('\n')).toContain('REST')
+    expect(log.infos.join('\n')).toContain('REST')
   })
 
   it('respects the user turning occupancy off', () => {
-    const { accessory } = build(clear, { exposeProtectOccupancy: false })
+    const { accessory, log } = build(clear, { exposeProtectOccupancy: false })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
+    expect(log.infos.join('\n')).toContain('turned off in settings')
   })
 
   it('publishes temperature and humidity when asked and available', () => {

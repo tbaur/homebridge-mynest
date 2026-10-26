@@ -29,6 +29,15 @@ export interface ComfortSource {
  * bug even though both numbers are real.
  */
 export declare function readComfortSource(state: ObserveState, resourceId: string): ComfortSource;
+/**
+ * Thermostats whose displayed temperature comes from a device in `changedIds`.
+ *
+ * An Observe patch names the sensor that changed. The thermostat is a
+ * different device, and its HomeKit tile reads that sensor. Skipping it
+ * leaves the thermostat on the previous temperature until some later trait
+ * of its own arrives.
+ */
+export declare function thermostatIdsForChangedComfortSensors(observe: ObserveState, thermostatIds: readonly string[], changedIds: ReadonlySet<string>): string[];
 /** Build thermostat state from the Observe stream. */
 export declare function readThermostatFromObserve(state: ObserveState, resourceId: string, options?: {
     comfortTemperatureC?: number;

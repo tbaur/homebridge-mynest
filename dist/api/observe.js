@@ -82,6 +82,12 @@ function runObserveSession(options) {
     // line can be tied back to the stream that produced it.
     const requestId = (0, node_crypto_1.randomUUID)();
     return new Promise((resolve, reject) => {
+        // Shutdown can abort before this function is entered. Opening the socket
+        // anyway leaves an HTTP/2 session that nothing is waiting on.
+        if (options.signal?.aborted) {
+            resolve({ reason: 'aborted', frameCount: 0, durationMs: 0 });
+            return;
+        }
         const splitter = new framing_1.FrameSplitter();
         let frameCount = 0;
         let handlerFailures = 0;
@@ -198,7 +204,12 @@ function runObserveSession(options) {
         for (const timer of timers) {
             timer.unref?.();
         }
-        options.signal?.addEventListener('abort', onAbort, { once: true });
+        if (options.signal?.aborted) {
+            onAbort();
+        }
+        else {
+            options.signal?.addEventListener('abort', onAbort, { once: true });
+        }
         // HTTP/2 emits `response` then `end` with no `error` for 401/403/5xx, so
         // without this handler a rejected token looks like Nest recycling a healthy
         // stream (reason `ended`, frameCount 0) and the loop reconnects forever.

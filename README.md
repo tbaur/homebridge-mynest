@@ -15,7 +15,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 - **Thermostats:** temperature, mode, activity, setpoints, humidity when Nest reports it, plus an Eco Mode switch per thermostat
 - **Optional house-wide Eco switch:** `exposeGlobalEcoSwitch`
 - **Thermostat writes:** mode, setpoints, and Eco only when **Allow thermostat control** is on (off by default)
-- **Nest Protect:** smoke and CO from REST when available; battery and online from REST and/or Observe
+- **Nest Protect:** smoke and CO sensors on every Protect. A missing REST reading is a fault, not a missing tile. Battery-low status can still come from Observe. The smoke and CO tiles stay inactive while that sensor has no REST number or the REST feed is stale, including when Observe says the Protect is online
 - **Optional Protect occupancy and temperature**
 - **Temperature Sensors:** Nest Temperature Sensor (kryptonite) pucks
 - **Dual transport:** Nest REST subscribe merged with HTTP/2 Observe, so Observe-only devices still appear
@@ -27,7 +27,7 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 
 ### Quality
 <!-- Canonical test count lives here only; keep other docs number-free to avoid multi-place updates. -->
-- **576 tests** with a per-area coverage floor, and a CI step that fails if the suite leaks an open handle
+- A per-area test coverage floor, and a CI step that fails if the suite leaks an open handle
 - **Built for Homebridge 2:** stored getters and `updateValue(...)`, not the removed `getValue()`
 - **Secret hygiene:** access tokens are redacted from logs
 - **No analytics**
@@ -77,8 +77,8 @@ Thermostat control stays off until you enable **Allow thermostat control**. Opti
 | Nest device | HomeKit accessory | Notes |
 | --- | --- | --- |
 | Thermostat | Thermostat + Eco Mode switch | Observe is source of truth. Writes need `allowThermostatControl`. |
-| Nest Protect | Smoke + CO (+ optional occupancy / temp) | Smoke/CO require REST `topaz`. Occupancy is ~10-minute presence, not motion. |
-| Temperature Sensor | Temperature Sensor | Battery + temperature |
+| Nest Protect | Smoke + CO (+ optional occupancy / temp) | Smoke and CO stay published. A missing REST number faults that sensor. Occupancy is ~10-minute presence, not motion. |
+| Temperature Sensor | Temperature Sensor | Battery + temperature. A missing temperature faults the sensor. |
 
 Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes are out of scope.
 
@@ -92,12 +92,13 @@ Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account
 | `accessToken` | — | Required. Nest Account `access_token`. See [docs/AUTH.md](docs/AUTH.md). |
 | `allowThermostatControl` | `false` | Send mode/setpoint/Eco changes to Nest. |
 | `exposeGlobalEcoSwitch` | `false` | One switch that sets Eco on every thermostat. Writes still need `allowThermostatControl`. |
-| `exposeProtectOccupancy` | `true` | Occupancy from REST `auto_away` on a mains-powered Protect. |
+| `exposeProtectOccupancy` | `true` | Occupancy from REST `auto_away` when that field is a boolean and the Protect is not reported as battery-powered. Unknown power does not hide a boolean Nest already sent. |
 | `exposeProtectTemperature` | `false` | Temperature/humidity measured by each Protect. |
 | `ignoredDeviceIds` | `[]` | Device IDs or serials to leave out of HomeKit. |
 | `fieldTest` | `false` | Use Nest field-test hosts. |
 | `diagnosticsInterval` | `0` | Seconds between health heartbeats; `0` off, else `30`–`86400`. |
 | `structuredLogs` | `false` | With diagnostics, also emit a JSON line. |
+| `pagerdutySignals` | `false` | Page through homebridge-pagerduty. Off until turned on. See [PagerDuty](docs/README-DETAILED.md#pagerduty). |
 | `debug` | `false` | Verbose logging; tokens are redacted. |
 
 The [detailed documentation](docs/README-DETAILED.md#full-configuration-reference) explains each option and what happens when REST or Observe is down.
@@ -107,8 +108,8 @@ The [detailed documentation](docs/README-DETAILED.md#full-configuration-referenc
 1. **Authentication error:** token missing, truncated, Google JWT/`ya29.`, or revoked. Capture a fresh Nest Account token ([docs/AUTH.md](docs/AUTH.md)).
 2. **Thermostat missing:** modern thermostats are Observe-only on some accounts. Enable `debug` for stream detail.
 3. **Eco / setpoint changes snap back:** enable **Allow thermostat control**.
-4. **Protect without smoke/CO:** likely Observe-only. The accessory still appears; alarm tiles wait for REST.
-5. **No occupancy:** battery Protect, power unknown, Observe-only, or `exposeProtectOccupancy` off. Occupancy is not motion.
+4. **Protect smoke/CO shows a fault:** REST has not supplied that sensor's number, or the REST feed is stale. The tile stays. A line `REST topaz auto_away=... smoke_status=... co_status=...` is the raw reading, including when the summary sentence did not change.
+5. **No occupancy, or a room that stays Occupied:** occupancy is Nest's `auto_away` inverted (false means Occupied), not motion. It is omitted for a battery Protect, when `auto_away` is missing, or when `exposeProtectOccupancy` is off. A stuck Occupied is that boolean staying false. The `REST topaz` line shows the raw value each time a Protect object arrives.
 
 The [full troubleshooting list](docs/README-DETAILED.md#troubleshooting) covers more cases, including a stuck Home app tile.
 

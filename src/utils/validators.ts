@@ -167,6 +167,7 @@ export function validateConfig(raw: MyNestPlatformConfig): ConfigValidationResul
     ignoredDeviceIds: parseIgnoredIds(raw.ignoredDeviceIds, warnings),
     diagnosticsInterval: parseDiagnosticsInterval(raw.diagnosticsInterval, warnings),
     structuredLogs: parseBoolean(raw.structuredLogs, false),
+    pagerdutySignals: parseBoolean(raw.pagerdutySignals, false),
     debug: parseBoolean(raw.debug, false),
   }
 

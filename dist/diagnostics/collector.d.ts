@@ -32,7 +32,7 @@ export interface ApiRequestMetricOptions {
 export interface DiagnosticsReaders {
     transport: () => TransportGauges;
     devices: () => DeviceGauges;
-    /** Platform has permanently stopped after Nest auth failure. */
+    /** Platform has stopped updates after HTTP 401 or a session it cannot use. */
     fatalActive: () => boolean;
     /** Wall-clock seconds since platform start (for Observe connecting grace). */
     uptimeSec: () => number;

@@ -17,6 +17,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ECO_MODE_STATE_TYPE_URL = exports.TARGET_TEMPERATURE_SETTINGS_TYPE_URL = void 0;
 exports.buildThermostatSetpointWrite = buildThermostatSetpointWrite;
+exports.applySentWrite = applySentWrite;
+exports.isSentWriteConfirmed = isSentWriteConfirmed;
 exports.formatThermostatUpdateLog = formatThermostatUpdateLog;
 exports.encodeEcoModeBatchUpdate = encodeEcoModeBatchUpdate;
 exports.encodeTargetTemperatureBatchUpdate = encodeTargetTemperatureBatchUpdate;
@@ -65,7 +67,11 @@ function buildThermostatSetpointWrite(resourceId, state, patch) {
         cool = patch.targetTemperatureHighC;
         didSetCool = true;
     }
-    if (patch.targetTemperatureC !== undefined) {
+    // A merged patch can carry the single target alongside explicit range
+    // bounds. The bounds are the more specific request, so re-centring on the
+    // single target would undo them.
+    const hasExplicitRange = effective === 'range' && (didSetHeat || didSetCool);
+    if (patch.targetTemperatureC !== undefined && !hasExplicitRange) {
         if (effective === 'cool') {
             cool = patch.targetTemperatureC;
             didSetCool = true;
@@ -108,6 +114,48 @@ function buildThermostatSetpointWrite(resourceId, state, patch) {
         clearEco: state.isEcoActive === true,
     };
 }
+/** Tolerance when comparing a Nest echo to the Celsius value that was sent. */
+const SETPOINT_ECHO_TOLERANCE_C = 0.05;
+/**
+ * Nest state as it will be once a sent write lands.
+ *
+ * Nest echoes a write through Observe some time after BatchUpdateState
+ * returns. A second HomeKit change in between must build on the first one,
+ * or it re-sends the old mode or bound and undoes it.
+ */
+function applySentWrite(state, write) {
+    return {
+        ...state,
+        mode: write.mode,
+        lastHvacMode: write.standbyMode,
+        targetTemperatureLowC: write.targetTemperatureHeatC,
+        targetTemperatureHighC: write.targetTemperatureCoolC,
+        targetTemperatureC: write.mode === 'cool' ? write.targetTemperatureCoolC : write.targetTemperatureHeatC,
+        isEcoActive: write.clearEco ? false : state.isEcoActive,
+    };
+}
+/** Whether Nest's reported state now shows the mode and bounds a write sent. */
+function isSentWriteConfirmed(state, write) {
+    if (state.mode !== write.mode) {
+        return false;
+    }
+    const isNear = (reported, sent) => (reported !== undefined && Math.abs(reported - sent) <= SETPOINT_ECHO_TOLERANCE_C);
+    switch (write.mode) {
+        case 'off':
+            return true;
+        case 'heat':
+            return isNear(state.targetTemperatureLowC ?? state.targetTemperatureC, write.targetTemperatureHeatC);
+        case 'cool':
+            return isNear(state.targetTemperatureHighC ?? state.targetTemperatureC, write.targetTemperatureCoolC);
+        case 'range':
+            return isNear(state.targetTemperatureLowC, write.targetTemperatureHeatC)
+                && isNear(state.targetTemperatureHighC, write.targetTemperatureCoolC);
+        default: {
+            const exhaustive = write.mode;
+            return exhaustive;
+        }
+    }
+}
 /**
  * Homebridge info line for a successful HomeKit-driven Nest write.
  *
@@ -119,13 +167,13 @@ function formatThermostatUpdateLog(write) {
     const cool = `${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`;
     switch (write.mode) {
         case 'off':
-            return 'Updating to Off';
+            return 'set Off';
         case 'heat':
-            return `Updating Heat to ${heat}`;
+            return `set Heat ${heat}`;
         case 'cool':
-            return `Updating Cool to ${cool}`;
+            return `set Cool ${cool}`;
         case 'range':
-            return `Updating Heat/Cool to ${write.targetTemperatureHeatC.toFixed(1)}\u2013${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`;
+            return `set Heat/Cool ${write.targetTemperatureHeatC.toFixed(1)}\u2013${write.targetTemperatureCoolC.toFixed(1)}\u00B0C`;
         default: {
             const exhaustive = write.mode;
             return exhaustive;

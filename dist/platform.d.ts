@@ -49,8 +49,8 @@ export declare class MyNestPlatform implements DynamicPlatformPlugin {
      * Set Eco on every published Nest thermostat.
      *
      * @returns `true` only when every targeted thermostat accepted the write.
-     *   `false` when control is off, there are no thermostats, or any write failed
-     *   (partial failures are logged; HomeKit must not flip the global switch).
+     *   `false` when control is off or there are no thermostats. Any failed
+     *   write throws, including when some thermostats already accepted it.
      */
     applyGlobalEcoWrite(ecoOn: boolean): Promise<boolean>;
 }

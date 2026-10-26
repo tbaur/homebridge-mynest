@@ -72,8 +72,16 @@ export interface ThermostatState {
   readonly isEcoActive?: boolean
   readonly canHeat?: boolean
   readonly canCool?: boolean
-  /** The unit shown on the device itself; HomeKit is always told Celsius. */
+  /**
+   * The unit shown on the Nest screen. Temperature values sent to HomeKit stay
+   * Celsius. `TemperatureDisplayUnits` follows this field.
+   */
   readonly displayUnit?: 'C' | 'F'
+  /**
+   * True when Observe has produced no decoded device trait for 10 minutes.
+   * Last values stay published.
+   */
+  readonly isObserveStale?: boolean
 }
 
 /** Nest's three-level alarm scale, shared by the smoke and CO sensors. */
@@ -85,7 +93,8 @@ export type AlarmLevel = 'ok' | 'warning' | 'emergency'
  * Recorded so the plugin can tell the user the truth. A Protect has a PIR
  * sensor but does not publish motion events on either API; all that is
  * available is Nest's own `auto_away` verdict, which flips only after about
- * ten minutes of no activity and only on mains-powered units.
+ * ten minutes of no activity. A missing boolean is omitted. Unknown power
+ * does not hide a boolean Nest already sent.
  */
 export type OccupancySource =
   /** Derived from REST `topaz.auto_away`. Ten-minute resolution, not motion. */
@@ -96,8 +105,6 @@ export type OccupancySource =
   | 'unavailable_observe_only'
   /** REST lists the Protect but omitted `auto_away` (no occupancy to publish). */
   | 'unavailable_no_auto_away'
-  /** REST listed the Protect but neither transport confirmed mains power. */
-  | 'unavailable_power_unknown'
   /**
    * REST previously reported this Protect, but the REST feed is no longer
    * trustworthy (breaker open, forbidden-dead, or stale). Last-known
@@ -140,6 +147,8 @@ export interface TemperatureSensorState {
   /** Percent, when Nest reports one. */
   readonly batteryLevel?: number
   readonly isBatteryLow?: boolean
+  /** See {@link ThermostatState.isObserveStale}. */
+  readonly isObserveStale?: boolean
 }
 
 /** One device, discriminated by {@link DeviceKind}. */

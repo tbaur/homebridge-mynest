@@ -19,7 +19,7 @@ import protobuf from 'protobufjs'
 
 /** One trait reading lifted out of an Observe frame. */
 export interface TraitUpdate {
-  /** Resource id, e.g. `DEVICE_18B4300000ACC1AD` or `STRUCTURE_…`. */
+  /** Resource id, e.g. `DEVICE_18B4300000000001` or `STRUCTURE_…`. */
   readonly resourceId: string
   /** Trait name in snake_case, e.g. `target_temperature_settings`. */
   readonly key: string

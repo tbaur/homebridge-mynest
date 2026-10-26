@@ -17,7 +17,7 @@
  * covering their entire Google account rather than just their Nest home.
  */
 
-import { AuthenticationError, SessionShapeError } from '../errors'
+import { SessionShapeError } from '../errors'
 import {
   SESSION_TIMEOUT_MS,
   USER_AGENT,
@@ -76,7 +76,8 @@ export function authenticatedHeaders(session: NestSession): Record<string, strin
  *
  * @throws {AuthenticationError} When Nest rejects the token.
  * @throws {SessionShapeError} When the response is accepted but omits a field
- *   the plugin needs, which means Nest changed the contract.
+ *   the plugin needs, or names a transport host off Nest infrastructure. Either
+ *   means Nest changed the contract; a new token would not help.
  */
 export async function openSession(options: OpenSessionOptions): Promise<NestSession> {
   const { accessToken, endpoints, log } = options
@@ -169,9 +170,7 @@ function assertNestTransportUrl(transportUrl: string): string {
   try {
     parsed = new URL(transportUrl)
   } catch {
-    throw new AuthenticationError(
-      'The Nest session returned a transport URL that is not a valid URL; refusing to use it.',
-    )
+    throw new SessionShapeError('has a transport URL that is not a valid URL, so it was refused')
   }
 
   const isHttps = parsed.protocol === 'https:'
@@ -183,8 +182,8 @@ function assertNestTransportUrl(transportUrl: string): string {
   const hasUserInfo = parsed.username !== '' || parsed.password !== ''
 
   if (!isHttps || !isNestHost || !isDefaultPort || hasUserInfo) {
-    throw new AuthenticationError(
-      `The Nest session returned an unexpected transport host (${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}); refusing to send the session token to it.`,
+    throw new SessionShapeError(
+      `names an unexpected transport host (${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}), so the session token was not sent to it`,
     )
   }
 

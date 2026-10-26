@@ -34,6 +34,12 @@ class NestAccessory {
     binder;
     identity;
     state;
+    /**
+     * True after Nest dropped this device from its inventory while HomeKit
+     * still shows it (removal is waiting on its own guards). Readings are then
+     * last-known only, so subclasses mark them inactive or faulted.
+     */
+    isUnreported = false;
     /** Last summary emitted, so an unchanged one stays at debug. */
     #lastSummary = null;
     constructor(platform, accessory, device, log) {
@@ -49,6 +55,37 @@ class NestAccessory {
     get deviceId() {
         return this.identity.id;
     }
+    get kind() {
+        return this.identity.kind;
+    }
+    /**
+     * Nest no longer reports this device, but HomeKit cannot drop it yet.
+     *
+     * Pushes the current readers again so subclasses that consult
+     * {@link isUnreported} stop presenting the last values as live.
+     */
+    markUnreported() {
+        if (this.isUnreported) {
+            return;
+        }
+        this.isUnreported = true;
+        this.log.warn(`${this.identity.name}: no longer reported by Nest, marked inactive`);
+        this.binder.refresh();
+    }
+    /**
+     * Remove every service this accessory published, before another kind of
+     * accessory takes over the same HomeKit accessory.
+     */
+    removeAllServices() {
+        const { Service: HapService } = this.platform;
+        for (const service of [...this.accessory.services]) {
+            if (service.UUID === HapService.AccessoryInformation.UUID) {
+                continue;
+            }
+            this.binder.unbindService(service);
+            this.accessory.removeService(service);
+        }
+    }
     /**
      * Take new state and push it to HomeKit.
      *
@@ -60,6 +97,10 @@ class NestAccessory {
         const previousIdentity = this.identity;
         this.identity = device.identity;
         this.state = device.state;
+        if (this.isUnreported) {
+            this.isUnreported = false;
+            this.log.info(`${this.identity.name}: reported by Nest again`);
+        }
         // Only when it actually changed. These four values essentially never do, and
         // re-applying them ran HAP's full value-validation path four times per
         // device per refresh on the hot update path.

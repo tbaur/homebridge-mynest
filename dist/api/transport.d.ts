@@ -26,8 +26,18 @@ export interface NestTransportOptions {
     log: Logger;
     /** Called with every trait the Observe stream reports, snapshot or patch. */
     onTraits: (traits: readonly TraitUpdate[]) => void;
-    /** Called with the full bucket map after any REST change. */
-    onBuckets: (buckets: BucketMap) => void;
+    /**
+     * Called with the full bucket map after any REST change.
+     *
+     * `updatedKeys` are the object keys in this response (`topaz.{id}`, and so
+     * on). Absent on callers that only have the merged map.
+     */
+    onBuckets: (buckets: BucketMap, updatedKeys?: readonly string[]) => void;
+    /**
+     * Called when decoded Observe device traits have been missing for
+     * {@link OBSERVE_DEVICE_DATA_STALE_MS}, and again when one arrives.
+     */
+    onObserveDeviceData?: (stale: boolean) => void;
     /**
      * Called when a new Observe connection is about to open.
      *
@@ -68,8 +78,15 @@ export interface NestTransportOptions {
     statusHeartbeatMs?: number;
     observeSilenceCheckMs?: number;
     forbiddenReprobeMs?: number;
-    /** Injected REST breaker (tests); defaults to a fresh instance. */
+    /**
+     * How long with no decoded device trait before temperature sensors fault.
+     * Defaults to {@link OBSERVE_DEVICE_DATA_STALE_MS}. Tests set a short value.
+     */
+    observeDataStaleMs?: number;
+    /** Injected REST subscribe breaker (tests); defaults to a fresh instance. */
     restCircuitBreaker?: CircuitBreaker;
+    /** Injected `app_launch` breaker (tests); defaults to a fresh instance. */
+    appLaunchCircuitBreaker?: CircuitBreaker;
     /** Injected Observe breaker (tests); defaults to a fresh instance. */
     observeCircuitBreaker?: CircuitBreaker;
     fetchImpl?: FetchLike;
@@ -96,15 +113,14 @@ export interface TransportStatus {
     readonly restState: 'running' | 'stopped' | 'forbidden_dead';
     readonly lastObserveFrameAgeSec: number | null;
     /**
-     * Seconds since the last successful REST cycle (subscribe idle counts).
-     * `null` until the first success after start.
+     * Seconds since the last REST refresh. An unanswered subscribe idle counts.
+     * A truncated `app_launch` does not. `null` until the first refresh.
      */
     readonly lastRestSuccessAgeSec: number | null;
     /**
      * Whether Protect smoke/CO (and REST occupancy) may be treated as live from
-     * cached topaz. False when REST is stopped, forbidden-dead, breaker-open,
-     * or past {@link REST_ALARM_FEED_STALE_MS} without a success — accessories
-     * stay published and are marked inactive/faulted instead.
+     * cached topaz. Decided by {@link AlarmFeedClock}. Accessories stay
+     * published and are marked inactive and faulted when this is false.
      */
     readonly isRestAlarmFeedAvailable: boolean;
     /**
@@ -133,8 +149,9 @@ export declare class NestTransport {
      * pushed as an update rather than being waited for. Blocking on it would
      * delay every REST-visible device behind the slower transport.
      *
-     * @throws {AuthenticationError} When the token is rejected. Nothing can
-     *   proceed without a session, so this is surfaced rather than retried.
+     * @throws {AuthenticationError} When the token is rejected.
+     * @throws {SessionShapeError} When the session is one this plugin cannot use.
+     *   Nothing can proceed without a session, so both are surfaced rather than retried.
      */
     start(): Promise<void>;
     /**

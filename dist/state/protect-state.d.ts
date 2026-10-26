@@ -13,9 +13,9 @@
  *    exists and every sample ever captured on this account reads all-clear, so
  *    there is nothing to validate a guessed field mapping against. Inferring
  *    "no smoke" from an unverified enum is the one mistake in this plugin that
- *    could matter to somebody's safety, so it is not made: a Protect that REST
- *    does not report gets no smoke or CO sensor in HomeKit at all, and the user
- *    is told why. See `docs/PROTOCOL.md`.
+ *    could matter to somebody's safety, so it is not made. A Protect with no
+ *    decoded alarm number still publishes both sensors, marked inactive, and
+ *    does not write a clear. See `docs/PROTOCOL.md`.
  *
  * 2. **A Protect does not report motion.** It has a PIR sensor, but neither API
  *    exposes its events: `ambient_motion` carries no state at rest, and a
@@ -71,5 +71,13 @@ export declare function readProtectState(options: {
      */
     restAlarmFeedAvailable?: boolean;
 }): ProtectState;
+/**
+ * One info line for a REST Protect object, including when HomeKit's sentence
+ * would be unchanged.
+ *
+ * `auto_away` false is Occupied. A stuck Occupied is invisible if the plugin
+ * only logs the summary when that word changes.
+ */
+export declare function formatTopazArrival(topaz: TopazBucket, label: string): string;
 /** A user-facing explanation for why occupancy is or is not published. */
 export declare function describeOccupancySource(source: OccupancySource): string;

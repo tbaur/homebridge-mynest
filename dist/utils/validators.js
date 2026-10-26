@@ -125,6 +125,7 @@ function validateConfig(raw) {
         ignoredDeviceIds: parseIgnoredIds(raw.ignoredDeviceIds, warnings),
         diagnosticsInterval: parseDiagnosticsInterval(raw.diagnosticsInterval, warnings),
         structuredLogs: parseBoolean(raw.structuredLogs, false),
+        pagerdutySignals: parseBoolean(raw.pagerdutySignals, false),
         debug: parseBoolean(raw.debug, false),
     };
     if (config.fieldTest) {

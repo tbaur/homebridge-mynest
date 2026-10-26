@@ -25,5 +25,6 @@ export declare class ThermostatAccessory extends NestAccessory<ThermostatState> 
     }>, log: Logger);
     protected bindCharacteristics(): void;
     protected onServicesMayChange(): void;
+    update(device: NestDevice): void;
     protected describeState(): string;
 }

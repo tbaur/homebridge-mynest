@@ -85,7 +85,20 @@ export class CharacteristicBinder {
     service: Service,
     type: CharacteristicType,
     read: CharacteristicReader,
-    options: { write?: CharacteristicWriter } = {},
+    options: {
+      write?: CharacteristicWriter
+      /**
+       * Throws when the reader has no value. The accessory list turns a throw
+       * into the characteristic default, so smoke and CO must not use this.
+       * They return null, and HAP keeps the cached value.
+       */
+      unavailable?: () => never
+      /**
+       * HomeKit read to use when the reader has no value. `refresh` still
+       * skips the push, so a missing value does not overwrite the cache.
+       */
+      whenMissing?: () => CharacteristicValue
+    } = {},
   ): Characteristic {
     const characteristic = service.getCharacteristic(type)
     const name = describeCharacteristic(characteristic, type)
@@ -100,10 +113,34 @@ export class CharacteristicBinder {
     }
 
     characteristic.onGet(() => {
-      const value = read()
-      // `null` tells HAP "not available yet" and leaves the cached value in
-      // place, which is the honest answer before the first Nest update lands.
-      return value ?? null
+      try {
+        const value = read()
+        if (value === null || value === undefined) {
+          if (options.unavailable) {
+            options.unavailable()
+          }
+          if (options.whenMissing) {
+            return options.whenMissing()
+          }
+          // Returning null makes HAP log an illegal-value warning and, on the
+          // accessory list, a thrown getter is replaced with the default.
+          // The cached value is the honest answer when Nest has not sent a new one.
+          if (characteristic.value !== null && characteristic.value !== undefined) {
+            return characteristic.value as CharacteristicValue
+          }
+          return null
+        }
+        return value
+      } catch (error) {
+        if (isHapStatusError(error)) {
+          throw error
+        }
+        // HAP already catches a throw from onGet and, on the accessory list,
+        // replaces it with the characteristic default. Returning null makes
+        // the read succeed with the previous value when one exists.
+        this.#noteReadFailure(name, error)
+        return null
+      }
     })
 
     if (options.write) {
@@ -144,19 +181,7 @@ export class CharacteristicBinder {
       try {
         value = binding.read()
       } catch (error) {
-        // Warned for the first few, then dropped to debug. A state-mapping bug
-        // throws on every refresh forever, and `createScopedLogger` discards
-        // debug entirely unless the operator enabled it — so at debug only, an
-        // accessory silently stopped updating and the log said nothing.
-        this.#readFailures++
-        const message = `${this.#label}: could not compute ${binding.name} `
-          + `(${this.#readFailures} failure(s)): `
-          + `${error instanceof Error ? error.message : String(error)}`
-        if (this.#readFailures <= MAX_READ_FAILURE_WARNINGS) {
-          this.#log.warn(message)
-        } else {
-          this.#log.debug(message)
-        }
+        this.#noteReadFailure(binding.name, error)
         continue
       }
 
@@ -172,6 +197,37 @@ export class CharacteristicBinder {
   get size(): number {
     return this.#bindings.length
   }
+
+  /**
+   * Warned for the first few, then dropped to debug.
+   *
+   * A state-mapping bug throws on every refresh forever, and
+   * `createScopedLogger` discards debug entirely unless the operator enabled
+   * it. At debug only, an accessory silently stopped updating and the log
+   * said nothing.
+   */
+  #noteReadFailure(name: string, error: unknown): void {
+    this.#readFailures++
+    const message = `${this.#label}: could not compute ${name} `
+      + `(${this.#readFailures} failure(s)): `
+      + `${error instanceof Error ? error.message : String(error)}`
+    if (this.#readFailures <= MAX_READ_FAILURE_WARNINGS) {
+      this.#log.warn(message)
+    } else {
+      this.#log.debug(message)
+    }
+  }
+}
+
+/**
+ * Homebridge exports HapStatusError as a type only, and the instance's
+ * `name` is `Error`. The status code lives on `hapStatus`.
+ */
+function isHapStatusError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'hapStatus' in error
+    && typeof (error as { hapStatus: unknown }).hapStatus === 'number'
 }
 
 /**
@@ -180,6 +236,7 @@ export class CharacteristicBinder {
  * HAP populates `displayName` on real characteristics; the UUID is the fallback
  * so this never throws on a stub.
  */
+
 function describeCharacteristic(
   characteristic: Characteristic,
   type: CharacteristicType,

@@ -9,6 +9,8 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 | Area | Purpose |
 | --- | --- |
 | `src/platform.ts` | Discovery, accessory lifecycle, coalesced updates |
+| `src/nest-signals.ts` | Which Nest conditions raise and clear each PagerDuty signal |
+| `src/pagerduty-signals.ts` | Signal store writer, copied unchanged from homebridge-pagerduty's `docs/SIGNALS-AGENT.md` |
 | `src/diagnostics/` | Opt-in health heartbeats and rollup (mirrors sibling plugins) |
 | `src/api/session.ts` | Nest Account session (`GET /session`) |
 | `src/api/rest.ts` | `app_launch` + `/v5/subscribe` |
@@ -16,11 +18,13 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 | `src/api/framing.ts` / `protobuf.ts` | Length-delimited frames and trait decode |
 | `src/api/thermostat-write.ts` / `batch-update.ts` | Encode + POST Nest BatchUpdateState (setpoints and Eco Mode) |
 | `src/api/transport.ts` | Independent REST + Observe run loops (+ thermostat / Eco writes) |
+| `src/api/alarm-feed.ts` | Pure rule for whether the REST Protect alarm feed is live (refresh and answer clocks) |
 | `src/api/circuit-breaker.ts` | Per-endpoint failure budget that parks a dead endpoint instead of hammering it |
 | `src/api/http.ts` | Shared fetch plumbing: client deadlines, bounded bodies, error classification |
 | `src/errors/` | Typed error hierarchy driving retry / breaker / fatal decisions |
 | `src/utils/retry.ts` | Exponential backoff with jitter and abort support |
 | `src/state/*` | Observe∪REST merge, Protect/thermostat/sensor readers |
+| `src/state/global-eco-state.ts` | Pure reducer for what the house-wide Eco switch shows while a write waits for Nest |
 | `src/accessories/thermostat.ts` | Thermostat + per-device Eco Mode switch |
 | `src/accessories/global-eco.ts` | Optional house-wide Eco Mode switch (`exposeGlobalEcoSwitch`) |
 | `src/accessories/*` | Other HomeKit accessories + HB2-safe `CharacteristicBinder` |

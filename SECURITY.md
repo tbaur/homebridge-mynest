@@ -9,7 +9,7 @@ Only the latest published release is supported. Fixes are shipped forward rather
 | Latest release | ✅ Active support |
 | Anything older | ❌ Unsupported — upgrade |
 
-Requires **Homebridge 2.x** and **Node.js 22 or newer**.
+Requires **Homebridge 2.x** and **Node.js 22, 24, or 26**.
 
 ## Reporting a Vulnerability
 
@@ -51,4 +51,4 @@ This plugin implements:
 
 Out-of-scope devices are listed in the [README](README.md#supported-devices): cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes.
 
-Life-safety alarm state for Protects is only published while Nest REST can refresh it; Observe-only units and Protects whose REST feed is down do not keep a frozen all-clear.
+Life-safety alarm state for Protects is only treated as live while Nest REST can refresh it. A missing number or a stale REST feed leaves the smoke and CO sensors published, inactive, and faulted, so HomeKit does not keep a frozen all-clear. An `app_launch` that is empty or under half the previous object count still merges the objects it contains, and it does not refresh that clock.

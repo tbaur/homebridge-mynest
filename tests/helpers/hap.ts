@@ -56,6 +56,7 @@ export function createResolvedConfig(overrides: Partial<ResolvedConfig> = {}): R
     ignoredDeviceIds: new Set<string>(),
     diagnosticsInterval: 0,
     structuredLogs: false,
+    pagerdutySignals: false,
     debug: false,
     ...overrides,
   }

@@ -14,9 +14,11 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.readComfortSource = readComfortSource;
+exports.thermostatIdsForChangedComfortSensors = thermostatIdsForChangedComfortSensors;
 exports.readThermostatFromObserve = readThermostatFromObserve;
 exports.readThermostatFromRest = readThermostatFromRest;
 exports.mergeThermostatState = mergeThermostatState;
+const classify_1 = require("./classify");
 const traits_1 = require("./traits");
 /**
  * Which sensor the thermostat is regulating to.
@@ -35,6 +37,27 @@ function readComfortSource(state, resourceId) {
     }
     const sensorResourceId = (0, traits_1.readString)(settings, 'activeRcsSelection', 'activeRcsSensor', 'resourceId');
     return sensorResourceId ? { sensorResourceId } : {};
+}
+/**
+ * Thermostats whose displayed temperature comes from a device in `changedIds`.
+ *
+ * An Observe patch names the sensor that changed. The thermostat is a
+ * different device, and its HomeKit tile reads that sensor. Skipping it
+ * leaves the thermostat on the previous temperature until some later trait
+ * of its own arrives.
+ */
+function thermostatIdsForChangedComfortSensors(observe, thermostatIds, changedIds) {
+    const linked = [];
+    for (const thermostatId of thermostatIds) {
+        if (changedIds.has(thermostatId)) {
+            continue;
+        }
+        const { sensorResourceId } = readComfortSource(observe, (0, classify_1.toResourceId)(thermostatId));
+        if (sensorResourceId && changedIds.has((0, classify_1.toDeviceId)(sensorResourceId))) {
+            linked.push(thermostatId);
+        }
+    }
+    return linked;
 }
 /**
  * Read the thermostat's own temperature.

@@ -43,12 +43,13 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Exponential backoff with full jitter.
+ * Exponential backoff with equal jitter: a delay in [step / 2, step].
  *
  * Jitter is not decoration. Every Homebridge instance running this plugin
  * reconnects against the same Nest gateway, and an outage that ends with all
  * of them retrying on the same schedule is how a recovering service is knocked
- * back over.
+ * back over. Every attempt is jittered, the first included. The lower half is
+ * excluded because a near-zero wait is an immediate retry with extra steps.
  *
  * @param attempt 1-based attempt number.
  * @param random Injectable for deterministic tests.
@@ -59,11 +60,9 @@ export function computeBackoffMs(
   maxMs: number = RECONNECT_MAX_MS,
   random: () => number = Math.random,
 ): number {
-  const exponential = Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1))
-  // Full jitter over [base, exponential] rather than [0, exponential]: waiting
-  // near-zero after a failure is just an immediate retry with extra steps.
-  const floor = Math.min(baseMs, exponential)
-  return Math.round(floor + random() * (exponential - floor))
+  const step = Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1))
+  const half = step / 2
+  return Math.round(half + random() * half)
 }
 
 export interface RetryOptions {

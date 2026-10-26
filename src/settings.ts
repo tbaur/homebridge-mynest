@@ -145,6 +145,13 @@ export const APP_LAUNCH_TIMEOUT_MS = 120_000
 export const BATCH_UPDATE_TIMEOUT_MS = 30_000
 
 /**
+ * How long a sent thermostat write is the base for the next one when Nest has
+ * not echoed it back. After this, Nest's own state wins again, so a write Nest
+ * quietly altered or dropped cannot steer later writes for long.
+ */
+export const THERMOSTAT_WRITE_ECHO_MAX_MS = 60_000
+
+/**
  * How long to hold a REST `subscribe` long-poll open before aborting it.
  *
  * Nest parks the request until something changes, so the client decides the
@@ -168,8 +175,9 @@ export const SUBSCRIBE_TIMEOUT_MS = 120_000
 export const SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = 0.5
 
 /**
- * How long after the last successful REST cycle (including idle subscribe)
- * Protect smoke/CO may still be treated as live from cached topaz.
+ * How long after the last REST refresh Protect smoke/CO may still be treated
+ * as live from cached topaz. An unanswered idle subscribe counts as a refresh.
+ * A truncated `app_launch` does not. See `api/alarm-feed.ts`.
  *
  * Must exceed {@link SUBSCRIBE_TIMEOUT_MS}: a quiet house parks the long-poll
  * for the full client timeout without being unhealthy. Beyond this window,
@@ -191,13 +199,17 @@ export const REST_ALARM_FEED_STALE_MS = SUBSCRIBE_TIMEOUT_MS + 60_000
 export const REST_PROOF_OF_LIFE_MS = 5 * 60_000
 
 /**
- * How long after Nest's last actual response the alarm feed stops counting as
- * live, regardless of timed-out cycles.
+ * How long after Nest last answered a refresh the alarm feed stops counting as
+ * live, regardless of timed-out cycles. A truncated `app_launch` is an answer
+ * but not a refresh, so it does not reset this.
  *
- * Sits above {@link REST_PROOF_OF_LIFE_MS} so a successful proof-of-life read
- * always lands first on a healthy account; only a genuine outage reaches it.
+ * The proof-of-life check runs between subscribe cycles, so the answer age can
+ * pass {@link REST_PROOF_OF_LIFE_MS} just after a subscribe starts and grow by a
+ * full {@link SUBSCRIBE_TIMEOUT_MS} before the proof runs. The extra minute is
+ * time for that `app_launch` to answer, so on a healthy account the proof
+ * always lands first and only a genuine outage reaches this limit.
  */
-export const REST_RESPONSE_STALE_MS = REST_PROOF_OF_LIFE_MS + 2 * 60_000
+export const REST_RESPONSE_STALE_MS = REST_PROOF_OF_LIFE_MS + SUBSCRIBE_TIMEOUT_MS + 60_000
 
 /**
  * How long a single Observe connection is held before being recycled.
@@ -210,16 +222,6 @@ export const OBSERVE_SESSION_MS = 30 * 60_000
 
 /** Interval between HTTP/2 pings that keep the Observe stream from idling out. */
 export const OBSERVE_PING_INTERVAL_MS = 60_000
-
-/**
- * How long a connection must last to count as productive rather than a flap.
- *
- * Nest sends a resource catalogue as the first frame of every connection, so
- * frame count alone cannot distinguish a working stream from a gateway that
- * accepts and immediately drops. Without a duration floor the latter resets
- * the reconnect backoff on every attempt.
- */
-export const OBSERVE_PRODUCTIVE_SESSION_MS = 30_000
 
 /**
  * Deadline for the Observe gateway to answer with response headers.
@@ -238,6 +240,16 @@ export const OBSERVE_CONNECT_TIMEOUT_MS = 30_000
  * the failure mode that leaves HomeKit showing stale temperatures indefinitely.
  */
 export const OBSERVE_IDLE_TIMEOUT_MS = 10 * 60_000
+
+/**
+ * How long Observe may go without a decoded device trait before temperature
+ * sensors are marked StatusFault.
+ *
+ * Thermostats do not get StatusFault in this HAP build. They keep their last
+ * values, and the transport logs the gap. Catalog frames and a socket that
+ * stays open do not count.
+ */
+export const OBSERVE_DEVICE_DATA_STALE_MS = OBSERVE_IDLE_TIMEOUT_MS
 
 /** Delay before the first reconnect attempt after a transport drops. */
 export const RECONNECT_BASE_MS = 5_000
@@ -288,11 +300,11 @@ export const OBSERVE_SNAPSHOT_ABANDON_MS = 30_000
 /**
  * Consecutive HTTP 403 responses on one transport before that loop gives up.
  *
- * A single 403 on a Nest edge host can be a WAF / bot-detection blip against
+ * A single 403 on a Nest edge host can be a WAF or bot-detection blip against
  * the pinned user agent. Counters are per-transport so REST blips cannot kill
- * a healthy Observe stream (and vice versa). The plugin only treats the token
- * as dead when *both* loops have exhausted this budget. 401 always means the
- * token is rejected immediately.
+ * a healthy Observe stream (and vice versa). After this many consecutive HTTP
+ * 403s that loop stops and probes again after the cooldown. A 403 is not a
+ * revoked token, on one transport or on both. HTTP 401 stops immediately.
  */
 export const FORBIDDEN_FATAL_THRESHOLD = 3
 

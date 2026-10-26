@@ -10,11 +10,13 @@
 import {
   ECO_MODE_STATE_TYPE_URL,
   TARGET_TEMPERATURE_SETTINGS_TYPE_URL,
+  applySentWrite,
   buildThermostatSetpointWrite,
   clampSetpoint,
   encodeEcoModeBatchUpdate,
   encodeTargetTemperatureBatchUpdate,
   formatThermostatUpdateLog,
+  isSentWriteConfirmed,
 } from '../../../src/api/thermostat-write'
 import { MAX_SETPOINT_C, MIN_SETPOINT_C } from '../../../src/settings'
 import { loadSchemas } from '../../../src/api/protobuf'
@@ -181,6 +183,86 @@ describe('buildThermostatSetpointWrite', () => {
       expect(write.targetTemperatureHeatC).toBe(19.5)
       expect(write.targetTemperatureCoolC).toBe(24.5)
     })
+  })
+
+  describe('a merged patch', () => {
+    const rangeState: ThermostatState = { ...baseState, mode: 'range', canCool: true }
+
+    it('keeps explicit range bounds over the single target in range mode', () => {
+      const write = buildThermostatSetpointWrite('DEVICE_ABC', rangeState, {
+        targetTemperatureC: 23,
+        targetTemperatureLowC: 20,
+      })
+
+      expect([write.targetTemperatureHeatC, write.targetTemperatureCoolC]).toEqual([20, 26])
+    })
+
+    it('applies the single target with a mode change out of range mode', () => {
+      const write = buildThermostatSetpointWrite('DEVICE_ABC', rangeState, {
+        mode: 'heat',
+        targetTemperatureC: 23,
+        targetTemperatureLowC: 20,
+      })
+
+      expect(write.targetTemperatureHeatC).toBe(23)
+    })
+  })
+})
+
+describe('applySentWrite', () => {
+  const sent = {
+    resourceId: 'DEVICE_ABC',
+    mode: 'cool' as const,
+    targetTemperatureHeatC: 20,
+    targetTemperatureCoolC: 24,
+    standbyMode: 'cool' as const,
+    clearEco: true,
+  }
+
+  it('shows the sent mode and bounds over the reported state', () => {
+    expect(applySentWrite({ ...baseState, isEcoActive: true }, sent)).toMatchObject({
+      mode: 'cool',
+      lastHvacMode: 'cool',
+      targetTemperatureLowC: 20,
+      targetTemperatureHighC: 24,
+      targetTemperatureC: 24,
+      isEcoActive: false,
+    })
+  })
+
+  it('keeps Eco and uses the heat bound for a heat write that does not clear Eco', () => {
+    const write = { ...sent, mode: 'heat' as const, standbyMode: 'heat' as const, clearEco: false }
+
+    expect(applySentWrite({ ...baseState, isEcoActive: true }, write)).toMatchObject({
+      targetTemperatureC: 20,
+      isEcoActive: true,
+    })
+  })
+})
+
+describe('isSentWriteConfirmed', () => {
+  const write = (mode: ThermostatState['mode'] & string, heat = 20, cool = 24) => ({
+    resourceId: 'DEVICE_ABC',
+    mode,
+    targetTemperatureHeatC: heat,
+    targetTemperatureCoolC: cool,
+    standbyMode: 'heat' as const,
+    clearEco: false,
+  })
+
+  it.each([
+    ['another mode', { ...baseState, mode: 'cool' as const }, write('heat'), false],
+    ['off', { ...baseState, mode: 'off' as const }, write('off'), true],
+    ['the heat bound', { ...baseState, targetTemperatureLowC: 20.04 }, write('heat'), true],
+    ['a different heat bound', { ...baseState, targetTemperatureLowC: 20.5 }, write('heat'), false],
+    ['the single heat target', { mode: 'heat' as const, targetTemperatureC: 20 }, write('heat'), true],
+    ['the cool bound', { ...baseState, mode: 'cool' as const, targetTemperatureHighC: 24 }, write('cool'), true],
+    ['the single cool target', { mode: 'cool' as const, targetTemperatureC: 24 }, write('cool'), true],
+    ['both range bounds', { ...baseState, mode: 'range' as const, targetTemperatureLowC: 20, targetTemperatureHighC: 24 }, write('range'), true],
+    ['one range bound', { ...baseState, mode: 'range' as const, targetTemperatureLowC: 20 }, write('range'), false],
+    ['no reported bound', { mode: 'range' as const }, write('range'), false],
+  ])('matches %s', (_label, state: ThermostatState, sentWrite, isConfirmed) => {
+    expect(isSentWriteConfirmed(state, sentWrite)).toBe(isConfirmed)
   })
 })
 
@@ -367,7 +449,7 @@ describe('formatThermostatUpdateLog', () => {
       targetTemperatureCoolC: 27.1,
       standbyMode: 'heat',
       clearEco: false,
-    })).toBe('Updating Heat to 16.0°C')
+    })).toBe('set Heat 16.0°C')
 
     expect(formatThermostatUpdateLog({
       resourceId: 'DEVICE_ABC',
@@ -376,7 +458,7 @@ describe('formatThermostatUpdateLog', () => {
       targetTemperatureCoolC: 24,
       standbyMode: 'cool',
       clearEco: false,
-    })).toBe('Updating Cool to 24.0°C')
+    })).toBe('set Cool 24.0°C')
 
     expect(formatThermostatUpdateLog({
       resourceId: 'DEVICE_ABC',
@@ -385,7 +467,7 @@ describe('formatThermostatUpdateLog', () => {
       targetTemperatureCoolC: 27.1,
       standbyMode: 'range',
       clearEco: false,
-    })).toBe('Updating Heat/Cool to 16.0–27.1°C')
+    })).toBe('set Heat/Cool 16.0–27.1°C')
 
     expect(formatThermostatUpdateLog({
       resourceId: 'DEVICE_ABC',
@@ -394,6 +476,6 @@ describe('formatThermostatUpdateLog', () => {
       targetTemperatureCoolC: 27.1,
       standbyMode: 'heat',
       clearEco: false,
-    })).toBe('Updating to Off')
+    })).toBe('set Off')
   })
 })

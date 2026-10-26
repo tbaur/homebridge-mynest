@@ -9,6 +9,8 @@
 
 import type { Characteristic as HapCharacteristic, PlatformAccessory } from 'homebridge'
 import { ThermostatAccessory } from '../../../src/accessories/thermostat'
+import { buildThermostatSetpointWrite, type ThermostatSetpointWrite } from '../../../src/api/thermostat-write'
+import { THERMOSTAT_WRITE_ECHO_MAX_MS } from '../../../src/settings'
 import type { DeviceOfKind } from '../../../src/types/device'
 import type { ThermostatState } from '../../../src/types/device'
 import { Characteristic, Service, createAccessory, createPlatformStub } from '../../helpers/hap'
@@ -36,7 +38,7 @@ function captureWarnings(characteristic: HapCharacteristic, sink: string[]): voi
  */
 function build(state: ThermostatState, restoreCache?: (accessory: PlatformAccessory) => void) {
   const platform = createPlatformStub()
-  const accessory = createAccessory('Hallway Thermostat')
+  const accessory = createAccessory('Zone One Thermostat')
   const log = createRecordingLogger()
 
   restoreCache?.(accessory)
@@ -45,7 +47,7 @@ function build(state: ThermostatState, restoreCache?: (accessory: PlatformAccess
     identity: {
       id: 'THERM01',
       kind: 'thermostat',
-      name: 'Hallway Thermostat',
+      name: 'Zone One Thermostat',
       sources: { observe: true, rest: false },
       model: 'Nest Thermostat E',
       serialNumber: 'THERM01',
@@ -426,6 +428,22 @@ describe('ThermostatAccessory', () => {
     expect(read(Characteristic.CurrentTemperature)).toBe(19.5)
   })
 
+  it('does not publish HomeKit\'s 0 °C default before Nest reports a temperature', () => {
+    const { read } = build({})
+
+    expect(read(Characteristic.CurrentTemperature)).toBe(20)
+  })
+
+  it('publishes a real 0 °C and keeps it when the next reading is missing', () => {
+    const { handler, read, device } = build({ ...heating, currentTemperatureC: 0 })
+
+    expect(read(Characteristic.CurrentTemperature)).toBe(0)
+
+    handler.update({ ...device, state: { ...heating, currentTemperatureC: undefined } })
+
+    expect(read(Characteristic.CurrentTemperature)).toBe(0)
+  })
+
   it('keeps write permission on target characteristics (Home needs them for tiles)', () => {
     // Stripping PAIRED_WRITE made the Home app show "No Response" and hide
     // room tiles even when Favorites / Home View were on.
@@ -435,6 +453,21 @@ describe('ThermostatAccessory', () => {
       .toContain('pw')
     expect(service.getCharacteristic(Characteristic.TargetHeatingCoolingState).props.perms)
       .toContain('pw')
+  })
+
+  it('leaves Eco unchanged until Nest reports it', async () => {
+    const { accessory, handler, device } = build({ ...heating, isEcoActive: undefined })
+    const eco = accessory.getService(Service.Switch as never)!
+    eco.getCharacteristic(Characteristic.On).updateValue(true)
+
+    handler.update({ ...device, state: { ...heating, isEcoActive: undefined } })
+
+    expect(eco.getCharacteristic(Characteristic.On).value).toBe(true)
+    await expect(eco.getCharacteristic(Characteristic.On).handleGetRequest()).resolves.toBe(true)
+
+    handler.update({ ...device, state: { ...heating, isEcoActive: true } })
+    handler.update({ ...device, state: { ...heating, isEcoActive: undefined } })
+    await expect(eco.getCharacteristic(Characteristic.On).handleGetRequest()).resolves.toBe(true)
   })
 
   it('publishes an Eco Mode switch reflecting Nest Eco state', () => {
@@ -453,7 +486,7 @@ describe('ThermostatAccessory', () => {
     await eco.getCharacteristic(Characteristic.On).handleSetRequest(true)
 
     expect(spy).toHaveBeenCalledWith('THERM01', true)
-    expect(log.infos.join('\n')).toMatch(/Hallway Thermostat: Updating to Eco/)
+    expect(log.infos.join('\n')).toMatch(/Zone One Thermostat: Eco on/)
   })
 
   it('reports a failed Eco write to HomeKit', async () => {
@@ -466,7 +499,7 @@ describe('ThermostatAccessory', () => {
     await expect(eco.getCharacteristic(Characteristic.On).handleSetRequest(true))
       .rejects.toBe(-70402)
 
-    expect(log.warns.join('\n')).toMatch(/Hallway Thermostat: Eco update failed/)
+    expect(log.warns.join('\n')).toMatch(/Zone One Thermostat: Eco update failed/)
   })
 
   it('resolves a refused Eco write rather than reporting a failure', async () => {
@@ -477,7 +510,7 @@ describe('ThermostatAccessory', () => {
     await expect(eco.getCharacteristic(Characteristic.On).handleSetRequest(true))
       .resolves.not.toThrow()
 
-    expect(log.warns.join('\n')).toMatch(/enable Allow thermostat control/)
+    expect(log.warns.join('\n')).toMatch(/thermostat control is off/)
   })
 
   it('routes target temperature writes through the platform', async () => {
@@ -499,7 +532,7 @@ describe('ThermostatAccessory', () => {
       expect.objectContaining({ targetTemperatureC: 21 }),
       { targetTemperatureC: 22.5 },
     )
-    expect(log.infos.join('\n')).toMatch(/Hallway Thermostat: Updating Heat to 22\.5°C/)
+    expect(log.infos.join('\n')).toMatch(/Zone One Thermostat: set Heat 22\.5°C/)
   })
 
   it('routes a HomeKit mode change through the platform', async () => {
@@ -543,6 +576,130 @@ describe('ThermostatAccessory', () => {
     expect(spy).toHaveBeenCalledWith('THERM01', expect.anything(), { targetTemperatureHighC: 25 })
   })
 
+  describe('several HomeKit changes before Nest echoes', () => {
+    const offWithRange: ThermostatState = {
+      currentTemperatureC: 19,
+      mode: 'off',
+      lastHvacMode: 'heat',
+      targetTemperatureC: 18,
+      targetTemperatureLowC: 18,
+      targetTemperatureHighC: 26,
+      canHeat: true,
+      canCool: true,
+      isEcoActive: false,
+      displayUnit: 'C',
+    }
+
+    /** Let the platform build writes the way production does. */
+    function buildWriting(state: ThermostatState) {
+      const built = build(state)
+      const sent: ThermostatSetpointWrite[] = []
+      jest.spyOn(built.platform, 'applyThermostatWrite').mockImplementation(
+        (deviceId, current, patch) => {
+          const write = buildThermostatSetpointWrite(`DEVICE_${deviceId}`, current, patch)
+          sent.push(write)
+          return Promise.resolve(write)
+        },
+      )
+      return { ...built, sent }
+    }
+
+    it('sends a scene that sets mode and setpoint together as one write', async () => {
+      // hap-nodejs starts every write in one request without awaiting the last.
+      const { service, sent } = buildWriting(offWithRange)
+
+      await Promise.all([
+        service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+          .handleSetRequest(Characteristic.TargetHeatingCoolingState.HEAT),
+        service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(22),
+      ])
+
+      expect(sent.map((write) => [write.mode, write.targetTemperatureHeatC])).toEqual([['heat', 22]])
+    })
+
+    it('sends both range thresholds from one request as one write', async () => {
+      const { service, sent } = buildWriting({ ...offWithRange, mode: 'range', lastHvacMode: 'range' })
+
+      await Promise.all([
+        service.getCharacteristic(Characteristic.HeatingThresholdTemperature).handleSetRequest(21),
+        service.getCharacteristic(Characteristic.CoolingThresholdTemperature).handleSetRequest(25),
+      ])
+
+      expect(sent.map((write) => [write.targetTemperatureHeatC, write.targetTemperatureCoolC]))
+        .toEqual([[21, 25]])
+    })
+
+    it('builds a later change on an earlier one Nest has not echoed yet', async () => {
+      const { service, sent } = buildWriting(offWithRange)
+
+      await service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+        .handleSetRequest(Characteristic.TargetHeatingCoolingState.HEAT)
+      await service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(22)
+
+      expect(sent.map((write) => [write.mode, write.targetTemperatureHeatC]))
+        .toEqual([['heat', 18], ['heat', 22]])
+    })
+
+    it('goes back to Nest state once Nest echoes the write', async () => {
+      const { service, sent, handler, device } = buildWriting(offWithRange)
+
+      await service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+        .handleSetRequest(Characteristic.TargetHeatingCoolingState.HEAT)
+      // Nest echoes the heat mode, then someone changes the setpoint in the Nest app.
+      handler.update({ ...device, state: { ...offWithRange, mode: 'heat' } })
+      handler.update({ ...device, state: { ...offWithRange, mode: 'heat', targetTemperatureLowC: 17 } })
+      await service.getCharacteristic(Characteristic.CoolingThresholdTemperature).handleSetRequest(27)
+
+      expect(sent.at(-1)).toMatchObject({ mode: 'heat', targetTemperatureHeatC: 17, targetTemperatureCoolC: 27 })
+    })
+
+    it('holds a sent write over a Nest report that does not show it yet', async () => {
+      const { service, sent, handler, device } = buildWriting(offWithRange)
+
+      await service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+        .handleSetRequest(Characteristic.TargetHeatingCoolingState.HEAT)
+      handler.update({ ...device, state: offWithRange })
+      await service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(22)
+
+      expect(sent.at(-1)).toMatchObject({ mode: 'heat', targetTemperatureHeatC: 22 })
+    })
+
+    it('stops holding a sent write that Nest never confirms', async () => {
+      jest.useFakeTimers({ now: 0 })
+      try {
+        const { service, sent, handler, device } = buildWriting(offWithRange)
+        const pending = service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+          .handleSetRequest(Characteristic.TargetHeatingCoolingState.HEAT)
+        await jest.runOnlyPendingTimersAsync()
+        await pending
+
+        jest.setSystemTime(THERMOSTAT_WRITE_ECHO_MAX_MS + 1)
+        handler.update({ ...device, state: offWithRange })
+        const next = service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(22)
+        await jest.runOnlyPendingTimersAsync()
+        await next
+
+        expect(sent.at(-1)).toMatchObject({ mode: 'off', targetTemperatureHeatC: 22 })
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it('reports a failed merged write to every HomeKit change in it', async () => {
+      const { service, platform } = build(offWithRange)
+      const spy = jest.spyOn(platform, 'applyThermostatWrite').mockRejectedValue(new Error('Nest 503'))
+
+      const results = await Promise.allSettled([
+        service.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+          .handleSetRequest(Characteristic.TargetHeatingCoolingState.HEAT),
+        service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(22),
+      ])
+
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected'])
+    })
+  })
+
   it('tells HomeKit a failed Nest write failed', async () => {
     // Resolving would report the HVAC as changed when it was not, leaving the
     // user with a slider that springs back and no reason given.
@@ -553,7 +710,7 @@ describe('ThermostatAccessory', () => {
       service.getCharacteristic(Characteristic.TargetTemperature).handleSetRequest(24),
     ).rejects.toBe(-70402)
 
-    expect(log.warns.join('\n')).toMatch(/Hallway Thermostat: thermostat update failed/)
+    expect(log.warns.join('\n')).toMatch(/Zone One Thermostat: update failed/)
     // Nest's last known values still go back, so the error status cannot stick:
     // updateValue clears it, as does the next onGet.
     await new Promise<void>((resolve) => setImmediate(resolve))
@@ -588,7 +745,7 @@ describe('ThermostatAccessory', () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(read(Characteristic.TargetTemperature)).toBe(21)
-    expect(log.warns.join('\n')).toMatch(/Hallway Thermostat: ignoring HomeKit change/)
+    expect(log.warns.join('\n')).toMatch(/Zone One Thermostat: thermostat control is off/)
   })
 
   it('records the device details HomeKit shows', () => {
@@ -606,11 +763,11 @@ describe('ThermostatAccessory', () => {
 
     handler.update({
       ...device,
-      identity: { ...device.identity, name: 'Living Room', firmwareVersion: '6.4-1' },
+      identity: { ...device.identity, name: 'Zone Two', firmwareVersion: '6.4-1' },
     })
 
     const information = accessory.getService(Service.AccessoryInformation as never)!
-    expect(information.getCharacteristic(Characteristic.Name).value).toBe('Living Room')
+    expect(information.getCharacteristic(Characteristic.Name).value).toBe('Zone Two')
     expect(information.getCharacteristic(Characteristic.FirmwareRevision).value).toBe('6.4-1')
   })
 

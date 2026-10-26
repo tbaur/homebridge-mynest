@@ -7,7 +7,9 @@
  * @fileoverview House-wide Eco Mode switch (all Nest thermostats).
  *
  * HomeKit has no Eco thermostat mode, so Eco is a Switch. This accessory turns
- * Eco on or off for every published thermostat at once.
+ * Eco on or off for every published thermostat at once. What the switch shows
+ * is decided by `state/global-eco-state.ts`; this class owns HomeKit, the
+ * expiry timer, and the log lines.
  */
 import type { PlatformAccessory } from 'homebridge';
 import type { Logger } from '../utils/logger';
@@ -16,13 +18,7 @@ import type { MyNestPlatform } from '../platform';
 export declare class GlobalEcoAccessory {
     #private;
     constructor(platform: MyNestPlatform, accessory: PlatformAccessory, log: Logger);
-    /**
-     * Reflect whether every Nest thermostat is currently in Eco.
-     *
-     * While a HomeKit write is pending confirmation, ignore Nest aggregates that
-     * do not yet match the desired value (partial Eco reports). If Nest never
-     * matches within {@link PENDING_ECO_MAX_MS}, take Nest truth.
-     */
+    /** Reflect whether every Nest thermostat is currently in Eco. */
     updateAllEco(allEco: boolean): void;
     /**
      * Release the pending-write backstop.

@@ -43,7 +43,7 @@ describe('GlobalEcoAccessory', () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(service.getCharacteristic(Characteristic.On).value).toBe(true)
-    expect(log.infos.join('\n')).toMatch(/Updating all thermostats to Eco/)
+    expect(log.infos.join('\n')).toMatch(/Eco on for all thermostats/)
   })
 
   it('keeps optimistic On across interim Nest syncs until all thermostats match', async () => {
@@ -69,16 +69,88 @@ describe('GlobalEcoAccessory', () => {
     try {
       const { service, platform, handler, log } = build()
       jest.spyOn(platform, 'applyGlobalEcoWrite').mockResolvedValue(true)
+      handler.updateAllEco(false)
 
       await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
       handler.updateAllEco(false)
       expect(service.getCharacteristic(Characteristic.On).value).toBe(true)
 
       jest.advanceTimersByTime(45_000)
-      handler.updateAllEco(false)
 
       expect(service.getCharacteristic(Characteristic.On).value).toBe(false)
-      expect(log.warns.join('\n')).toMatch(/did not confirm Eco change/)
+      expect(log.warns.join('\n')).toMatch(/not confirmed in 45s, showing Nest state/)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('does not call an unconfirmed command the last Nest reading', async () => {
+    jest.useFakeTimers()
+    try {
+      const { service, platform, log } = build()
+      jest.spyOn(platform, 'applyGlobalEcoWrite').mockResolvedValue(true)
+
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+      jest.advanceTimersByTime(45_000)
+
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(true)
+      expect(log.warns.join('\n')).toMatch(/not confirmed in 45s$/)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('expires to a Nest aggregate that arrived during the pending window', async () => {
+    jest.useFakeTimers()
+    try {
+      const { service, platform, handler, log } = build()
+      jest.spyOn(platform, 'applyGlobalEcoWrite').mockResolvedValue(true)
+
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+      handler.updateAllEco(false)
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(true)
+
+      jest.advanceTimersByTime(45_000)
+
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(false)
+      expect(log.warns.join('\n')).toMatch(/showing Nest state/)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('expires to the latest Nest aggregate after a second toggle', async () => {
+    jest.useFakeTimers()
+    try {
+      const { service, platform, handler } = build()
+      jest.spyOn(platform, 'applyGlobalEcoWrite').mockResolvedValue(true)
+      handler.updateAllEco(false)
+
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(false)
+      handler.updateAllEco(true)
+
+      jest.advanceTimersByTime(45_000)
+
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(true)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('a second Eco toggle reverts to the last Nest reading, not the first command', async () => {
+    jest.useFakeTimers()
+    try {
+      const { service, platform, handler } = build()
+      jest.spyOn(platform, 'applyGlobalEcoWrite').mockResolvedValue(true)
+      handler.updateAllEco(false)
+
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(false)
+
+      jest.advanceTimersByTime(45_000)
+
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(false)
     } finally {
       jest.useRealTimers()
     }
@@ -98,7 +170,28 @@ describe('GlobalEcoAccessory', () => {
 
       jest.advanceTimersByTime(90_000)
 
-      expect(log.warns.join('\n')).not.toMatch(/did not confirm Eco change/)
+      expect(log.warns.join('\n')).not.toMatch(/not confirmed in 45s, showing Nest state/)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('keeps an in-flight Eco confirmation when a later write is not sent', async () => {
+    jest.useFakeTimers({ legacyFakeTimers: true })
+    try {
+      const { service, platform, handler, log } = build()
+      const write = jest.spyOn(platform, 'applyGlobalEcoWrite')
+      write.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+      handler.updateAllEco(false)
+
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(true)
+      await service.getCharacteristic(Characteristic.On).handleSetRequest(false)
+      jest.runAllImmediates()
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(true)
+
+      jest.advanceTimersByTime(45_000)
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(false)
+      expect(log.warns.join('\n')).toMatch(/showing Nest state/)
     } finally {
       jest.useRealTimers()
     }
@@ -113,7 +206,7 @@ describe('GlobalEcoAccessory', () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
 
     expect(service.getCharacteristic(Characteristic.On).value).toBe(false)
-    expect(log.warns.join('\n')).toMatch(/enable Allow thermostat control/)
+    expect(log.warns.join('\n')).toMatch(/thermostat control is off/)
   })
 
   it('reports a failed write to HomeKit and reverts On', async () => {

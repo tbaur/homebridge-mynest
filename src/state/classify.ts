@@ -23,9 +23,9 @@ export const OBSERVE_DEVICE_PREFIX = 'DEVICE_'
 /**
  * Reduce an Observe resource id to the id the REST buckets use.
  *
- * Confirmed on a live account: Observe reports `DEVICE_18B4300000ACC1AD` for
- * the same Protect that REST reports as `topaz.18B4300000ACC1AD`. This exact
- * correspondence is what makes merging the two transports possible at all.
+ * Observe reports `DEVICE_0000000000000001` for the same Protect that REST
+ * reports as `topaz.0000000000000001`. That correspondence is what makes
+ * merging the two transports possible.
  */
 export function toDeviceId(resourceId: string): string {
   return resourceId.startsWith(OBSERVE_DEVICE_PREFIX)
@@ -120,7 +120,8 @@ const MAX_DEVICE_NAME_LENGTH = 64
  * named with an embedded newline can forge log lines. The value is also
  * type-checked rather than trusted: TypeScript only claims these are strings.
  */
-function cleanName(value: unknown): string | undefined {
+/** Strip control characters so a Nest name cannot forge a log line. */
+export function cleanName(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined
   }

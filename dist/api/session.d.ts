@@ -35,6 +35,7 @@ export declare function authenticatedHeaders(session: NestSession): Record<strin
  *
  * @throws {AuthenticationError} When Nest rejects the token.
  * @throws {SessionShapeError} When the response is accepted but omits a field
- *   the plugin needs, which means Nest changed the contract.
+ *   the plugin needs, or names a transport host off Nest infrastructure. Either
+ *   means Nest changed the contract; a new token would not help.
  */
 export declare function openSession(options: OpenSessionOptions): Promise<NestSession>;
