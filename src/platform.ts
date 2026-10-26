@@ -704,7 +704,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       const topaz = value as TopazBucket
       const knownName = this.#lastInventory?.protects.get(id)?.identity.name
       const description = cleanName(topaz.description)
-      this.#log.info(formatTopazArrival(topaz, knownName ?? description ?? id))
+      this.#log.debug(formatTopazArrival(topaz, knownName ?? description ?? id))
     }
   }
 

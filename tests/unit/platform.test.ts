@@ -1028,15 +1028,16 @@ describe('MyNestPlatform', () => {
     expect(log.errors.join('\n')).toContain('Access Token is required')
   })
 
-  it('logs the raw topaz fields when a Protect object arrives', async () => {
-    await launch()
+  it('logs the raw topaz fields at debug when a Protect object arrives', async () => {
+    await launch({ debug: true })
     flushSync()
 
     harness.options.onBuckets(restBuckets, [`topaz.${PROTECT_ID}`])
 
-    expect(log.infos.join('\n')).toContain(
+    expect(log.debugs.join('\n')).toContain(
       'REST topaz auto_away=false smoke_status=0 co_status=0',
     )
+    expect(log.infos.join('\n')).not.toContain('REST topaz')
   })
 
   it('faults a temperature sensor when Observe device data goes stale', async () => {
@@ -1071,7 +1072,7 @@ describe('MyNestPlatform', () => {
 
   it('keeps the other accessories updating when one accessory throws', async () => {
     const { NestAccessory } = await import('../../src/accessories/base')
-    await launch()
+    await launch({ debug: true })
     flushSync()
 
     const spy = jest.spyOn(NestAccessory.prototype, 'update').mockImplementationOnce(() => {
@@ -1082,7 +1083,7 @@ describe('MyNestPlatform', () => {
     flushSync()
 
     expect(log.errors.join('\n')).toContain('protect blew up')
-    expect(log.infos.join('\n')).toContain('REST topaz auto_away=false')
+    expect(log.debugs.join('\n')).toContain('REST topaz auto_away=false')
     spy.mockRestore()
   })
 

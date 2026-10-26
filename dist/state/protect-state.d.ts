@@ -72,11 +72,10 @@ export declare function readProtectState(options: {
     restAlarmFeedAvailable?: boolean;
 }): ProtectState;
 /**
- * One info line for a REST Protect object, including when HomeKit's sentence
- * would be unchanged.
+ * One debug line with the raw REST fields behind a Protect's summary.
  *
- * `auto_away` false is Occupied. A stuck Occupied is invisible if the plugin
- * only logs the summary when that word changes.
+ * `auto_away` false is Occupied. The accessory's info summary already shows
+ * the readable state on change; this is for checking what Nest actually sent.
  */
 export declare function formatTopazArrival(topaz: TopazBucket, label: string): string;
 /** A user-facing explanation for why occupancy is or is not published. */
