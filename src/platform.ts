@@ -125,10 +125,10 @@ function describeStartupFailure(error: unknown): string {
     return 'paused after repeated failures'
   }
   if (error instanceof TimeoutError) {
-    return 'no response'
+    return 'timed out'
   }
   if (error instanceof NetworkError) {
-    return 'no connection'
+    return 'network error'
   }
   if (error instanceof ApiParseError) {
     return 'unexpected response'
@@ -137,6 +137,11 @@ function describeStartupFailure(error: unknown): string {
     return `HTTP ${error.httpStatus}`
   }
   return sanitizeError(error)
+}
+
+function formatDelay(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)} min`
 }
 
 function stopReasonFor(error: Error): StopReason {
@@ -429,7 +434,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     this.#startRetryAttempt++
     const delayMs = computeBackoffMs(this.#startRetryAttempt)
-    this.#log.warn(`Nest unreachable at startup (${reason}), retrying in ${Math.round(delayMs / 1000)}s`)
+    this.#log.warn(`Could not connect to Nest (${reason}), retrying in ${formatDelay(delayMs)}`)
 
     this.#startRetryTimer = setTimeout(() => {
       this.#startRetryTimer = null

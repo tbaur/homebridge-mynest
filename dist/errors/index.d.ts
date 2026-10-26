@@ -28,10 +28,8 @@ export declare class ConfigurationError extends NestError {
     readonly isRetryable = false;
 }
 /**
- * Nest rejected the access token.
- *
- * HTTP 401 anywhere, or any client error from the session endpoint (see
- * {@link isSessionTokenRejection}).
+ * Nest rejected the access token: HTTP 401 anywhere, or HTTP 400 from the
+ * session endpoint (see {@link isSessionTokenRejection}).
  *
  * Not retryable: the token is copied by hand from a browser session and only a
  * new one will help. Retrying a rejected token is also how an account attracts
@@ -47,12 +45,13 @@ export declare class AuthenticationError extends NestError {
     });
 }
 /**
- * Whether a failed session open means the configured token is unusable.
+ * Whether a failed session open proves the configured token is unusable.
  *
- * The session endpoint takes nothing but the token, so any 4xx is about the
- * token. Nest has answered a bad token with 400, 401 and 403, and the next
- * code it picks must also stop the plugin rather than retry forever. Only
- * timeouts and rate limits are excluded.
+ * The session endpoint takes nothing but the token, and Nest answers a
+ * missing or bad one with 400 (`invalid_request`) or 401. Every other failure
+ * retries, because a 403 or an unfamiliar code can be an edge block that
+ * clears on its own. Retrying never hides an outage: the alarm feed goes stale
+ * and alarm-feed-stale pages whatever the cause.
  */
 export declare function isSessionTokenRejection(error: unknown): error is NestError & {
     httpStatus: number;

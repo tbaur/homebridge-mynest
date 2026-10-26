@@ -75,10 +75,10 @@ function describeStartupFailure(error) {
         return 'paused after repeated failures';
     }
     if (error instanceof errors_1.TimeoutError) {
-        return 'no response';
+        return 'timed out';
     }
     if (error instanceof errors_1.NetworkError) {
-        return 'no connection';
+        return 'network error';
     }
     if (error instanceof errors_1.ApiParseError) {
         return 'unexpected response';
@@ -87,6 +87,10 @@ function describeStartupFailure(error) {
         return `HTTP ${error.httpStatus}`;
     }
     return (0, sanitizers_1.sanitizeError)(error);
+}
+function formatDelay(ms) {
+    const seconds = Math.round(ms / 1000);
+    return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)} min`;
 }
 function stopReasonFor(error) {
     if (error instanceof errors_1.SessionShapeError) {
@@ -350,7 +354,7 @@ class MyNestPlatform {
         this.#holdUnpublishedProtectAlarms();
         this.#startRetryAttempt++;
         const delayMs = (0, retry_1.computeBackoffMs)(this.#startRetryAttempt);
-        this.#log.warn(`Nest unreachable at startup (${reason}), retrying in ${Math.round(delayMs / 1000)}s`);
+        this.#log.warn(`Could not connect to Nest (${reason}), retrying in ${formatDelay(delayMs)}`);
         this.#startRetryTimer = setTimeout(() => {
             this.#startRetryTimer = null;
             if (this.#isShuttingDown || this.#hasFatal) {

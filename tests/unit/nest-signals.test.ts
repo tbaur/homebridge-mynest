@@ -106,6 +106,21 @@ describe('NestSignals', () => {
     expect(writer.latest.get('alarm-feed-stale')?.active).toBe(true)
   })
 
+  it('writes auth-failed and alarm-feed-stale clear at start, but not smoke or co', () => {
+    signals.start()
+
+    expect([...writer.latest.keys()].sort()).toEqual(['alarm-feed-stale', 'auth-failed'])
+    expect(writer.latest.get('auth-failed')?.active).toBe(false)
+    expect(writer.latest.get('alarm-feed-stale')?.active).toBe(false)
+  })
+
+  it('does not clear auth-failed when start runs after a stop', () => {
+    signals.noteStopped('config')
+    signals.start()
+
+    expect(writer.latest.get('auth-failed')?.active).toBe(true)
+  })
+
   it('clears auth-failed once Nest accepts the token', () => {
     signals.noteConnected()
 

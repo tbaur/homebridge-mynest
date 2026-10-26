@@ -47,10 +47,12 @@ export declare class NestSignals {
     #private;
     constructor(writer: SignalWriter, graceMs?: number);
     /**
-     * Start the alarm feed grace.
+     * Write auth-failed and alarm-feed-stale clear, and start the alarm feed grace.
      *
-     * Does not write. Call once, before the first request, so a feed that is
-     * already down at launch still pages.
+     * Call once, before the first request. The write lists this plugin in
+     * homebridge-pagerduty even if Nest never answers, and the grace timer pages
+     * for a feed that is already down at launch. Smoke and CO wait for a fresh
+     * feed, so a restart cannot clear a real alarm.
      */
     start(): void;
     /** Nest accepted the token. Clears auth-failed. */

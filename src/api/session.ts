@@ -72,9 +72,9 @@ export function authenticatedHeaders(session: NestSession): Record<string, strin
 }
 
 /**
- * Fetch `GET /session`, reporting any client error as a rejected token.
+ * Fetch `GET /session`, reporting HTTP 400 or 401 as a rejected token.
  *
- * @throws {AuthenticationError} On any 4xx except a timeout or rate limit.
+ * @throws {AuthenticationError} On HTTP 400 or 401.
  */
 async function requestSession(options: OpenSessionOptions): Promise<SessionResponse> {
   try {
@@ -96,8 +96,7 @@ async function requestSession(options: OpenSessionOptions): Promise<SessionRespo
 /**
  * Exchange the configured access token for a usable session.
  *
- * @throws {AuthenticationError} When Nest rejects the token with any 4xx
- *   other than a timeout or rate limit.
+ * @throws {AuthenticationError} When Nest rejects the token (HTTP 400 or 401).
  * @throws {SessionShapeError} When the response is accepted but omits a field
  *   the plugin needs, or names a transport host off Nest infrastructure. Either
  *   means Nest changed the contract; a new token would not help.

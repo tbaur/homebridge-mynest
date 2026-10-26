@@ -142,7 +142,7 @@ describe('openSession', () => {
     expect(session.transportUrl).toContain('nestlabs.com')
   })
 
-  it.each([400, 401, 403, 404, 499])('treats HTTP %i from the session endpoint as a rejected token', async (status) => {
+  it.each([400, 401])('treats HTTP %i from the session endpoint as a rejected token', async (status) => {
     const { fetch } = jsonFetch(
       { error: 'invalid_request', error_description: 'missing user credentials' },
       { status },
@@ -158,7 +158,7 @@ describe('openSession', () => {
     expect((error as AuthenticationError).httpStatus).toBe(status)
   })
 
-  it.each([408, 429, 503])('does not stop the plugin on HTTP %i', async (status) => {
+  it.each([403, 404, 408, 429, 499, 503])('retries on HTTP %i instead of stopping the plugin', async (status) => {
     const { fetch } = jsonFetch({}, { status })
     const error = await openSession({
       accessToken: 'config-token',
