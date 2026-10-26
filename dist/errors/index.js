@@ -9,6 +9,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CircuitBreakerError = exports.ObserveStreamError = exports.ApiParseError = exports.ApiResponseError = exports.RateLimitError = exports.TimeoutError = exports.NetworkError = exports.SessionShapeError = exports.ForbiddenError = exports.AuthenticationError = exports.ConfigurationError = exports.NestError = void 0;
+exports.isSessionTokenRejection = isSessionTokenRejection;
 exports.isFatalTransportError = isFatalTransportError;
 exports.isCircuitBreakerFailure = isCircuitBreakerFailure;
 exports.parseRetryAfterMs = parseRetryAfterMs;
@@ -42,7 +43,8 @@ class ConfigurationError extends NestError {
 }
 exports.ConfigurationError = ConfigurationError;
 /**
- * Nest rejected the access token (HTTP 401).
+ * Nest rejected the access token: HTTP 401 anywhere, or HTTP 400 from the
+ * session endpoint (see {@link isSessionTokenRejection}).
  *
  * Not retryable: the token is copied by hand from a browser session and only a
  * new one will help. Retrying a rejected token is also how an account attracts
@@ -51,12 +53,25 @@ exports.ConfigurationError = ConfigurationError;
 class AuthenticationError extends NestError {
     code = 'AUTH_ERROR';
     isRetryable = false;
-    httpStatus = 401;
+    httpStatus;
     constructor(message = 'Nest rejected the configured access token. Sign in at https://home.nest.com, open https://home.nest.com/session, and copy a fresh "access_token".', options) {
-        super(message, options);
+        super(message, options?.cause ? { cause: options.cause } : undefined);
+        this.httpStatus = options?.status ?? 401;
     }
 }
 exports.AuthenticationError = AuthenticationError;
+/**
+ * Whether a failed session open proves the configured token is unusable.
+ *
+ * The session endpoint takes nothing but the token, and Nest answers a
+ * missing or bad one with 400 (`invalid_request`) or 401. Every other failure
+ * retries, because a 403 or an unfamiliar code can be an edge block that
+ * clears on its own. Retrying never hides an outage: the alarm feed goes stale
+ * and alarm-feed-stale pages whatever the cause.
+ */
+function isSessionTokenRejection(error) {
+    return error instanceof NestError && (error.httpStatus === 400 || error.httpStatus === 401);
+}
 /**
  * Nest answered HTTP 403 Forbidden.
  *

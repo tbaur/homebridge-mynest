@@ -49,25 +49,41 @@ function authenticatedHeaders(session) {
     };
 }
 /**
+ * Fetch `GET /session`, reporting HTTP 400 or 401 as a rejected token.
+ *
+ * @throws {AuthenticationError} On HTTP 400 or 401.
+ */
+async function requestSession(options) {
+    try {
+        return await (0, http_1.requestJson)(options.endpoints.sessionUrl, {
+            method: 'GET',
+            headers: sessionHeaders(options.accessToken),
+            timeoutMs: settings_1.SESSION_TIMEOUT_MS,
+            fetchImpl: options.fetchImpl,
+            signal: options.signal,
+        });
+    }
+    catch (error) {
+        if (!(0, errors_1.isSessionTokenRejection)(error) || error instanceof errors_1.AuthenticationError) {
+            throw error;
+        }
+        throw new errors_1.AuthenticationError(error.message, { cause: error, status: error.httpStatus });
+    }
+}
+/**
  * Exchange the configured access token for a usable session.
  *
- * @throws {AuthenticationError} When Nest rejects the token.
+ * @throws {AuthenticationError} When Nest rejects the token (HTTP 400 or 401).
  * @throws {SessionShapeError} When the response is accepted but omits a field
  *   the plugin needs, or names a transport host off Nest infrastructure. Either
  *   means Nest changed the contract; a new token would not help.
  */
 async function openSession(options) {
-    const { accessToken, endpoints, log } = options;
+    const { accessToken, log } = options;
     if (log.debugEnabled) {
         log.debug(`Opening a Nest session with the configured token ${(0, sanitizers_1.previewSecret)(accessToken)}`);
     }
-    const body = await (0, http_1.requestJson)(endpoints.sessionUrl, {
-        method: 'GET',
-        headers: sessionHeaders(accessToken),
-        timeoutMs: settings_1.SESSION_TIMEOUT_MS,
-        fetchImpl: options.fetchImpl,
-        signal: options.signal,
-    });
+    const body = await requestSession(options);
     const token = typeof body.access_token === 'string' ? body.access_token : undefined;
     // Only a scalar. `String()` accepts anything, so an object would become
     // `'[object Object]'` — truthy, so it passes the missing-field check below and

@@ -66,7 +66,32 @@ const UPDATE_COALESCE_MS = 250;
  * only remaining signal that HomeKit's values are frozen.
  */
 const FATAL_REMINDER_MS = 60 * 60_000;
-const TOKEN_REJECTED_MESSAGE = 'Nest token rejected. Get a new token from https://home.nest.com/session and restart Homebridge.';
+function tokenRejectedMessage(status) {
+    return `Nest rejected the token (HTTP ${status}). Get a new token from https://home.nest.com/session and restart Homebridge.`;
+}
+/** A few words for the startup retry line; the full error goes to debug. */
+function describeStartupFailure(error) {
+    if (error instanceof errors_1.CircuitBreakerError) {
+        return 'paused after repeated failures';
+    }
+    if (error instanceof errors_1.TimeoutError) {
+        return 'timed out';
+    }
+    if (error instanceof errors_1.NetworkError) {
+        return 'network error';
+    }
+    if (error instanceof errors_1.ApiParseError) {
+        return 'unexpected response';
+    }
+    if (error instanceof errors_1.NestError && error.httpStatus !== undefined) {
+        return `HTTP ${error.httpStatus}`;
+    }
+    return (0, sanitizers_1.sanitizeError)(error);
+}
+function formatDelay(ms) {
+    const seconds = Math.round(ms / 1000);
+    return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)} min`;
+}
 function stopReasonFor(error) {
     if (error instanceof errors_1.SessionShapeError) {
         return 'session';
@@ -203,6 +228,9 @@ class MyNestPlatform {
             for (const warning of warnings) {
                 this.#log.warn(warning);
             }
+            if (resolved.allowThermostatControl) {
+                this.#log.info('Thermostat control enabled');
+            }
         }
         catch (error) {
             // Homebridge keeps running other platforms, so this must not throw. The
@@ -252,9 +280,6 @@ class MyNestPlatform {
         this.#holdUnpublishedProtectAlarms();
         this.#signals?.start();
         this.#startedAt = Date.now();
-        if (this.#config.allowThermostatControl) {
-            this.#log.info('Thermostat control enabled');
-        }
         const diagnostics = this.#diagnostics;
         const transport = new transport_1.NestTransport({
             accessToken: this.#config.accessToken,
@@ -302,8 +327,8 @@ class MyNestPlatform {
             if (this.#isShuttingDown) {
                 return;
             }
-            this.#log.warn(`Nest unreachable at startup (${(0, sanitizers_1.sanitizeError)(error)}), retrying`);
-            this.#scheduleStartRetry();
+            this.#log.debug(`Startup failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
+            this.#scheduleStartRetry(describeStartupFailure(error));
             return;
         }
         this.#startRetryAttempt = 0;
@@ -320,7 +345,7 @@ class MyNestPlatform {
      * the plugin permanently idle — and cache-restored Protect tiles keep whatever
      * smoke/CO value Homebridge persisted, with no handler to mark them faulted.
      */
-    #scheduleStartRetry() {
+    #scheduleStartRetry(reason) {
         if (this.#isShuttingDown || this.#hasFatal || this.#startRetryTimer) {
             return;
         }
@@ -329,6 +354,7 @@ class MyNestPlatform {
         this.#holdUnpublishedProtectAlarms();
         this.#startRetryAttempt++;
         const delayMs = (0, retry_1.computeBackoffMs)(this.#startRetryAttempt);
+        this.#log.warn(`Could not connect to Nest (${reason}), retrying in ${formatDelay(delayMs)}`);
         this.#startRetryTimer = setTimeout(() => {
             this.#startRetryTimer = null;
             if (this.#isShuttingDown || this.#hasFatal) {
@@ -393,7 +419,11 @@ class MyNestPlatform {
         }
         this.#hasFatal = true;
         const isSessionShape = error instanceof errors_1.SessionShapeError;
-        this.#log.error(error instanceof errors_1.AuthenticationError ? TOKEN_REJECTED_MESSAGE : error.message);
+        const message = error instanceof errors_1.AuthenticationError
+            ? tokenRejectedMessage(error.httpStatus)
+            : error.message;
+        this.#log.error(message);
+        this.#log.debug(`Stopped by: ${(0, sanitizers_1.sanitizeError)(error)}`);
         this.#signals?.noteStopped(stopReasonFor(error));
         // Mark Protect smoke/CO inactive/faulted while handlers can still refresh.
         // `#stop` sets `#isShuttingDown` and drops `#scheduleUpdate`, so the
@@ -417,7 +447,7 @@ class MyNestPlatform {
         // the single error line above scrolls out of the log within hours.
         const reminder = isSessionShape
             ? 'Still stopped: unsupported Nest session format. Readings are frozen.'
-            : `Still stopped: ${TOKEN_REJECTED_MESSAGE}`;
+            : `Still stopped: ${message}`;
         this.#fatalReminderTimer = setInterval(() => {
             this.#log.error(reminder);
         }, FATAL_REMINDER_MS);

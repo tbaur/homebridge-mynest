@@ -42,9 +42,14 @@ import {
 } from './types/device'
 import type { BucketMap, TopazBucket } from './types/nest'
 import {
+  ApiParseError,
   AuthenticationError,
+  CircuitBreakerError,
   ConfigurationError,
+  NestError,
+  NetworkError,
   SessionShapeError,
+  TimeoutError,
   isFatalTransportError,
 } from './errors'
 import { NestTransport } from './api/transport'
@@ -110,8 +115,34 @@ const UPDATE_COALESCE_MS = 250
  */
 const FATAL_REMINDER_MS = 60 * 60_000
 
-const TOKEN_REJECTED_MESSAGE =
-  'Nest token rejected. Get a new token from https://home.nest.com/session and restart Homebridge.'
+function tokenRejectedMessage(status: number): string {
+  return `Nest rejected the token (HTTP ${status}). Get a new token from https://home.nest.com/session and restart Homebridge.`
+}
+
+/** A few words for the startup retry line; the full error goes to debug. */
+function describeStartupFailure(error: unknown): string {
+  if (error instanceof CircuitBreakerError) {
+    return 'paused after repeated failures'
+  }
+  if (error instanceof TimeoutError) {
+    return 'timed out'
+  }
+  if (error instanceof NetworkError) {
+    return 'network error'
+  }
+  if (error instanceof ApiParseError) {
+    return 'unexpected response'
+  }
+  if (error instanceof NestError && error.httpStatus !== undefined) {
+    return `HTTP ${error.httpStatus}`
+  }
+  return sanitizeError(error)
+}
+
+function formatDelay(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)} min`
+}
 
 function stopReasonFor(error: Error): StopReason {
   if (error instanceof SessionShapeError) {
@@ -261,6 +292,9 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       for (const warning of warnings) {
         this.#log.warn(warning)
       }
+      if (resolved.allowThermostatControl) {
+        this.#log.info('Thermostat control enabled')
+      }
     } catch (error) {
       // Homebridge keeps running other platforms, so this must not throw. The
       // plugin simply publishes nothing and says why.
@@ -320,10 +354,6 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     this.#startedAt = Date.now()
 
-    if (this.#config.allowThermostatControl) {
-      this.#log.info('Thermostat control enabled')
-    }
-
     const diagnostics = this.#diagnostics
     const transport = new NestTransport({
       accessToken: this.#config.accessToken,
@@ -372,10 +402,8 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
         return
       }
 
-      this.#log.warn(
-        `Nest unreachable at startup (${sanitizeError(error)}), retrying`,
-      )
-      this.#scheduleStartRetry()
+      this.#log.debug(`Startup failed: ${sanitizeError(error)}`)
+      this.#scheduleStartRetry(describeStartupFailure(error))
       return
     }
 
@@ -395,7 +423,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
    * the plugin permanently idle — and cache-restored Protect tiles keep whatever
    * smoke/CO value Homebridge persisted, with no handler to mark them faulted.
    */
-  #scheduleStartRetry(): void {
+  #scheduleStartRetry(reason: string): void {
     if (this.#isShuttingDown || this.#hasFatal || this.#startRetryTimer) {
       return
     }
@@ -406,6 +434,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     this.#startRetryAttempt++
     const delayMs = computeBackoffMs(this.#startRetryAttempt)
+    this.#log.warn(`Could not connect to Nest (${reason}), retrying in ${formatDelay(delayMs)}`)
 
     this.#startRetryTimer = setTimeout(() => {
       this.#startRetryTimer = null
@@ -480,7 +509,11 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     }
     this.#hasFatal = true
     const isSessionShape = error instanceof SessionShapeError
-    this.#log.error(error instanceof AuthenticationError ? TOKEN_REJECTED_MESSAGE : error.message)
+    const message = error instanceof AuthenticationError
+      ? tokenRejectedMessage(error.httpStatus)
+      : error.message
+    this.#log.error(message)
+    this.#log.debug(`Stopped by: ${sanitizeError(error)}`)
     this.#signals?.noteStopped(stopReasonFor(error))
 
     // Mark Protect smoke/CO inactive/faulted while handlers can still refresh.
@@ -507,7 +540,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     // the single error line above scrolls out of the log within hours.
     const reminder = isSessionShape
       ? 'Still stopped: unsupported Nest session format. Readings are frozen.'
-      : `Still stopped: ${TOKEN_REJECTED_MESSAGE}`
+      : `Still stopped: ${message}`
     this.#fatalReminderTimer = setInterval(() => {
       this.#log.error(reminder)
     }, FATAL_REMINDER_MS)

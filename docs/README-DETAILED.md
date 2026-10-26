@@ -131,10 +131,10 @@ Each condition below then opens a PagerDuty alert while it is present, and resol
 | --- | --- | --- |
 | `smoke` | critical | Any Protect reports a smoke warning or emergency |
 | `co` | critical | Any Protect reports a carbon monoxide warning or emergency |
-| `alarm-feed-stale` | error | The Protect alarm feed has been unavailable for 5 minutes, so HomeKit may not show a smoke or CO alarm |
-| `auth-failed` | error | The plugin stopped because Nest rejected the token, the token in the config is missing or invalid, or Nest changed its session format |
+| `alarm-feed-stale` | error | The Protect alarm feed has been unavailable for 5 minutes, whatever the cause, so HomeKit may not show a smoke or CO alarm |
+| `auth-failed` | error | The plugin stopped because Nest rejected the token (HTTP 400 or 401), the token in the config is missing or invalid, or Nest changed its session format |
 
-Each signal covers the whole house. The summary does not name the Protect, so check the Nest app for which one is alarming. While the alarm feed is stale, `smoke` and `co` keep their last value. They do not clear until fresh readings arrive. While `auth-failed` is active, `alarm-feed-stale` stays off, so a stopped plugin sends one page.
+Each signal covers the whole house. The summary does not name the Protect, so check the Nest app for which one is alarming. While the alarm feed is stale, `smoke` and `co` keep their last value. They do not clear until fresh readings arrive. While `auth-failed` is active, `alarm-feed-stale` stays off, so a stopped plugin sends one page. Any other failure, such as HTTP 403, an unfamiliar error code or a network outage, keeps retrying and pages `alarm-feed-stale` if it lasts 5 minutes. The plugin writes `auth-failed` and `alarm-feed-stale` at startup, so homebridge-pagerduty lists it even if Nest never answers.
 
 ## Troubleshooting
 

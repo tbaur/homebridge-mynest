@@ -22,7 +22,13 @@ import { CircuitState } from '../../src/api/circuit-breaker'
 import type { NestTransportOptions, TransportStatus } from '../../src/api/transport'
 import type { TraitUpdate } from '../../src/api/protobuf'
 import type { BucketMap } from '../../src/types/nest'
-import { AuthenticationError, NetworkError, SessionShapeError } from '../../src/errors'
+import {
+  ApiResponseError,
+  AuthenticationError,
+  ForbiddenError,
+  NetworkError,
+  SessionShapeError,
+} from '../../src/errors'
 import {
   OBSERVE_SNAPSHOT_ABANDON_MS,
   PLATFORM_NAME,
@@ -249,7 +255,9 @@ describe('MyNestPlatform', () => {
 
     await launch()
 
-    expect(log.warns.join('\n')).toMatch(/Nest unreachable at startup/)
+    expect(log.warns).toContainEqual(
+      expect.stringMatching(/^Could not connect to Nest \(network error\), retrying in \d+s$/),
+    )
     expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
 
     // Backoff, then a successful second attempt.
@@ -268,9 +276,29 @@ describe('MyNestPlatform', () => {
     expect(log.warns.join('\n')).not.toMatch(/retrying in the background/)
   })
 
-  it('logs that thermostat control is enabled when the flag is on', async () => {
+  it('stops with a readable message when the session endpoint answers HTTP 400', async () => {
+    pendingStartFailures.push(new AuthenticationError(
+      'https://home.nest.com/session returned HTTP 400: {"error":"invalid_request"}',
+      { status: 400 },
+    ))
+
+    await launch()
+
+    expect(log.errors).toContain(
+      'Nest rejected the token (HTTP 400). Get a new token from https://home.nest.com/session and restart Homebridge.',
+    )
+    expect(log.warns.join('\n')).not.toMatch(/Could not connect to Nest/)
+  })
+
+  it('logs that thermostat control is enabled once, not on every startup retry', async () => {
+    pendingStartFailures.push(new NetworkError('Could not reach https://home.nest.com/session'))
+
     await launch({ allowThermostatControl: true })
-    expect(log.infos.join('\n')).toMatch(/Thermostat control enabled/)
+    await jest.advanceTimersByTimeAsync(60_000)
+    await Promise.resolve()
+
+    expect(log.infos.join('\n')).toContain('Connected to Nest')
+    expect(log.infos.filter((line) => line === 'Thermostat control enabled')).toHaveLength(1)
   })
 
   it('does not call Nest when thermostat control is off', async () => {
@@ -1110,7 +1138,7 @@ describe('MyNestPlatform', () => {
     expect(api.unregistered).toHaveLength(0)
     expect(api.registered).toHaveLength(published)
     expect(log.errors.join('\n')).toMatch(/home\.nest\.com\/session/)
-    expect(log.errors.join('\n')).toMatch(/Nest token rejected/)
+    expect(log.errors.join('\n')).toMatch(/Nest rejected the token/)
     // Last readings stay, but must not look like a live all-clear after auth dies.
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(false)
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusFault).value)
@@ -1194,6 +1222,32 @@ describe('MyNestPlatform', () => {
       api.emit('shutdown')
 
       expect(readSignals()).toEqual(expect.objectContaining({ 'auth-failed': 1, 'alarm-feed-stale': 0 }))
+    })
+
+    it('pages auth-failed at once when Nest refuses the token at startup', async () => {
+      pendingStartFailures.push(new AuthenticationError('missing user credentials', { status: 400 }))
+      await launch({ pagerdutySignals: true })
+
+      expect(readSignals()).toEqual({ 'auth-failed': 1, 'alarm-feed-stale': 0 })
+    })
+
+    it.each([
+      ['HTTP 403', () => new ForbiddenError('HTTP 403')],
+      ['HTTP 499', () => new ApiResponseError(499, 'HTTP 499')],
+      ['a network error', () => new NetworkError('Could not reach Nest')],
+    ])('pages alarm-feed-stale when startup keeps failing with %s', async (_label, makeError) => {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        pendingStartFailures.push(makeError())
+      }
+      await launch({ pagerdutySignals: true })
+
+      // Written before the first request, so homebridge-pagerduty lists the plugin.
+      expect(readSignals()).toEqual({ 'auth-failed': 0, 'alarm-feed-stale': 0 })
+
+      await jest.advanceTimersByTimeAsync(5 * 60_000)
+
+      expect(readSignals()).toEqual({ 'auth-failed': 0, 'alarm-feed-stale': 1 })
+      expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
     })
 
     it('raises auth-failed when the configuration is unusable', async () => {
