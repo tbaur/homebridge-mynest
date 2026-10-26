@@ -173,8 +173,6 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   #pendingUpdate: NodeJS.Timeout | null = null
   #pendingChangedIds: Set<string> | null = null
   #bucketsChanged = false
-  /** True after 10 minutes with no decoded Observe device trait. */
-  #observeDeviceDataStale = false
   #isShuttingDown = false
   #hasFatal = false
   #startedAt = 0
@@ -333,11 +331,6 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       log: this.#log,
       onTraits: (traits) => this.#applyTraits(traits),
       onBuckets: (buckets, updatedKeys) => this.#applyBuckets(buckets, updatedKeys),
-      onObserveDeviceData: (stale) => {
-        this.#observeDeviceDataStale = stale
-        this.#bucketsChanged = true
-        this.#scheduleUpdate()
-      },
       onObserveSessionStart: () => this.#beginObserveSnapshot(),
       onFatal: (error) => this.#handleFatal(error),
       onCircuitOpen: () => diagnostics?.breakerTrip(),
@@ -758,7 +751,6 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
       buckets: this.#buckets,
       ignoredDeviceIds: this.#config.ignoredDeviceIds,
       restAlarmFeedAvailable: isFeedAvailable,
-      observeDataStale: this.#observeDeviceDataStale,
     })
     this.#lastInventory = inventory
 
@@ -1359,7 +1351,6 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
         buckets: this.#buckets,
         ignoredDeviceIds: this.#config.ignoredDeviceIds,
         restAlarmFeedAvailable: this.#transport?.status.isRestAlarmFeedAvailable ?? false,
-        observeDataStale: this.#observeDeviceDataStale,
       })
       : null)
 

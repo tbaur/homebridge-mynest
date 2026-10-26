@@ -175,15 +175,6 @@ export declare const OBSERVE_CONNECT_TIMEOUT_MS = 30000;
  * the failure mode that leaves HomeKit showing stale temperatures indefinitely.
  */
 export declare const OBSERVE_IDLE_TIMEOUT_MS: number;
-/**
- * How long Observe may go without a decoded device trait before temperature
- * sensors are marked StatusFault.
- *
- * Thermostats do not get StatusFault in this HAP build. They keep their last
- * values, and the transport logs the gap. Catalog frames and a socket that
- * stays open do not count.
- */
-export declare const OBSERVE_DEVICE_DATA_STALE_MS: number;
 /** Delay before the first reconnect attempt after a transport drops. */
 export declare const RECONNECT_BASE_MS = 5000;
 /** Upper bound on the reconnect backoff. */

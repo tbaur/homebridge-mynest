@@ -22,7 +22,6 @@ import {
   FRAME_DECODE_WINDOW,
   LOOP_FAILURE_WARN_EVERY,
   MIN_SUBSCRIBE_CYCLE_MS,
-  OBSERVE_DEVICE_DATA_STALE_MS,
   OBSERVE_IDLE_TIMEOUT_MS,
   OBSERVE_SILENCE_CHECK_MS,
   OBSERVE_STARTUP_WARN_MS,
@@ -83,11 +82,6 @@ export interface NestTransportOptions {
    */
   onBuckets: (buckets: BucketMap, updatedKeys?: readonly string[]) => void
   /**
-   * Called when decoded Observe device traits have been missing for
-   * {@link OBSERVE_DEVICE_DATA_STALE_MS}, and again when one arrives.
-   */
-  onObserveDeviceData?: (stale: boolean) => void
-  /**
    * Called when a new Observe connection is about to open.
    *
    * The platform uses this to collect the reconnect device snapshot so
@@ -127,11 +121,6 @@ export interface NestTransportOptions {
   statusHeartbeatMs?: number
   observeSilenceCheckMs?: number
   forbiddenReprobeMs?: number
-  /**
-   * How long with no decoded device trait before temperature sensors fault.
-   * Defaults to {@link OBSERVE_DEVICE_DATA_STALE_MS}. Tests set a short value.
-   */
-  observeDataStaleMs?: number
   /** Injected REST subscribe breaker (tests); defaults to a fresh instance. */
   restCircuitBreaker?: CircuitBreaker
   /** Injected `app_launch` breaker (tests); defaults to a fresh instance. */
@@ -236,8 +225,6 @@ export class NestTransport {
   #lastObserveFrameAt: number | null = null
   /** Decoded `DEVICE_` traits in the Observe session that is open now. */
   #decodedDeviceTraitsThisSession = 0
-  #observeDataStale = false
-  #observeDataStaleTimer: NodeJS.Timeout | null = null
   readonly #loopRestartTimers = new Map<string, NodeJS.Timeout>()
   #observeSessionOpen = false
   #restLoopRunning = false
@@ -423,7 +410,6 @@ export class NestTransport {
     // default `--unhandled-rejections=throw` — taking every other plugin down.
     this.#startLoop('Observe', () => this.#runObserveLoop())
     this.#startLoop('REST', () => this.#runSubscribeLoop())
-    this.#scheduleObserveDataStale()
 
     if (this.#options.statusHeartbeatEnabled !== false) {
       this.#startStatusHeartbeat()
@@ -520,10 +506,6 @@ export class NestTransport {
       this.#observeStartupWarnTimer = null
     }
     this.#clearRestAlarmFeedStaleTimer()
-    if (this.#observeDataStaleTimer) {
-      clearTimeout(this.#observeDataStaleTimer)
-      this.#observeDataStaleTimer = null
-    }
     for (const timer of this.#loopRestartTimers.values()) {
       clearTimeout(timer)
     }
@@ -879,47 +861,15 @@ export class NestTransport {
       )
     }
 
+    // Observe sends device traits only on change, so a quiet house can go a
+    // long time without one. This counts them only to judge a session productive.
     if (traits.some((trait) => trait.resourceId.startsWith(OBSERVE_DEVICE_PREFIX))) {
-      this.#noteDecodedDeviceTrait()
+      this.#decodedDeviceTraitsThisSession++
     }
 
     if (traits.length > 0) {
       this.#options.onTraits(traits)
     }
-  }
-
-  /** A decoded device trait is the only Observe event that means the house is live. */
-  #noteDecodedDeviceTrait(): void {
-    this.#decodedDeviceTraitsThisSession++
-    if (this.#observeDataStale) {
-      this.#observeDataStale = false
-      this.#options.log.info('Observe: device updates resumed')
-      this.#options.onObserveDeviceData?.(false)
-    }
-    this.#scheduleObserveDataStale()
-  }
-
-  /**
-   * Mark temperature sensors faulted if this long passes with no decoded
-   * device trait. Thermostats keep their last values.
-   *
-   * Catalog frames still increment `#observeFrames` and would otherwise keep
-   * the stream looking healthy.
-   */
-  #scheduleObserveDataStale(): void {
-    if (this.#observeDataStaleTimer) {
-      clearTimeout(this.#observeDataStaleTimer)
-    }
-    this.#observeDataStaleTimer = setTimeout(() => {
-      this.#observeDataStaleTimer = null
-      if (this.#isStopped || this.#observeDataStale) {
-        return
-      }
-      this.#observeDataStale = true
-      this.#options.log.warn('Observe: no device updates for 10 min, temperature sensors marked faulted')
-      this.#options.onObserveDeviceData?.(true)
-    }, this.#options.observeDataStaleMs ?? OBSERVE_DEVICE_DATA_STALE_MS)
-    this.#observeDataStaleTimer.unref?.()
   }
 
   /**

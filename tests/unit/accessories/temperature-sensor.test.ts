@@ -43,15 +43,6 @@ function build(state: TemperatureSensorState) {
 }
 
 describe('TemperatureSensorAccessory', () => {
-  it('faults the sensor when Observe device data is stale', () => {
-    const { read } = build({ temperatureC: 18.2, isObserveStale: true })
-
-    expect(read(Service.TemperatureSensor, Characteristic.StatusFault))
-      .toBe(Characteristic.StatusFault.GENERAL_FAULT)
-    expect(read(Service.TemperatureSensor, Characteristic.CurrentTemperature))
-      .toBeCloseTo(18.2, 5)
-  })
-
   it('publishes the temperature', () => {
     const { read } = build({ temperatureC: 18.2, batteryLevel: 80, isBatteryLow: false })
 

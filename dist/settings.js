@@ -15,8 +15,8 @@
  * nothing external will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_DEVICE_DATA_STALE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.THERMOSTAT_WRITE_ECHO_MAX_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
-exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_C = void 0;
+exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.THERMOSTAT_WRITE_ECHO_MAX_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = void 0;
 exports.resolveEndpoints = resolveEndpoints;
 exports.appLaunchUrl = appLaunchUrl;
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -198,15 +198,6 @@ exports.OBSERVE_CONNECT_TIMEOUT_MS = 30_000;
  * the failure mode that leaves HomeKit showing stale temperatures indefinitely.
  */
 exports.OBSERVE_IDLE_TIMEOUT_MS = 10 * 60_000;
-/**
- * How long Observe may go without a decoded device trait before temperature
- * sensors are marked StatusFault.
- *
- * Thermostats do not get StatusFault in this HAP build. They keep their last
- * values, and the transport logs the gap. Catalog frames and a socket that
- * stays open do not count.
- */
-exports.OBSERVE_DEVICE_DATA_STALE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS;
 /** Delay before the first reconnect attempt after a transport drops. */
 exports.RECONNECT_BASE_MS = 5_000;
 /** Upper bound on the reconnect backoff. */

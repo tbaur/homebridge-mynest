@@ -67,12 +67,6 @@ export interface BuildInventoryOptions {
    * values. Defaults to true.
    */
   restAlarmFeedAvailable?: boolean
-  /**
-   * When true, `isObserveStale` is set on thermostats and temperature sensors.
-   * Only temperature sensors publish Status Fault. Thermostats keep their last
-   * values. Defaults to false.
-   */
-  observeDataStale?: boolean
 }
 
 /**
@@ -87,7 +81,6 @@ export function buildInventory(options: BuildInventoryOptions): DeviceInventory 
     buckets,
     ignoredDeviceIds,
     restAlarmFeedAvailable = true,
-    observeDataStale = false,
   } = options
 
   const kinds = collectDeviceKinds(observe, buckets)
@@ -105,7 +98,6 @@ export function buildInventory(options: BuildInventoryOptions): DeviceInventory 
       deviceId,
       roomNames,
       restAlarmFeedAvailable,
-      observeDataStale,
     }
     let device: NestDevice
 
@@ -154,7 +146,6 @@ interface BuildContext {
   deviceId: string
   roomNames: RoomNames
   restAlarmFeedAvailable: boolean
-  observeDataStale: boolean
 }
 
 /**
@@ -342,10 +333,9 @@ function buildThermostat(
     buckets.device?.[deviceId] as DeviceBucket | undefined,
   )
 
-  const state = mergeThermostatState(fromObserve, fromRest)
   return {
     identity: buildIdentity(context, 'thermostat') as DeviceIdentity & { kind: 'thermostat' },
-    state: context.observeDataStale ? { ...state, isObserveStale: true } : state,
+    state: mergeThermostatState(fromObserve, fromRest),
   }
 }
 
@@ -368,16 +358,15 @@ function buildTemperatureSensor(
 ): Extract<NestDevice, { identity: { kind: 'temperature_sensor' } }> {
   const { observe, buckets, deviceId } = context
 
-  const state = readTemperatureSensorState({
-    state: observe,
-    resourceId: toResourceId(deviceId),
-    kryptonite: buckets.kryptonite?.[deviceId] as KryptoniteBucket | undefined,
-  })
   return {
     identity: buildIdentity(context, 'temperature_sensor') as DeviceIdentity & {
       kind: 'temperature_sensor'
     },
-    state: context.observeDataStale ? { ...state, isObserveStale: true } : state,
+    state: readTemperatureSensorState({
+      state: observe,
+      resourceId: toResourceId(deviceId),
+      kryptonite: buckets.kryptonite?.[deviceId] as KryptoniteBucket | undefined,
+    }),
   }
 }
 

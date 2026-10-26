@@ -77,11 +77,6 @@ export interface ThermostatState {
    * Celsius. `TemperatureDisplayUnits` follows this field.
    */
   readonly displayUnit?: 'C' | 'F'
-  /**
-   * True when Observe has produced no decoded device trait for 10 minutes.
-   * Last values stay published.
-   */
-  readonly isObserveStale?: boolean
 }
 
 /** Nest's three-level alarm scale, shared by the smoke and CO sensors. */
@@ -147,8 +142,6 @@ export interface TemperatureSensorState {
   /** Percent, when Nest reports one. */
   readonly batteryLevel?: number
   readonly isBatteryLow?: boolean
-  /** See {@link ThermostatState.isObserveStale}. */
-  readonly isObserveStale?: boolean
 }
 
 /** One device, discriminated by {@link DeviceKind}. */

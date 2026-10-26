@@ -40,7 +40,7 @@ export class TemperatureSensorAccessory extends NestAccessory<TemperatureSensorS
     // characteristic is 0, and 0 is inside the legal range, so the fault is
     // what tells Home the number is not a reading. A later real 0 °C clears it.
     this.binder.bind(this.#service, Characteristic.StatusFault, () => (
-      this.state.isObserveStale === true || this.state.temperatureC === undefined || this.isUnreported
+      this.state.temperatureC === undefined || this.isUnreported
         ? Characteristic.StatusFault.GENERAL_FAULT
         : Characteristic.StatusFault.NO_FAULT
     ))

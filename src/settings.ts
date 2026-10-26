@@ -241,16 +241,6 @@ export const OBSERVE_CONNECT_TIMEOUT_MS = 30_000
  */
 export const OBSERVE_IDLE_TIMEOUT_MS = 10 * 60_000
 
-/**
- * How long Observe may go without a decoded device trait before temperature
- * sensors are marked StatusFault.
- *
- * Thermostats do not get StatusFault in this HAP build. They keep their last
- * values, and the transport logs the gap. Catalog frames and a socket that
- * stays open do not count.
- */
-export const OBSERVE_DEVICE_DATA_STALE_MS = OBSERVE_IDLE_TIMEOUT_MS
-
 /** Delay before the first reconnect attempt after a transport drops. */
 export const RECONNECT_BASE_MS = 5_000
 
