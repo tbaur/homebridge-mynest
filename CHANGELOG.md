@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.1.0](https://github.com/tbaur/homebridge-mynest/compare/v2.0.2...v2.1.0) (2026-10-26)
+
+
+### Features
+
+* page through homebridge-pagerduty for smoke, CO and a stopped plugin ([#67](https://github.com/tbaur/homebridge-mynest/issues/67)) ([95d7afb](https://github.com/tbaur/homebridge-mynest/commit/95d7afbc719a68be874382ca7476735c398726f6))
+
 ## [2.0.2](https://github.com/tbaur/homebridge-mynest/compare/v2.0.1...v2.0.2) (2026-10-05)
 
 
