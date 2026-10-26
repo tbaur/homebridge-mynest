@@ -33,7 +33,8 @@ export declare function authenticatedHeaders(session: NestSession): Record<strin
 /**
  * Exchange the configured access token for a usable session.
  *
- * @throws {AuthenticationError} When Nest rejects the token.
+ * @throws {AuthenticationError} When Nest rejects the token with any 4xx
+ *   other than a timeout or rate limit.
  * @throws {SessionShapeError} When the response is accepted but omits a field
  *   the plugin needs, or names a transport host off Nest infrastructure. Either
  *   means Nest changed the contract; a new token would not help.

@@ -17,7 +17,7 @@
  * covering their entire Google account rather than just their Nest home.
  */
 
-import { SessionShapeError } from '../errors'
+import { AuthenticationError, SessionShapeError, isSessionTokenRejection } from '../errors'
 import {
   SESSION_TIMEOUT_MS,
   USER_AGENT,
@@ -72,27 +72,44 @@ export function authenticatedHeaders(session: NestSession): Record<string, strin
 }
 
 /**
+ * Fetch `GET /session`, reporting any client error as a rejected token.
+ *
+ * @throws {AuthenticationError} On any 4xx except a timeout or rate limit.
+ */
+async function requestSession(options: OpenSessionOptions): Promise<SessionResponse> {
+  try {
+    return await requestJson<SessionResponse>(options.endpoints.sessionUrl, {
+      method: 'GET',
+      headers: sessionHeaders(options.accessToken),
+      timeoutMs: SESSION_TIMEOUT_MS,
+      fetchImpl: options.fetchImpl,
+      signal: options.signal,
+    })
+  } catch (error) {
+    if (!isSessionTokenRejection(error) || error instanceof AuthenticationError) {
+      throw error
+    }
+    throw new AuthenticationError(error.message, { cause: error, status: error.httpStatus })
+  }
+}
+
+/**
  * Exchange the configured access token for a usable session.
  *
- * @throws {AuthenticationError} When Nest rejects the token.
+ * @throws {AuthenticationError} When Nest rejects the token with any 4xx
+ *   other than a timeout or rate limit.
  * @throws {SessionShapeError} When the response is accepted but omits a field
  *   the plugin needs, or names a transport host off Nest infrastructure. Either
  *   means Nest changed the contract; a new token would not help.
  */
 export async function openSession(options: OpenSessionOptions): Promise<NestSession> {
-  const { accessToken, endpoints, log } = options
+  const { accessToken, log } = options
 
   if (log.debugEnabled) {
     log.debug(`Opening a Nest session with the configured token ${previewSecret(accessToken)}`)
   }
 
-  const body = await requestJson<SessionResponse>(endpoints.sessionUrl, {
-    method: 'GET',
-    headers: sessionHeaders(accessToken),
-    timeoutMs: SESSION_TIMEOUT_MS,
-    fetchImpl: options.fetchImpl,
-    signal: options.signal,
-  })
+  const body = await requestSession(options)
 
   const token = typeof body.access_token === 'string' ? body.access_token : undefined
   // Only a scalar. `String()` accepts anything, so an object would become

@@ -8,7 +8,12 @@
  */
 
 import { authenticatedHeaders, openSession } from '../../../src/api/session'
-import { SessionShapeError } from '../../../src/errors'
+import {
+  AuthenticationError,
+  NestError,
+  SessionShapeError,
+  isFatalTransportError,
+} from '../../../src/errors'
 import { resolveEndpoints } from '../../../src/settings'
 import { createRecordingLogger } from '../../helpers/logger'
 import { jsonFetch } from '../../helpers/fetch'
@@ -135,6 +140,35 @@ describe('openSession', () => {
     }).promise
 
     expect(session.transportUrl).toContain('nestlabs.com')
+  })
+
+  it.each([400, 401, 403, 404, 499])('treats HTTP %i from the session endpoint as a rejected token', async (status) => {
+    const { fetch } = jsonFetch(
+      { error: 'invalid_request', error_description: 'missing user credentials' },
+      { status },
+    )
+    const error = await openSession({
+      accessToken: 'config-token',
+      endpoints,
+      log: createRecordingLogger(),
+      fetchImpl: fetch,
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(AuthenticationError)
+    expect((error as AuthenticationError).httpStatus).toBe(status)
+  })
+
+  it.each([408, 429, 503])('does not stop the plugin on HTTP %i', async (status) => {
+    const { fetch } = jsonFetch({}, { status })
+    const error = await openSession({
+      accessToken: 'config-token',
+      endpoints,
+      log: createRecordingLogger(),
+      fetchImpl: fetch,
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(NestError)
+    expect(isFatalTransportError(error)).toBe(false)
   })
 
   it('never writes a token to the log', async () => {
