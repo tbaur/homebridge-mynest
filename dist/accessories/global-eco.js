@@ -131,7 +131,7 @@ class GlobalEcoAccessory {
             this.#log.warn(`${settings_1.GLOBAL_ECO_DISPLAY_NAME}: Eco update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
             setImmediate(this.#refreshSwitch);
             const { HAPStatus, HapStatusError } = this.#platform.api.hap;
-            throw new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
+            throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
         }
         if (!sent) {
             if (!this.#platform.resolvedConfig.allowThermostatControl) {

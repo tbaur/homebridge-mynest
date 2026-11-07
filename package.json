@@ -36,7 +36,9 @@
     "js-yaml": "^4.3.1",
     "@homebridge/hap-nodejs": "$@homebridge/hap-nodejs",
     "deepmerge": "4.1.2",
-    "handlebars": "^4.7.10"
+    "handlebars": "^4.7.10",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   },
   "devDependencies": {
     "@homebridge/hap-nodejs": "^2.0.4",
@@ -72,7 +74,7 @@
     "prepublishOnly": "npm run clean && npm run build",
     "verify": "npm run build && node scripts/verify.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "NODE_ENV=test NODE_OPTIONS=--require=./tests/preload-nock.js jest --coverage",
+    "test": "NODE_ENV=test NODE_OPTIONS='--require=./tests/preload-nock.js --experimental-vm-modules' jest --coverage",
     "test:watch": "NODE_ENV=test NODE_OPTIONS=--require=./tests/preload-nock.js jest --watch",
     "test:unit": "NODE_ENV=test NODE_OPTIONS=--require=./tests/preload-nock.js jest --coverage --testPathPatterns=tests/unit",
     "test:integration": "NODE_ENV=test NODE_OPTIONS=--require=./tests/preload-nock.js jest --testPathPatterns=tests/integration --collectCoverage=false",

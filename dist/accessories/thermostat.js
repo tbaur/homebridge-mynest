@@ -216,7 +216,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
             // stack trace in the Homebridge log through HAP's unhandled-error path,
             // and Nest's message is already logged above without the token in it.
             const { HAPStatus, HapStatusError } = this.platform.api.hap;
-            return new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
+            return new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
         }
     }
     update(device) {
@@ -311,7 +311,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
             this.log.warn(`${this.identity.name}: Eco update failed: ${(0, sanitizers_1.sanitizeError)(error)}`);
             this.#revertHomeKitValues();
             const { HAPStatus, HapStatusError } = this.platform.api.hap;
-            throw new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
+            throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
         }
     }
     /**
