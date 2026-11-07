@@ -18,7 +18,20 @@ module.exports = {
       // (see tsconfig.test.json) so type errors are caught consistently.
       tsconfig: 'tsconfig.test.json',
     }],
+    // hap-nodejs 2.3+ ships ESM only. Jest can load ESM from CommonJS tests
+    // natively only on Node 24.9+, so compile it to CommonJS for Node 22.
+    '/node_modules/@homebridge/hap-nodejs/.+\\.js$': ['babel-jest', {
+      babelrc: false,
+      configFile: false,
+      plugins: [
+        'babel-plugin-transform-import-meta',
+        '@babel/plugin-transform-export-namespace-from',
+        '@babel/plugin-transform-modules-commonjs',
+      ],
+    }],
   },
+
+  transformIgnorePatterns: ['/node_modules/(?!@homebridge/hap-nodejs/)'],
 
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
 

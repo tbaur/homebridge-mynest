@@ -36,14 +36,20 @@
     "js-yaml": "^4.3.1",
     "@homebridge/hap-nodejs": "$@homebridge/hap-nodejs",
     "deepmerge": "4.1.2",
-    "handlebars": "^4.7.10"
+    "handlebars": "^4.7.10",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.13",
+    "@babel/plugin-transform-export-namespace-from": "^7.29.7",
+    "@babel/plugin-transform-modules-commonjs": "^7.29.7",
     "@homebridge/hap-nodejs": "^2.0.4",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.2.0",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
+    "babel-plugin-transform-import-meta": "^2.3.3",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
     "homebridge": "^2.1.0",
