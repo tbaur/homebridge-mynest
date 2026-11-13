@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.13",
-    "@babel/plugin-transform-export-namespace-from": "^7.29.7",
+    "@babel/plugin-transform-export-namespace-from": "^8.1.0",
     "@babel/plugin-transform-modules-commonjs": "^7.29.7",
     "@homebridge/hap-nodejs": "^2.0.4",
     "@types/jest": "^30.0.0",
