@@ -41,7 +41,7 @@
     "minimatch": "^11.0.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.13",
+    "@babel/core": "^8.1.0",
     "@babel/plugin-transform-export-namespace-from": "^7.29.7",
     "@babel/plugin-transform-modules-commonjs": "^7.29.7",
     "@homebridge/hap-nodejs": "^2.0.4",
