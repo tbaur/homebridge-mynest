@@ -17,14 +17,31 @@ updates:
     labels:
       - "dependencies"
     groups:
-      # Batch only low-risk patch/minor *development* updates so they stay
-      # auto-mergeable. Production (`protobufjs`) and major bumps each arrive
-      # as their own PR for deliberate review.
+      # Batch only low-risk patch/minor development updates. Production
+      # patches still arrive alone. Majors that fail CI are ignored below.
       dev-dependencies:
         dependency-type: "development"
         update-types:
           - "minor"
           - "patch"
+    # These majors fail CI. See DEVELOPMENT.md.
+    # Babel 8 does not install: Jest's preset still peers Babel 7, and a
+    # one-package bump conflicts with the packages left on 7.
+    # TypeScript 7 is outside the range ts-jest 29 accepts.
+    # protobufjs 8 throws on the framed Observe buffer this plugin decodes.
+    ignore:
+      - dependency-name: "@babel/core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@babel/plugin-transform-export-namespace-from"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@babel/plugin-transform-modules-commonjs"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "babel-plugin-transform-import-meta"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "protobufjs"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
