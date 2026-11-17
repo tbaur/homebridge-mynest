@@ -14,10 +14,11 @@
  * verdict that nobody has been seen for roughly ten minutes, and omitted for
  * a battery-powered Protect. Unknown power does not hide a boolean `auto_away`.
  *
- * So this accessory publishes occupancy only where that verdict exists, and
- * says why in the log when it does not. Presenting a ten-minute presence
- * signal as motion would be the easy thing to do and would make every
- * automation built on it wrong.
+ * So this accessory publishes occupancy only where that verdict exists. It
+ * logs when that sensor is added or removed, and does not repeat the reason
+ * on later startups once the service is already gone. Presenting a
+ * ten-minute presence signal as motion would be the easy thing to do and
+ * would make every automation built on it wrong.
  *
  * Smoke and CO come from REST `topaz` only. Observe streams safety traits, but
  * no public schema maps them and every captured sample reads all-clear, so
@@ -39,7 +40,7 @@ class ProtectAccessory extends base_1.NestAccessory {
     #coService = null;
     #didLogMissingAlarms = false;
     #didLogAlarmFeedStale = false;
-    /** Last occupancy-omission sentence, so a repeating reason logs once. */
+    /** Last stale-occupancy sentence, so a repeating outage logs once per process. */
     #occupancyOmission = null;
     /** @internal Clears the process-wide occupancy hint flag (tests only). */
     static resetOccupancyHintForTests() {
@@ -160,30 +161,48 @@ class ProtectAccessory extends base_1.NestAccessory {
         this.removeService(this.platform.Service.Battery);
     }
     /**
+     * Whether this Protect should publish an occupancy service right now.
+     *
+     * The setting, a real Nest verdict, and a last verdict held through a REST
+     * outage all have to agree. A disabled setting leaves the service off even
+     * when Nest still has `auto_away`.
+     */
+    #isOccupancyPublished() {
+        return this.config.exposeProtectOccupancy
+            && this.state.isOccupied !== undefined
+            && (this.state.occupancySource === 'auto_away'
+                || this.state.occupancySource === 'unavailable_rest_stale');
+    }
+    /**
      * Publish occupancy only where Nest actually reports it.
      *
      * A device with no verdict gets no sensor at all rather than one stuck at
      * "not occupied", which would look like a working sensor reporting an empty
-     * house forever.
+     * house forever. The log records the add or the removal. A later startup
+     * that finds the service already in that state stays quiet.
      */
     #bindOccupancy() {
         const { Characteristic, Service: HapService } = this.platform;
+        const existing = this.accessory.getService(HapService.OccupancySensor);
         // Keep the service through REST outages when we still have a last verdict
         // (`unavailable_rest_stale` + isOccupied) so automations are not torn down.
-        const isAvailable = this.config.exposeProtectOccupancy
-            && this.state.isOccupied !== undefined
-            && (this.state.occupancySource === 'auto_away'
-                || this.state.occupancySource === 'unavailable_rest_stale');
-        if (!isAvailable) {
-            this.removeService(HapService.OccupancySensor);
-            const reason = this.config.exposeProtectOccupancy
-                ? (0, protect_state_1.describeOccupancySource)(this.state.occupancySource)
-                : 'turned off in settings';
-            if (this.#occupancyOmission !== reason) {
-                this.#occupancyOmission = reason;
-                this.log.info(`${this.identity.name}: no occupancy sensor (${reason})`);
+        if (!this.#isOccupancyPublished()) {
+            if (existing) {
+                this.removeService(HapService.OccupancySensor);
+                const reason = this.config.exposeProtectOccupancy
+                    ? (0, protect_state_1.describeOccupancySource)(this.state.occupancySource)
+                    : 'turned off in settings';
+                this.log.info(`${this.identity.name}: removed occupancy sensor (${reason})`);
             }
+            this.#occupancyOmission = null;
             return;
+        }
+        if (!existing) {
+            this.log.info(`${this.identity.name}: added occupancy sensor`);
+            if (!_a.#didLogOccupancyHint) {
+                _a.#didLogOccupancyHint = true;
+                this.log.info(`Protect occupancy uses Nest auto-away (about ${settings_1.PROTECT_OCCUPANCY_HOLD_OFF_SEC / 60} min), not motion`);
+            }
         }
         if (this.state.occupancySource === 'unavailable_rest_stale') {
             const reason = (0, protect_state_1.describeOccupancySource)(this.state.occupancySource);
@@ -203,10 +222,6 @@ class ProtectAccessory extends base_1.NestAccessory {
                 ? Characteristic.OccupancyDetected.OCCUPANCY_DETECTED
                 : Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED);
         this.#bindLiveness(service);
-        if (!_a.#didLogOccupancyHint) {
-            _a.#didLogOccupancyHint = true;
-            this.log.info(`Protect occupancy uses Nest auto-away (about ${settings_1.PROTECT_OCCUPANCY_HOLD_OFF_SEC / 60} min), not motion`);
-        }
     }
     /**
      * Publish the Protect's own temperature and humidity readings.
@@ -278,7 +293,7 @@ class ProtectAccessory extends base_1.NestAccessory {
         if (this.state.isBatteryLow) {
             parts.push('Battery low');
         }
-        if (this.state.isOccupied !== undefined) {
+        if (this.#isOccupancyPublished() && this.state.isOccupied !== undefined) {
             parts.push(this.state.isOccupied ? 'Occupied' : 'Unoccupied');
         }
         return parts.join(', ');

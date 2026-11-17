@@ -13,10 +13,11 @@
  * verdict that nobody has been seen for roughly ten minutes, and omitted for
  * a battery-powered Protect. Unknown power does not hide a boolean `auto_away`.
  *
- * So this accessory publishes occupancy only where that verdict exists, and
- * says why in the log when it does not. Presenting a ten-minute presence
- * signal as motion would be the easy thing to do and would make every
- * automation built on it wrong.
+ * So this accessory publishes occupancy only where that verdict exists. It
+ * logs when that sensor is added or removed, and does not repeat the reason
+ * on later startups once the service is already gone. Presenting a
+ * ten-minute presence signal as motion would be the easy thing to do and
+ * would make every automation built on it wrong.
  *
  * Smoke and CO come from REST `topaz` only. Observe streams safety traits, but
  * no public schema maps them and every captured sample reads all-clear, so
