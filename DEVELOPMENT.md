@@ -39,6 +39,9 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 - **HB2 update path.** Store getters; push with `updateValue(reader())` — never `getValue()`, never `updateValue(characteristic.value)`.
 - **Dependency-light.** Runtime dependency is `protobufjs` only; `fetch` and `http2` are Node built-ins.
 - **Dev-dependency hygiene.** An `overrides` entry pins transitive `js-yaml` to `^4.3.1` (GHSA-h67p-54hq-rp68 on 3.x via Jest coverage, and GHSA-5p4m-2wfm-xmqj on 4.x below 4.3.1). js-yaml 3 pulls `sprintf-js`, which has no patched release for CVE-2026-97058. It is dev-only and never shipped.
+- **Babel stays on 7.** Jest's `babel-preset-current-node-syntax` 1.2.0 still depends on syntax plugins that peer `@babel/core` 7 only, so Babel 8 fails `npm ci`. Take it when that preset publishes plugins that accept Babel 8.
+- **TypeScript stays on 6.0.3.** `ts-jest` 29 accepts `typescript` below 7. TypeScript 7.0 is out, and 7.1 is still a beta.
+- **protobufjs stays on 7.6.6.** 8.8.1 throws `illegal tag: field number 0` on the framed Observe buffer this plugin decodes. 7.6.6 accepts that buffer.
 - **Secrets never reach the log.** Tokens, Basic headers, and user ids are redacted.
 
 ## Local workflow
