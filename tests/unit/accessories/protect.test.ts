@@ -24,9 +24,16 @@ import {
 import { createRecordingLogger } from '../../helpers/logger'
 import type { ResolvedConfig } from '../../../src/types/config'
 
-function build(state: ProtectState, config: Partial<ResolvedConfig> = {}) {
+function build(
+  state: ProtectState,
+  config: Partial<ResolvedConfig> = {},
+  options: { seedOccupancy?: boolean } = {},
+) {
   const platform = createPlatformStub(config)
   const accessory = createAccessory('Zone One Protect')
+  if (options.seedOccupancy) {
+    accessory.addService(Service.OccupancySensor)
+  }
   const log = createRecordingLogger()
 
   const device: DeviceOfKind<'protect'> = {
@@ -45,7 +52,7 @@ function build(state: ProtectState, config: Partial<ResolvedConfig> = {}) {
   const read = (serviceType: unknown, type: unknown): unknown =>
     readValue(accessory, serviceType, type)
 
-  return { handler, accessory, log, read, device }
+  return { handler, accessory, log, read, device, platform }
 }
 
 const clear: ProtectState = {
@@ -291,13 +298,14 @@ describe('ProtectAccessory', () => {
   })
 
   it('grows an occupancy sensor when REST auto_away arrives later', () => {
-    const { handler, accessory, device } = build({
+    const { handler, accessory, device, log } = build({
       ...clear,
       isOccupied: undefined,
       occupancySource: 'unavailable_observe_only',
     })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
 
     handler.update({
       ...device,
@@ -305,6 +313,7 @@ describe('ProtectAccessory', () => {
     })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(true)
+    expect(log.infos).toContain('Zone One Protect: added occupancy sensor')
   })
 
   it('reports an offline clear Protect as inactive and faulted', () => {
@@ -379,11 +388,22 @@ describe('ProtectAccessory', () => {
     const hints = log.infos.filter((line) => line.includes('Protect occupancy'))
     expect(hints).toHaveLength(1)
     expect(hints[0]).toMatch(/auto-away \(about 10 min\), not motion/)
+    expect(log.infos.filter((line) => line.includes('added occupancy sensor'))).toHaveLength(2)
+  })
+
+  it('does not repeat the occupancy hint when the sensor is already published', () => {
+    const { platform, accessory, device } = build(clear)
+    ProtectAccessory.resetOccupancyHintForTests()
+    const log = createRecordingLogger()
+
+    new ProtectAccessory(platform, accessory, device, log)
+
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
   })
 
   it('publishes no occupancy sensor for a battery-powered Protect', () => {
     // A sensor stuck at "not occupied" looks like a working sensor reporting an
-    // empty house forever.
+    // empty house forever. Nothing was removed, so there is no log line.
     const { accessory, log } = build({
       ...clear,
       isOccupied: undefined,
@@ -391,7 +411,37 @@ describe('ProtectAccessory', () => {
     })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
-    expect(log.infos.join('\n')).toContain('battery powered')
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
+  })
+
+  it('logs when a published occupancy sensor is removed for a battery-powered Protect', () => {
+    const { handler, accessory, device, log } = build(clear)
+
+    log.infos.length = 0
+    handler.update({
+      ...device,
+      state: {
+        ...clear,
+        isOccupied: undefined,
+        occupancySource: 'unsupported_battery_powered',
+      },
+    })
+
+    expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
+    expect(log.infos).toContain(
+      'Zone One Protect: removed occupancy sensor (battery powered)',
+    )
+
+    log.infos.length = 0
+    handler.update({
+      ...device,
+      state: {
+        ...clear,
+        isOccupied: undefined,
+        occupancySource: 'unsupported_battery_powered',
+      },
+    })
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
   })
 
   it('publishes no occupancy sensor for a Protect missing from REST', () => {
@@ -402,14 +452,40 @@ describe('ProtectAccessory', () => {
     })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
-    expect(log.infos.join('\n')).toContain('REST')
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
   })
 
-  it('respects the user turning occupancy off', () => {
-    const { accessory, log } = build(clear, { exposeProtectOccupancy: false })
+  it('leaves occupancy off without a startup log when the sensor was never published', () => {
+    const { accessory, handler, device, log } = build(clear, { exposeProtectOccupancy: false })
 
     expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
-    expect(log.infos.join('\n')).toContain('turned off in settings')
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
+
+    handler.update(device)
+    expect(log.infos).toContain('Zone One Protect: Smoke ok, CO ok')
+  })
+
+  it('removes a cached occupancy sensor once when the setting is off', () => {
+    const { accessory, handler, device, log, platform } = build(
+      clear,
+      { exposeProtectOccupancy: false },
+      { seedOccupancy: true },
+    )
+
+    expect(hasService(accessory, Service.OccupancySensor)).toBe(false)
+    expect(log.infos).toContain(
+      'Zone One Protect: removed occupancy sensor (turned off in settings)',
+    )
+
+    log.infos.length = 0
+    handler.update(device)
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
+    expect(log.infos).toContain('Zone One Protect: Smoke ok, CO ok')
+
+    log.infos.length = 0
+    ProtectAccessory.resetOccupancyHintForTests()
+    new ProtectAccessory(platform, accessory, device, log)
+    expect(log.infos.filter((line) => line.includes('occupancy'))).toEqual([])
   })
 
   it('publishes temperature and humidity when asked and available', () => {
@@ -460,7 +536,7 @@ describe('ProtectAccessory', () => {
 
     // First summary is announced, so an operator can see the device reporting.
     handler.update({ ...device, state: clear })
-    expect(log.infos.join('\n')).toContain('Smoke ok')
+    expect(log.infos.join('\n')).toContain('Smoke ok, CO ok, Occupied')
 
     log.infos.length = 0
     handler.update({ ...device, state: clear })

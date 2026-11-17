@@ -109,7 +109,7 @@ The [detailed documentation](docs/README-DETAILED.md#full-configuration-referenc
 2. **Thermostat missing:** modern thermostats are Observe-only on some accounts. Enable `debug` for stream detail.
 3. **Eco / setpoint changes snap back:** enable **Allow thermostat control**.
 4. **Protect smoke/CO shows a fault:** REST has not supplied that sensor's number, or the REST feed is stale. The tile stays. With `debug` on, a `REST topaz` line shows the raw `smoke_status` and `co_status` Nest sent.
-5. **No occupancy, or a room that stays Occupied:** occupancy is Nest's `auto_away` inverted (false means Occupied), not motion. It is omitted for a battery Protect, when `auto_away` is missing, or when `exposeProtectOccupancy` is off. A stuck Occupied is that boolean staying false. The Protect's summary line, such as `Zone One Protect: Smoke ok, CO ok, Occupied`, shows the change when it happens.
+5. **No occupancy, or a room that stays Occupied:** occupancy is Nest's `auto_away` inverted (false means Occupied), not motion. It is omitted for a battery Protect, when `auto_away` is missing, or when `exposeProtectOccupancy` is off. With occupancy off, the sensor is not on the Protect and the summary does not say Occupied. A stuck Occupied, while the sensor is published, is that boolean staying false. The Protect's summary line shows the change when it happens, such as `Zone One Protect: Smoke ok, CO ok, Occupied`.
 
 The [full troubleshooting list](docs/README-DETAILED.md#troubleshooting) covers more cases, including a stuck Home app tile.
 
