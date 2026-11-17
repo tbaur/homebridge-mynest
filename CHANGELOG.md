@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [2.1.4](https://github.com/tbaur/homebridge-mynest/compare/v2.1.3...v2.1.4) (2026-11-17)
+
+
+### Bug Fixes
+
+* leave Protect occupancy off when the setting is off ([#86](https://github.com/tbaur/homebridge-mynest/issues/86)) ([740cc3c](https://github.com/tbaur/homebridge-mynest/commit/740cc3cb25340edc73a8768536f0442f7c1f0879))
+
 ## [2.1.3](https://github.com/tbaur/homebridge-mynest/compare/v2.1.2...v2.1.3) (2026-10-26)
 
 
