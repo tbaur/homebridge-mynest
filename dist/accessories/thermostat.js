@@ -88,7 +88,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
                 await this.#write({ targetTemperatureC: value });
             },
         });
-        this.#bindSetpoint(Characteristic.HeatingThresholdTemperature, () => this.state.targetTemperatureLowC, {
+        this.#bindSetpoint(Characteristic.HeatingThresholdTemperature, () => this.#writeBaseState().targetTemperatureLowC, {
             write: async (value) => {
                 if (typeof value !== 'number') {
                     return;
@@ -96,7 +96,7 @@ class ThermostatAccessory extends base_1.NestAccessory {
                 await this.#write({ targetTemperatureLowC: value });
             },
         });
-        this.#bindSetpoint(Characteristic.CoolingThresholdTemperature, () => this.state.targetTemperatureHighC, {
+        this.#bindSetpoint(Characteristic.CoolingThresholdTemperature, () => this.#writeBaseState().targetTemperatureHighC, {
             write: async (value) => {
                 if (typeof value !== 'number') {
                     return;
@@ -225,7 +225,12 @@ class ThermostatAccessory extends base_1.NestAccessory {
         // echo can be a change made in the Nest app, and it must not be masked.
         this.#forgetSettledWrite();
     }
-    /** Nest state with the last accepted, not yet echoed write applied. */
+    /**
+     * Nest state with the last accepted, not yet echoed write applied.
+     *
+     * HomeKit is shown this too. Nest can echo an earlier write after a later
+     * one was accepted, and showing that echo bounces the Home app slider.
+     */
     #writeBaseState() {
         this.#forgetSettledWrite();
         const unconfirmed = this.#unconfirmedWrite;
@@ -451,7 +456,8 @@ class ThermostatAccessory extends base_1.NestAccessory {
             cool: Characteristic.TargetHeatingCoolingState.COOL,
             range: Characteristic.TargetHeatingCoolingState.AUTO,
         };
-        return this.state.mode === undefined ? undefined : byMode[this.state.mode];
+        const { mode } = this.#writeBaseState();
+        return mode === undefined ? undefined : byMode[mode];
     }
     #modeFromHomeKit(value) {
         const { Characteristic } = this.platform;
@@ -480,31 +486,33 @@ class ThermostatAccessory extends base_1.NestAccessory {
      * required characteristic still holds something meaningful.
      */
     #targetTemperature() {
-        if (this.state.mode === 'range') {
-            return midpoint(this.state.targetTemperatureLowC, this.state.targetTemperatureHighC);
+        const state = this.#writeBaseState();
+        if (state.mode === 'range') {
+            return midpoint(state.targetTemperatureLowC, state.targetTemperatureHighC);
         }
-        return this.state.targetTemperatureC;
+        return state.targetTemperatureC;
     }
     describeState() {
         const parts = [];
         if (this.state.currentTemperatureC !== undefined) {
             parts.push(`${this.state.currentTemperatureC.toFixed(1)}\u00B0C`);
         }
-        if (this.state.mode !== undefined) {
-            parts.push(`Mode ${this.state.mode}`);
+        const target = this.#writeBaseState();
+        if (target.mode !== undefined) {
+            parts.push(`Mode ${target.mode}`);
         }
         if (this.state.activity !== undefined && this.state.activity !== 'idle') {
             const activity = this.state.activity;
             parts.push(activity.charAt(0).toUpperCase() + activity.slice(1));
         }
-        if (this.state.mode === 'range') {
-            const { targetTemperatureLowC: low, targetTemperatureHighC: high } = this.state;
+        if (target.mode === 'range') {
+            const { targetTemperatureLowC: low, targetTemperatureHighC: high } = target;
             if (low !== undefined && high !== undefined) {
                 parts.push(`Target ${low.toFixed(1)}\u2013${high.toFixed(1)}\u00B0C`);
             }
         }
-        else if (this.state.targetTemperatureC !== undefined) {
-            parts.push(`Target ${this.state.targetTemperatureC.toFixed(1)}\u00B0C`);
+        else if (target.targetTemperatureC !== undefined) {
+            parts.push(`Target ${target.targetTemperatureC.toFixed(1)}\u00B0C`);
         }
         if (this.state.isEcoActive) {
             parts.push('Eco');
