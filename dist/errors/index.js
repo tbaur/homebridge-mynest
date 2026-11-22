@@ -57,9 +57,12 @@ class AuthenticationError extends NestError {
     code = 'AUTH_ERROR';
     isRetryable = false;
     httpStatus;
+    /** A complete operator instruction that replaces the generic sign-in message. */
+    operatorMessage;
     constructor(message = 'Google rejected the sign-in. Copy a new Issue Token URL and Cookies as described in docs/AUTH.md.', options) {
         super(message, options?.cause ? { cause: options.cause } : undefined);
         this.httpStatus = options?.status ?? 401;
+        this.operatorMessage = options?.operatorMessage;
     }
 }
 exports.AuthenticationError = AuthenticationError;

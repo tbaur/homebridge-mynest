@@ -206,6 +206,21 @@ describe('GoogleAuth', () => {
     expect(store.saved).toEqual([expected])
   })
 
+  it('keeps the configured cookies when a failed answer tries to update them', async () => {
+    const { fetch, calls } = signInFetch([
+      { status: 403, body: {}, setCookies: ['SID=cleared; Path=/'] },
+      GOOGLE_OK,
+    ])
+    const store = memoryStore()
+    const { auth } = createAuth(fetch, store)
+
+    await expect(auth.mintToken()).rejects.toBeInstanceOf(AuthenticationError)
+    await auth.mintToken()
+
+    expect(store.saved).toHaveLength(0)
+    expect(calls[1]?.headers.cookie).toBe(TEST_COOKIES)
+  })
+
   it('does not save when Google sends back the same cookies', async () => {
     const { fetch } = signInFetch([{ ...GOOGLE_OK, setCookies: ['SIDCC=test-sidcc; Path=/'] }])
     const store = memoryStore()

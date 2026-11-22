@@ -32,7 +32,7 @@ export const CO_SUMMARY = 'A Nest Protect detects carbon monoxide.'
 export const ALARM_FEED_STALE_SUMMARY =
   'Nest Protect smoke and CO readings are stale. HomeKit may not show an alarm.'
 export const SIGN_IN_REJECTED_SUMMARY =
-  'Google sign-in was rejected. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
+  'Google sign-in was rejected, or the account is not an admin of the home. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
 export const SESSION_FORMAT_SUMMARY =
   'Nest changed its session format. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
 export const CONFIG_INVALID_SUMMARY =

@@ -424,7 +424,7 @@ class MyNestPlatform {
         this.#hasFatal = true;
         const isSessionShape = error instanceof errors_1.SessionShapeError;
         const message = error instanceof errors_1.AuthenticationError
-            ? signInRejectedMessage(error.httpStatus)
+            ? error.operatorMessage ?? signInRejectedMessage(error.httpStatus)
             : error.message;
         this.#log.error(message);
         this.#log.debug(`Stopped by: ${(0, sanitizers_1.sanitizeError)(error)}`);

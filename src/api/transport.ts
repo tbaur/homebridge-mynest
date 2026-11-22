@@ -201,6 +201,7 @@ export class NestTransport {
   #sessionRefresh: Promise<NestSession> | null = null
   /** Refusals of a sign-in itself, which are final rather than a reason to renew. */
   readonly #signInFailures = new WeakSet<AuthenticationError>()
+  readonly #requestSessions = new WeakMap<object, NestSession>()
   #isStopped = false
   /** Consecutive failures per transport, for log escalation. */
   #observeFailureStreak = 0
@@ -484,7 +485,7 @@ export class NestTransport {
       this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true })
       // The next write or loop cycle signs in again instead of reusing a
       // session Nest has refused.
-      if (error instanceof AuthenticationError && this.#session === session) {
+      if (error instanceof AuthenticationError && this.#session === session && !this.#isSessionYoung(session)) {
         this.#session = null
       }
       // Accessory handlers log once and revert HomeKit — do not warn here too.
@@ -588,29 +589,49 @@ export class NestTransport {
     return this.#sessionRefresh
   }
 
-  /** Whether a session's token is within the renewal margin of its expiry. */
+  /**
+   * Whether a session's token is within the renewal margin of its expiry.
+   *
+   * The margin is capped at half the token's lifetime, so a token issued with
+   * less than the full margin left is still used before it is renewed.
+   */
   #isSessionStale(session: NestSession): boolean {
-    return Date.now() >= session.expiresAt - SESSION_EXPIRY_MARGIN_MS
+    const margin = Math.min(SESSION_EXPIRY_MARGIN_MS, (session.expiresAt - session.openedAt) / 2)
+    return Date.now() >= session.expiresAt - margin
+  }
+
+  /** Remember which session a failed request was sent with. */
+  #noteRequestSession(error: unknown, session: NestSession | null): void {
+    if (session !== null && typeof error === 'object' && error !== null) {
+      this.#requestSessions.set(error, session)
+    }
+  }
+
+  #isSessionYoung(session: NestSession): boolean {
+    return Date.now() - session.openedAt < SESSION_REJECT_GRACE_MS
   }
 
   /**
-   * Whether Nest refusing the current session should be answered by signing
-   * in again rather than stopping.
+   * Whether Nest refusing a session should be answered by signing in again
+   * rather than stopping.
    *
-   * Only a session that has been in use for a while qualifies; its token may
-   * have lapsed early. Dropping it makes the next cycle sign in, and if that
-   * fresh session is refused too, the refusal is final.
+   * A refusal of a session that has since been replaced says nothing about the
+   * current one. Otherwise only a session that has been in use for a while
+   * qualifies; its token may have lapsed early. Dropping it makes the next
+   * cycle sign in, and if that fresh session is refused too, the refusal is
+   * final.
+   *
+   * @param used The session the failing request was sent with.
    */
-  #renewRejectedSession(error: unknown): boolean {
-    if (!(error instanceof AuthenticationError) || this.#signInFailures.has(error)) {
+  #renewRejectedSession(error: unknown, used: NestSession | null): boolean {
+    if (!(error instanceof AuthenticationError) || this.#signInFailures.has(error) || used === null) {
       return false
     }
     const session = this.#session
-    if (session === null) {
-      // The other loop already dropped it; the next cycle signs in.
+    if (session !== used) {
       return true
     }
-    if (Date.now() - session.openedAt < SESSION_REJECT_GRACE_MS) {
+    if (this.#isSessionYoung(session)) {
       return false
     }
     this.#session = null
@@ -668,6 +689,7 @@ export class NestTransport {
       if (this.#isStopped) {
         throw error
       }
+      this.#noteRequestSession(error, session)
       const networked = !(error instanceof CircuitBreakerError)
       this.#options.metrics?.apiRequest?.(Date.now() - startedAt, false, networked)
       this.#options.metrics?.restCycle?.(false, Date.now() - startedAt)
@@ -737,8 +759,10 @@ export class NestTransport {
 
     while (!this.#isStopped) {
       this.#decodedDeviceTraitsThisSession = 0
+      let session: NestSession | null = null
       try {
-        const session = await this.#ensureSession()
+        const current = await this.#ensureSession()
+        session = current
         this.#observeSessionOpen = true
         if (!isFirstSession) {
           this.#options.metrics?.observeReconnect?.()
@@ -748,7 +772,7 @@ export class NestTransport {
 
         const result = await this.#observeBreaker.execute(
           () => runObserveSession({
-            session,
+            session: current,
             endpoints: this.#options.endpoints,
             log: this.#options.log,
             connect: this.#options.connect,
@@ -794,6 +818,7 @@ export class NestTransport {
           this.#observeForbidden = 0
           this.#noteLoopSuccess('observe')
         }
+        this.#noteRequestSession(error, session)
         if (!this.#handleLoopError('Observe', error, 'observe')) {
           return
         }
@@ -962,11 +987,13 @@ export class NestTransport {
       }
       const cycleStartedAt = Date.now()
 
+      let session: NestSession | null = null
       try {
-        const session = await this.#ensureSession()
+        const current = await this.#ensureSession()
+        session = current
         const result = await this.#restBreaker.execute(
           () => subscribeOnce({
-            session,
+            session: current,
             endpoints: this.#options.endpoints,
             revisions: this.#objects.revisions,
             fetchImpl: this.#options.fetchImpl,
@@ -1005,6 +1032,7 @@ export class NestTransport {
         })
         this.#options.metrics?.restCycle?.(false, Date.now() - cycleStartedAt)
         this.#emitRestAlarmFeedAvailability()
+        this.#noteRequestSession(error, session)
         if (!this.#handleLoopError('REST', error, 'rest')) {
           this.#restLoopRunning = false
           this.#emitRestAlarmFeedAvailability()
@@ -1049,7 +1077,8 @@ export class NestTransport {
       return false
     }
 
-    if (this.#renewRejectedSession(error)) {
+    const used = typeof error === 'object' && error !== null ? this.#requestSessions.get(error) ?? null : null
+    if (this.#renewRejectedSession(error, used)) {
       return true
     }
 

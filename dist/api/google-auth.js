@@ -138,7 +138,6 @@ class GoogleAuth {
             fetchImpl: this.#options.fetchImpl,
             signal,
         });
-        this.#applySetCookies(response.headers);
         if (response.status === 400 || response.status === 401 || response.status === 403) {
             throw new errors_1.AuthenticationError(undefined, { status: response.status });
         }
@@ -152,6 +151,9 @@ class GoogleAuth {
             const reason = typeof body.error === 'string' ? ` (${(0, sanitizers_1.sanitizeString)(body.error)})` : '';
             throw new errors_1.AuthenticationError(`Google rejected the sign-in${reason}. Copy a new Issue Token URL and Cookies as described in docs/AUTH.md.`, { status: 401 });
         }
+        // Only a successful answer's cookie updates are kept, so a failed sign-in
+        // cannot replace the configured cookies on disk.
+        this.#applySetCookies(response.headers);
         return body.access_token;
     }
     async #issueNestToken(googleToken, signal) {
@@ -175,7 +177,8 @@ class GoogleAuth {
             signal,
         });
         if (response.status === 400) {
-            throw new errors_1.AuthenticationError(`Nest would not issue a token for this Google account (HTTP 400). Make sure the account is an admin of the home, then copy a new Issue Token URL and Cookies as described in docs/AUTH.md.`, { status: 400 });
+            const message = 'Nest would not issue a token for this Google account (HTTP 400). Make sure the account is an admin of the home in the Google Home app, then restart Homebridge. See docs/AUTH.md.';
+            throw new errors_1.AuthenticationError(message, { status: 400, operatorMessage: message });
         }
         if (response.status >= 400) {
             throw (0, errors_1.createApiError)(response.status, `${(0, sanitizers_1.sanitizeUrl)(settings_1.NEST_ISSUE_JWT_URL)} returned HTTP ${response.status}`);

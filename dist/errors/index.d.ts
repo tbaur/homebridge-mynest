@@ -42,9 +42,12 @@ export declare class AuthenticationError extends NestError {
     readonly code = "AUTH_ERROR";
     readonly isRetryable = false;
     readonly httpStatus: number;
+    /** A complete operator instruction that replaces the generic sign-in message. */
+    readonly operatorMessage: string | undefined;
     constructor(message?: string, options?: {
         cause?: Error;
         status?: number;
+        operatorMessage?: string;
     });
 }
 /**

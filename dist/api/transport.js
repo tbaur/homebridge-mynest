@@ -47,6 +47,7 @@ class NestTransport {
     #sessionRefresh = null;
     /** Refusals of a sign-in itself, which are final rather than a reason to renew. */
     #signInFailures = new WeakSet();
+    #requestSessions = new WeakMap();
     #isStopped = false;
     /** Consecutive failures per transport, for log escalation. */
     #observeFailureStreak = 0;
@@ -304,7 +305,7 @@ class NestTransport {
             this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true });
             // The next write or loop cycle signs in again instead of reusing a
             // session Nest has refused.
-            if (error instanceof errors_1.AuthenticationError && this.#session === session) {
+            if (error instanceof errors_1.AuthenticationError && this.#session === session && !this.#isSessionYoung(session)) {
                 this.#session = null;
             }
             // Accessory handlers log once and revert HomeKit — do not warn here too.
@@ -399,28 +400,46 @@ class NestTransport {
         })();
         return this.#sessionRefresh;
     }
-    /** Whether a session's token is within the renewal margin of its expiry. */
+    /**
+     * Whether a session's token is within the renewal margin of its expiry.
+     *
+     * The margin is capped at half the token's lifetime, so a token issued with
+     * less than the full margin left is still used before it is renewed.
+     */
     #isSessionStale(session) {
-        return Date.now() >= session.expiresAt - settings_1.SESSION_EXPIRY_MARGIN_MS;
+        const margin = Math.min(settings_1.SESSION_EXPIRY_MARGIN_MS, (session.expiresAt - session.openedAt) / 2);
+        return Date.now() >= session.expiresAt - margin;
+    }
+    /** Remember which session a failed request was sent with. */
+    #noteRequestSession(error, session) {
+        if (session !== null && typeof error === 'object' && error !== null) {
+            this.#requestSessions.set(error, session);
+        }
+    }
+    #isSessionYoung(session) {
+        return Date.now() - session.openedAt < settings_1.SESSION_REJECT_GRACE_MS;
     }
     /**
-     * Whether Nest refusing the current session should be answered by signing
-     * in again rather than stopping.
+     * Whether Nest refusing a session should be answered by signing in again
+     * rather than stopping.
      *
-     * Only a session that has been in use for a while qualifies; its token may
-     * have lapsed early. Dropping it makes the next cycle sign in, and if that
-     * fresh session is refused too, the refusal is final.
+     * A refusal of a session that has since been replaced says nothing about the
+     * current one. Otherwise only a session that has been in use for a while
+     * qualifies; its token may have lapsed early. Dropping it makes the next
+     * cycle sign in, and if that fresh session is refused too, the refusal is
+     * final.
+     *
+     * @param used The session the failing request was sent with.
      */
-    #renewRejectedSession(error) {
-        if (!(error instanceof errors_1.AuthenticationError) || this.#signInFailures.has(error)) {
+    #renewRejectedSession(error, used) {
+        if (!(error instanceof errors_1.AuthenticationError) || this.#signInFailures.has(error) || used === null) {
             return false;
         }
         const session = this.#session;
-        if (session === null) {
-            // The other loop already dropped it; the next cycle signs in.
+        if (session !== used) {
             return true;
         }
-        if (Date.now() - session.openedAt < settings_1.SESSION_REJECT_GRACE_MS) {
+        if (this.#isSessionYoung(session)) {
             return false;
         }
         this.#session = null;
@@ -467,6 +486,7 @@ class NestTransport {
             if (this.#isStopped) {
                 throw error;
             }
+            this.#noteRequestSession(error, session);
             const networked = !(error instanceof errors_1.CircuitBreakerError);
             this.#options.metrics?.apiRequest?.(Date.now() - startedAt, false, networked);
             this.#options.metrics?.restCycle?.(false, Date.now() - startedAt);
@@ -533,8 +553,10 @@ class NestTransport {
         let isFirstSession = true;
         while (!this.#isStopped) {
             this.#decodedDeviceTraitsThisSession = 0;
+            let session = null;
             try {
-                const session = await this.#ensureSession();
+                const current = await this.#ensureSession();
+                session = current;
                 this.#observeSessionOpen = true;
                 if (!isFirstSession) {
                     this.#options.metrics?.observeReconnect?.();
@@ -542,7 +564,7 @@ class NestTransport {
                 isFirstSession = false;
                 this.#options.onObserveSessionStart?.();
                 const result = await this.#observeBreaker.execute(() => (0, observe_1.runObserveSession)({
-                    session,
+                    session: current,
                     endpoints: this.#options.endpoints,
                     log: this.#options.log,
                     connect: this.#options.connect,
@@ -582,6 +604,7 @@ class NestTransport {
                     this.#observeForbidden = 0;
                     this.#noteLoopSuccess('observe');
                 }
+                this.#noteRequestSession(error, session);
                 if (!this.#handleLoopError('Observe', error, 'observe')) {
                     return;
                 }
@@ -732,10 +755,12 @@ class NestTransport {
                 return;
             }
             const cycleStartedAt = Date.now();
+            let session = null;
             try {
-                const session = await this.#ensureSession();
+                const current = await this.#ensureSession();
+                session = current;
                 const result = await this.#restBreaker.execute(() => (0, rest_1.subscribeOnce)({
-                    session,
+                    session: current,
                     endpoints: this.#options.endpoints,
                     revisions: this.#objects.revisions,
                     fetchImpl: this.#options.fetchImpl,
@@ -771,6 +796,7 @@ class NestTransport {
                 });
                 this.#options.metrics?.restCycle?.(false, Date.now() - cycleStartedAt);
                 this.#emitRestAlarmFeedAvailability();
+                this.#noteRequestSession(error, session);
                 if (!this.#handleLoopError('REST', error, 'rest')) {
                     this.#restLoopRunning = false;
                     this.#emitRestAlarmFeedAvailability();
@@ -807,7 +833,8 @@ class NestTransport {
         if (this.#abort.signal.aborted) {
             return false;
         }
-        if (this.#renewRejectedSession(error)) {
+        const used = typeof error === 'object' && error !== null ? this.#requestSessions.get(error) ?? null : null;
+        if (this.#renewRejectedSession(error, used)) {
             return true;
         }
         if ((0, errors_1.isFatalTransportError)(error)) {

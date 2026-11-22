@@ -53,13 +53,16 @@ export class AuthenticationError extends NestError {
   readonly code = 'AUTH_ERROR'
   readonly isRetryable = false
   override readonly httpStatus: number
+  /** A complete operator instruction that replaces the generic sign-in message. */
+  readonly operatorMessage: string | undefined
 
   constructor(
     message = 'Google rejected the sign-in. Copy a new Issue Token URL and Cookies as described in docs/AUTH.md.',
-    options?: { cause?: Error; status?: number },
+    options?: { cause?: Error; status?: number; operatorMessage?: string },
   ) {
     super(message, options?.cause ? { cause: options.cause } : undefined)
     this.httpStatus = options?.status ?? 401
+    this.operatorMessage = options?.operatorMessage
   }
 }
 

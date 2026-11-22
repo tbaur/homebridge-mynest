@@ -197,8 +197,6 @@ export class GoogleAuth implements TokenSource {
       signal,
     })
 
-    this.#applySetCookies(response.headers)
-
     if (response.status === 400 || response.status === 401 || response.status === 403) {
       throw new AuthenticationError(undefined, { status: response.status })
     }
@@ -216,6 +214,9 @@ export class GoogleAuth implements TokenSource {
         { status: 401 },
       )
     }
+    // Only a successful answer's cookie updates are kept, so a failed sign-in
+    // cannot replace the configured cookies on disk.
+    this.#applySetCookies(response.headers)
     return body.access_token
   }
 
@@ -241,10 +242,8 @@ export class GoogleAuth implements TokenSource {
     })
 
     if (response.status === 400) {
-      throw new AuthenticationError(
-        `Nest would not issue a token for this Google account (HTTP 400). Make sure the account is an admin of the home, then copy a new Issue Token URL and Cookies as described in docs/AUTH.md.`,
-        { status: 400 },
-      )
+      const message = 'Nest would not issue a token for this Google account (HTTP 400). Make sure the account is an admin of the home in the Google Home app, then restart Homebridge. See docs/AUTH.md.'
+      throw new AuthenticationError(message, { status: 400, operatorMessage: message })
     }
     if (response.status >= 400) {
       throw createApiError(response.status, `${sanitizeUrl(NEST_ISSUE_JWT_URL)} returned HTTP ${response.status}`)

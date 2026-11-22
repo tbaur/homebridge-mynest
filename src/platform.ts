@@ -514,7 +514,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     this.#hasFatal = true
     const isSessionShape = error instanceof SessionShapeError
     const message = error instanceof AuthenticationError
-      ? signInRejectedMessage(error.httpStatus)
+      ? error.operatorMessage ?? signInRejectedMessage(error.httpStatus)
       : error.message
     this.#log.error(message)
     this.#log.debug(`Stopped by: ${sanitizeError(error)}`)

@@ -21,6 +21,7 @@ import {
   REDISCOVERY_INTERVAL_MS,
   REST_ALARM_FEED_STALE_MS,
   REST_RESPONSE_STALE_MS,
+  NEST_TOKEN_LIFETIME_SEC,
   SESSION_EXPIRY_MARGIN_MS,
   SESSION_REJECT_GRACE_MS,
   resolveEndpoints,
@@ -922,7 +923,7 @@ describe('NestTransport loop recovery', () => {
   function routedFetch(routes: {
     session?: () => Response
     appLaunch?: (call: number) => Response | Promise<Response>
-    subscribe?: (call: number) => Response
+    subscribe?: (call: number) => Response | Promise<Response> | undefined
   }) {
     const counts = { session: 0, appLaunch: 0, subscribe: 0 }
     const fetch = (async (url: unknown, init: RequestInit = {}) => {
@@ -970,7 +971,7 @@ describe('NestTransport loop recovery', () => {
   })
 
   it('stops both loops when a later session open returns a shape it cannot use', async () => {
-    // A token expiring inside the renewal margin makes every loop call re-open the session.
+    // An already-expired token makes every loop call re-open the session.
     const { fetch, counts } = routedFetch({
       session: () => new Response(JSON.stringify(
         counts.session <= 2
@@ -980,7 +981,7 @@ describe('NestTransport loop recovery', () => {
     })
     const { transport, fatals } = createTransport({
       fetchImpl: fetch,
-      auth: createTokenSource({ lifetimeMs: 1_000 }),
+      auth: createTokenSource({ lifetimeMs: -1_000 }),
     })
 
     await transport.start()
@@ -995,13 +996,13 @@ describe('NestTransport loop recovery', () => {
 
   it('signs in again before the Nest token expires', async () => {
     const clock = shiftableClock()
-    const auth = createTokenSource({ lifetimeMs: SESSION_EXPIRY_MARGIN_MS + 60_000 })
+    const auth = createTokenSource()
     const { transport, http2, fatals } = createTransport({ auth })
 
     await transport.start()
     expect(auth.minted).toHaveLength(1)
 
-    clock.advance(2 * 60_000)
+    clock.advance(NEST_TOKEN_LIFETIME_SEC * 1_000 - SESSION_EXPIRY_MARGIN_MS + 60_000)
     const connection = await http2.session()
     connection.failStream('stream reset')
     await waitUntil(() => auth.minted.length >= 2)
@@ -1014,6 +1015,45 @@ describe('NestTransport loop recovery', () => {
 
   it('keeps using a session until its token nears expiry', async () => {
     const auth = createTokenSource()
+    const { transport, http2 } = createTransport({ auth })
+
+    await transport.start()
+    const connection = await http2.session()
+    connection.failStream('stream reset')
+    await waitUntil(() => http2.origins.length >= 2)
+    transport.stop()
+
+    expect(auth.minted).toHaveLength(1)
+  })
+
+  it('keeps running when Nest refuses a session that a renewal already replaced', async () => {
+    const clock = shiftableClock()
+    let answerFirstSubscribe: (response: Response) => void = () => undefined
+    const { fetch, counts } = routedFetch({
+      subscribe: (call) => call === 1
+        ? new Promise<Response>((resolve) => { answerFirstSubscribe = resolve })
+        : undefined,
+    })
+    const auth = createTokenSource()
+    const { transport, http2, fatals } = createTransport({ fetchImpl: fetch, auth })
+
+    await transport.start()
+    await waitUntil(() => counts.subscribe >= 1)
+    clock.advance(NEST_TOKEN_LIFETIME_SEC * 1_000 - SESSION_EXPIRY_MARGIN_MS + 60_000)
+    const connection = await http2.session()
+    connection.failStream('stream reset')
+    await waitUntil(() => auth.minted.length >= 2)
+    answerFirstSubscribe(new Response('{}', { status: 401 }))
+    await waitUntil(() => counts.subscribe >= 2)
+    transport.stop()
+    clock.restore()
+
+    expect(fatals).toHaveLength(0)
+    expect(auth.minted).toHaveLength(2)
+  })
+
+  it('uses a token issued with less than the renewal margin left instead of signing in on every cycle', async () => {
+    const auth = createTokenSource({ lifetimeMs: SESSION_EXPIRY_MARGIN_MS / 2 })
     const { transport, http2 } = createTransport({ auth })
 
     await transport.start()
@@ -1045,7 +1085,7 @@ describe('NestTransport loop recovery', () => {
   it('stops when Google rejects the sign-in during a renewal', async () => {
     const clock = shiftableClock()
     let isRevoked = false
-    const working = createTokenSource({ lifetimeMs: SESSION_EXPIRY_MARGIN_MS + 60_000 })
+    const working = createTokenSource()
     const auth = {
       mintToken: async () => {
         if (isRevoked) {
@@ -1058,7 +1098,7 @@ describe('NestTransport loop recovery', () => {
 
     await transport.start()
     isRevoked = true
-    clock.advance(2 * 60_000)
+    clock.advance(NEST_TOKEN_LIFETIME_SEC * 1_000 - SESSION_EXPIRY_MARGIN_MS + 60_000)
     const connection = await http2.session()
     connection.failStream('stream reset')
     await waitUntil(() => fatals.length > 0)

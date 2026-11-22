@@ -291,6 +291,14 @@ describe('MyNestPlatform', () => {
     expect(log.warns.join('\n')).not.toMatch(/Could not connect to Nest/)
   })
 
+  it('logs the specific instruction a sign-in error carries', async () => {
+    pendingStartFailures.push(new AuthenticationError('raw', { status: 400, operatorMessage: 'Make the account an admin.' }))
+
+    await launch()
+
+    expect(log.errors).toContain('Make the account an admin.')
+  })
+
   it('logs that thermostat control is enabled once, not on every startup retry', async () => {
     pendingStartFailures.push(new NetworkError('Could not reach https://home.nest.com/session'))
 
