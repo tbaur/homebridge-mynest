@@ -6,10 +6,10 @@
  *
  * @fileoverview Keeping credentials out of logs.
  *
- * A Nest access token reads every sensor and changes every thermostat in the
- * home, with no password and no second factor, and Homebridge debug logs get
- * pasted into public issue trackers routinely. These tests cover each shape the
- * token is known to travel in.
+ * The Google cookies sign in to the whole Google account, and every token the
+ * plugin derives from them reads every sensor and changes every thermostat in
+ * the home. Homebridge debug logs get pasted into public issue trackers
+ * routinely. These tests cover each shape the credentials are known to travel in.
  */
 
 import {
@@ -33,7 +33,10 @@ describe('sanitizeString', () => {
   })
 
   it('redacts every spelling of the token key', () => {
-    for (const key of ['access_token', 'accessToken', 'cztoken', 'refresh_token', 'refreshToken']) {
+    for (const key of [
+      'access_token', 'accessToken', 'google_oauth_access_token', 'id_token', 'jwt',
+      'issueToken', 'issue_token', 'cookies', 'refresh_token', 'refreshToken',
+    ]) {
       expect(sanitizeString(`{"${key}":"${TOKEN}"}`)).not.toContain(TOKEN)
       expect(sanitizeString(`${key}=${TOKEN}`)).not.toContain(TOKEN)
     }
@@ -51,20 +54,28 @@ describe('sanitizeString', () => {
   })
 
   it('redacts cookie headers in both header and JSON form', () => {
-    expect(sanitizeString(`Cookie: cztoken=${TOKEN}; other=1`)).not.toContain(TOKEN)
-    expect(sanitizeString(`{"cookie":"cztoken=${TOKEN}"}`)).not.toContain(TOKEN)
-    expect(sanitizeString(`Set-Cookie: cztoken=${TOKEN}; Path=/`)).not.toContain(TOKEN)
+    expect(sanitizeString(`Cookie: SID=${TOKEN}; other=1`)).not.toContain(TOKEN)
+    expect(sanitizeString(`{"cookie":"SID=${TOKEN}"}`)).not.toContain(TOKEN)
+    expect(sanitizeString(`Set-Cookie: SID=${TOKEN}; Path=/`)).not.toContain(TOKEN)
   })
 
-  it('redacts a bare cookie string with no header prefix', () => {
-    // This is the shape the session request actually sends.
-    const cookies = `G_ENABLED_IDPS=google; eu_cookie_accepted=1; cztoken=${TOKEN}`
+  it('redacts every value in a bare cookie string with no header prefix', () => {
+    // This is the shape the configured Cookies take.
+    const cookies = `SID=${TOKEN}; HSID=short; NID=1`
 
     const result = sanitizeString(cookies)
 
-    expect(result).not.toContain(TOKEN)
-    // Preference cookies are not secrets and stay readable.
-    expect(result).toContain('G_ENABLED_IDPS=google')
+    expect(result).toBe('SID=***; HSID=***; NID=***')
+  })
+
+  it('redacts bare Google OAuth tokens and Nest tokens', () => {
+    expect(sanitizeString(`got ya29.${TOKEN} back`)).toBe('got ya29.*** back')
+    expect(sanitizeString(`got g.0.${TOKEN} back`)).toBe('got g.0.*** back')
+  })
+
+  it('redacts the account email in the Issue Token URL and elsewhere', () => {
+    expect(sanitizeString('login_hint=user%40example.com&client_id=1')).not.toContain('example.com')
+    expect(sanitizeString('signed in as user@example.com')).toBe('signed in as ***@***')
   })
 
   it('redacts an unknown long value rather than trusting an allowlist', () => {
@@ -111,7 +122,7 @@ describe('sanitizeError', () => {
   })
 
   it('handles a thrown string or other value', () => {
-    expect(sanitizeError(`cztoken=${TOKEN}`)).not.toContain(TOKEN)
+    expect(sanitizeError(`SID=${TOKEN}`)).not.toContain(TOKEN)
     expect(sanitizeError(undefined)).toBe('undefined')
     expect(sanitizeError({ code: 500 })).toBe('[object Object]')
   })

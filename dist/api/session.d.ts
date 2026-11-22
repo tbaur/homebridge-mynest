@@ -4,25 +4,23 @@
  * Licensed under the Apache License, Version 2.0
  * See LICENSE file for full license text
  *
- * @fileoverview Nest Account session, the only authentication path supported.
+ * @fileoverview Nest session, opened with a Nest token from Google sign-in.
  *
  * Flow:
- *   1. `GET /session` with `Authorization: Basic <configured access_token>`.
+ *   1. `GET /session` with `Authorization: Basic <Nest token>` (see
+ *      `google-auth.ts` for where the token comes from).
  *   2. Use the `access_token`, `userid`, and `urls.transport_url` from that
- *      response for every subsequent REST and Observe call.
- *
- * Google account sign-in is deliberately not implemented. It requires
- * replaying a browser cookie through Google's own `issueToken` flow, which
- * Google changes without notice and which asks the user to paste a credential
- * covering their entire Google account rather than just their Nest home.
+ *      response for every subsequent REST and Observe call, until the Nest
+ *      token expires.
  */
 import { type NestEndpoints } from '../settings';
 import type { NestSession } from '../types/nest';
 import type { Logger } from '../utils/logger';
+import type { NestToken } from './google-auth';
 import { type FetchLike } from './http';
 export interface OpenSessionOptions {
-    /** The token from the user's config, not from a previous session. */
-    accessToken: string;
+    /** A freshly minted Nest token. */
+    token: NestToken;
     endpoints: NestEndpoints;
     log: Logger;
     fetchImpl?: FetchLike;
@@ -31,11 +29,11 @@ export interface OpenSessionOptions {
 /** Standard headers for an authenticated REST call, once a session exists. */
 export declare function authenticatedHeaders(session: NestSession): Record<string, string>;
 /**
- * Exchange the configured access token for a usable session.
+ * Exchange a Nest token for a usable session.
  *
  * @throws {AuthenticationError} When Nest rejects the token (HTTP 400 or 401).
  * @throws {SessionShapeError} When the response is accepted but omits a field
  *   the plugin needs, or names a transport host off Nest infrastructure. Either
- *   means Nest changed the contract; a new token would not help.
+ *   means Nest changed the contract; signing in again would not help.
  */
 export declare function openSession(options: OpenSessionOptions): Promise<NestSession>;

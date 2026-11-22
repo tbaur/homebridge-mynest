@@ -10,7 +10,7 @@
  * decodes with, so a test exercises the real framing and decode path rather
  * than a hand-written object that happens to match what the parser expects.
  *
- * No data here comes from a real Nest account. The device ids are invented and
+ * No data here comes from a real account. The device ids are invented and
  * the readings are chosen to make each assertion obvious.
  */
 

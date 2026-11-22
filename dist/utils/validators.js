@@ -7,11 +7,10 @@
  *
  * @fileoverview Configuration validation.
  *
- * The checks here are shaped by what users actually paste into this field.
- * `access_token` sits in a JSON blob next to half a dozen other tokens, and
- * getting the wrong one produces an opaque HTTP 401 at runtime with nothing
- * pointing back at the config. Catching the recognisable mistakes at startup
- * is worth more than a generic "required field" error.
+ * Both sign-in values are copied by hand from a browser's developer tools, so
+ * the checks here are shaped by the mistakes that copy makes: the wrong
+ * request's URL, a header name pasted along with its value, or a truncated
+ * value. Each otherwise fails at runtime as an unexplained Google error.
  *
  * Log copy uses the Homebridge UI titles (Title Case), not JSON keys.
  */
@@ -19,50 +18,63 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateConfig = validateConfig;
 const errors_1 = require("../errors");
 const settings_1 = require("../settings");
-/**
- * Shortest plausible Nest access token.
- *
- * Real ones run to well over a hundred characters. Anything this short is a
- * truncated copy/paste, which otherwise fails as an unexplained 401. Matches
- * `config.schema.json` `minLength` so the UI and runtime agree.
- */
-const MIN_TOKEN_LENGTH = 32;
-/**
- * A JSON Web Token, which is what a Google account sign-in yields.
- *
- * Users following a guide written for the Google auth path arrive with one of
- * these. It is not a Nest Account token and will never work here, so saying so
- * plainly beats letting Nest answer 401.
- */
-const JWT_PATTERN = /^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./;
-/**
- * Google's OAuth access tokens, which users also reach for by mistake.
- */
-const GOOGLE_TOKEN_PATTERN = /^ya29\./;
+const SETUP_HINT = 'See docs/AUTH.md for how to copy it.';
+/** A cookie header always carries Google's session cookie under this name. */
+const REQUIRED_COOKIE = 'SID';
 function parseBoolean(value, fallback) {
     return typeof value === 'boolean' ? value : fallback;
 }
 /**
- * Validate the Nest access token.
+ * Validate the issueToken URL.
  *
- * @throws {ConfigurationError} When the value is missing or is recognisably
- *   the wrong kind of credential.
+ * The URL is fetched with the account's cookies attached, so only Google's
+ * own sign-in endpoint is accepted. Anything else would send the cookies to
+ * whatever host the config names.
+ *
+ * @throws {ConfigurationError} When the value is missing or is not Google's
+ *   issueToken endpoint.
  */
-function parseAccessToken(value) {
+function parseIssueToken(value) {
     if (typeof value !== 'string' || value.trim().length === 0) {
-        throw new errors_1.ConfigurationError(`Access Token is required in the ${settings_1.PLATFORM_NAME} platform config. Sign in at https://home.nest.com/session and copy the Nest Account access_token.`);
+        throw new errors_1.ConfigurationError(`Issue Token URL is required. ${SETUP_HINT}`);
     }
-    const token = value.trim();
-    if (JWT_PATTERN.test(token)) {
-        throw new errors_1.ConfigurationError('Access Token looks like a Google account sign-in token (JWT). Use a Nest Account token from https://home.nest.com/session instead.');
+    let url;
+    try {
+        url = new URL(value.trim());
     }
-    if (GOOGLE_TOKEN_PATTERN.test(token)) {
-        throw new errors_1.ConfigurationError('Access Token looks like a Google OAuth token (ya29.). Use a Nest Account token from https://home.nest.com/session instead.');
+    catch {
+        throw new errors_1.ConfigurationError(`Issue Token URL is not a valid URL. ${SETUP_HINT}`);
     }
-    if (token.length < MIN_TOKEN_LENGTH) {
-        throw new errors_1.ConfigurationError(`Access Token is shorter than ${MIN_TOKEN_LENGTH} characters and is probably truncated; paste the full value from https://home.nest.com/session.`);
+    const isGoogleEndpoint = url.protocol === 'https:'
+        && url.hostname === settings_1.GOOGLE_ISSUE_TOKEN_HOST
+        && (url.port === '' || url.port === '443')
+        && url.username === ''
+        && url.password === ''
+        && url.pathname === settings_1.GOOGLE_ISSUE_TOKEN_PATH;
+    if (!isGoogleEndpoint) {
+        throw new errors_1.ConfigurationError(`Issue Token URL must start with https://${settings_1.GOOGLE_ISSUE_TOKEN_HOST}${settings_1.GOOGLE_ISSUE_TOKEN_PATH}. ${SETUP_HINT}`);
     }
-    return token;
+    if (url.searchParams.get('action') !== 'issueToken') {
+        throw new errors_1.ConfigurationError(`Issue Token URL is from a different request; copy the one containing action=issueToken. ${SETUP_HINT}`);
+    }
+    return url.toString();
+}
+/**
+ * Validate the Google cookie header.
+ *
+ * @throws {ConfigurationError} When the value is missing or is not a cookie
+ *   header from a signed-in Google session.
+ */
+function parseCookies(value) {
+    if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new errors_1.ConfigurationError(`Cookies are required. ${SETUP_HINT}`);
+    }
+    const cookies = value.trim().replace(/^cookie:\s*/i, '');
+    const names = cookies.split(';').map((pair) => pair.split('=')[0]?.trim());
+    if (!names.includes(REQUIRED_COOKIE)) {
+        throw new errors_1.ConfigurationError(`Cookies do not include Google's ${REQUIRED_COOKIE} cookie; copy the whole Cookie header from the oauth2/iframe request. ${SETUP_HINT}`);
+    }
+    return cookies;
 }
 /**
  * Parse the diagnostics heartbeat interval.
@@ -116,7 +128,8 @@ function validateConfig(raw) {
     const warnings = [];
     const config = {
         name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : settings_1.PLATFORM_NAME,
-        accessToken: parseAccessToken(raw.accessToken),
+        issueToken: parseIssueToken(raw.issueToken),
+        cookies: parseCookies(raw.cookies),
         fieldTest: parseBoolean(raw.fieldTest, false),
         allowThermostatControl: parseBoolean(raw.allowThermostatControl, false),
         exposeGlobalEcoSwitch: parseBoolean(raw.exposeGlobalEcoSwitch, false),

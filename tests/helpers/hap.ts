@@ -21,6 +21,7 @@ import { Accessory, Characteristic, Service, uuid } from '@homebridge/hap-nodejs
 import type { API, PlatformAccessory } from 'homebridge'
 import type { MyNestPlatform } from '../../src/platform'
 import type { ResolvedConfig } from '../../src/types/config'
+import { TEST_COOKIES, TEST_ISSUE_TOKEN } from './sign-in'
 
 /**
  * HAP declares `Perms` and `HAPStatus` as `const enum`s, which TypeScript
@@ -47,7 +48,8 @@ export function createAccessory(displayName: string, id = displayName): Platform
 export function createResolvedConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
     name: 'MyNest',
-    accessToken: 'test-token',
+    issueToken: TEST_ISSUE_TOKEN,
+    cookies: TEST_COOKIES,
     fieldTest: false,
     allowThermostatControl: false,
     exposeGlobalEcoSwitch: false,

@@ -39,29 +39,35 @@ export class ConfigurationError extends NestError {
 }
 
 /**
- * Nest rejected the access token: HTTP 401 anywhere, or HTTP 400 from the
- * session endpoint (see {@link isSessionTokenRejection}).
+ * A credential was refused: Google rejected the sign-in cookies, or Nest
+ * answered HTTP 401 anywhere, or HTTP 400 from the session endpoint (see
+ * {@link isSessionTokenRejection}).
  *
- * Not retryable: the token is copied by hand from a browser session and only a
- * new one will help. Retrying a rejected token is also how an account attracts
- * attention it does not want.
+ * Not retryable as-is. The transport renews a session once when Nest refuses
+ * one that has been in use for a while (its token may simply have expired); a
+ * refusal of a fresh sign-in means the cookies need to be captured again.
+ * Retrying a rejected sign-in is also how an account attracts attention it
+ * does not want.
  */
 export class AuthenticationError extends NestError {
   readonly code = 'AUTH_ERROR'
   readonly isRetryable = false
   override readonly httpStatus: number
+  /** A complete operator instruction that replaces the generic sign-in message. */
+  readonly operatorMessage: string | undefined
 
   constructor(
-    message = 'Nest rejected the configured access token. Sign in at https://home.nest.com, open https://home.nest.com/session, and copy a fresh "access_token".',
-    options?: { cause?: Error; status?: number },
+    message = 'Google rejected the sign-in. Copy a new Issue Token URL and Cookies as described in docs/AUTH.md.',
+    options?: { cause?: Error; status?: number; operatorMessage?: string },
   ) {
     super(message, options?.cause ? { cause: options.cause } : undefined)
     this.httpStatus = options?.status ?? 401
+    this.operatorMessage = options?.operatorMessage
   }
 }
 
 /**
- * Whether a failed session open proves the configured token is unusable.
+ * Whether a failed session open proves the Nest token is unusable.
  *
  * The session endpoint takes nothing but the token, and Nest answers a
  * missing or bad one with 400 (`invalid_request`) or 401. Every other failure
@@ -96,7 +102,7 @@ export class ForbiddenError extends NestError {
  * The session JSON was accepted but did not carry what the plugin needs.
  *
  * Distinguished from an authentication failure because the remedy is a plugin
- * update, not a new token: it means Nest changed the shape of the response.
+ * update, not a new sign-in: it means Nest changed the shape of the response.
  */
 export class SessionShapeError extends NestError {
   readonly code = 'SESSION_SHAPE_ERROR'
@@ -298,7 +304,7 @@ export function parseRetryAfterMs(header: string | null | undefined): number | u
 /**
  * Map an HTTP status to the appropriate error type.
  *
- * Nest answers a bad or expired token with 401. A 403 on the transport host
+ * Nest and Google answer a bad or expired credential with 401. A 403 on the transport host
  * becomes {@link ForbiddenError}. Repeated 403s stop that loop until the
  * cooldown. They are not a fatal auth failure.
  */

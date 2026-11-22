@@ -6,20 +6,20 @@
  *
  * @fileoverview Configuration validation.
  *
- * `access_token` sits in a JSON blob beside half a dozen other tokens, so the
- * interesting cases are the wrong ones users reach for. Each produces an
- * unexplained HTTP 401 at runtime if it is not caught here.
+ * Both sign-in values are copied by hand from browser developer tools, so the
+ * interesting cases are the copy mistakes. Each produces an unexplained Google
+ * error at runtime if it is not caught here.
  */
 
 import { ConfigurationError } from '../../../src/errors'
 import { validateConfig } from '../../../src/utils/validators'
 import type { MyNestPlatformConfig } from '../../../src/types/config'
-
-const VALID_TOKEN = 'b'.repeat(120)
+import { TEST_COOKIES, TEST_ISSUE_TOKEN } from '../../helpers/sign-in'
 
 const base = (overrides: Partial<MyNestPlatformConfig> = {}): MyNestPlatformConfig => ({
   platform: 'MyNest',
-  accessToken: VALID_TOKEN,
+  issueToken: TEST_ISSUE_TOKEN,
+  cookies: TEST_COOKIES,
   ...overrides,
 })
 
@@ -27,7 +27,8 @@ describe('validateConfig', () => {
   it('accepts a minimal valid configuration', () => {
     const { config, warnings } = validateConfig(base())
 
-    expect(config.accessToken).toBe(VALID_TOKEN)
+    expect(config.issueToken).toBe(TEST_ISSUE_TOKEN)
+    expect(config.cookies).toBe(TEST_COOKIES)
     expect(warnings).toEqual([])
   })
 
@@ -103,35 +104,58 @@ describe('validateConfig', () => {
     ['whitespace', '   '],
     ['a number', 42],
     ['null', null],
-  ])('tells the user where to find the token when it is %s', (_label, accessToken) => {
-    expect(() => validateConfig(base({ accessToken }))).toThrow(ConfigurationError)
-    expect(() => validateConfig(base({ accessToken }))).toThrow(/home\.nest\.com\/session/)
+  ])('points to the setup guide when the Issue Token URL is %s', (_label, issueToken) => {
+    expect(() => validateConfig(base({ issueToken }))).toThrow(ConfigurationError)
+    expect(() => validateConfig(base({ issueToken }))).toThrow(/Issue Token URL is required.*docs\/AUTH\.md/)
   })
 
-  it('recognises a Google account JWT and says why it cannot work', () => {
-    // Users following a guide written for the Google auth path arrive with one
-    // of these; "401" would tell them nothing.
-    const jwt = `eyJhbGciOiJSUzI1NiJ9.${'a'.repeat(60)}.${'b'.repeat(40)}`
-
-    expect(() => validateConfig(base({ accessToken: jwt })))
-      .toThrow(/Nest Account token/)
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['a number', 42],
+  ])('points to the setup guide when the Cookies are %s', (_label, cookies) => {
+    expect(() => validateConfig(base({ cookies }))).toThrow(/Cookies are required.*docs\/AUTH\.md/)
   })
 
-  it('recognises a Google OAuth token', () => {
-    expect(() => validateConfig(base({ accessToken: `ya29.${'a'.repeat(80)}` })))
-      .toThrow(/Google OAuth token/)
+  it('rejects text that is not a URL', () => {
+    expect(() => validateConfig(base({ issueToken: 'issueToken please' }))).toThrow(/not a valid URL/)
   })
 
-  it('rejects a token short enough to have been truncated', () => {
-    // Matches config.schema.json minLength so the UI and runtime agree.
-    expect(() => validateConfig(base({ accessToken: 'short-token' })))
-      .toThrow(/truncated|shorter than/i)
+  it.each([
+    ['another host', 'https://accounts.example.com/o/oauth2/iframerpc?action=issueToken'],
+    ['a lookalike host', 'https://accounts.google.com.example.com/o/oauth2/iframerpc?action=issueToken'],
+    ['plain http', 'http://accounts.google.com/o/oauth2/iframerpc?action=issueToken'],
+    ['a non-default port', 'https://accounts.google.com:8443/o/oauth2/iframerpc?action=issueToken'],
+    ['embedded credentials', 'https://user:pass@accounts.google.com/o/oauth2/iframerpc?action=issueToken'],
+    ['another path', 'https://accounts.google.com/o/oauth2/iframe?action=issueToken'],
+  ])('refuses an Issue Token URL on %s, because the cookies are sent to it', (_label, issueToken) => {
+    expect(() => validateConfig(base({ issueToken }))).toThrow(/must start with https:\/\/accounts\.google\.com/)
   })
 
-  it('trims whitespace picked up when copying', () => {
-    const { config } = validateConfig(base({ accessToken: `  ${VALID_TOKEN}\n` }))
+  it('names the right request when the URL is from another iframerpc call', () => {
+    const issueToken = 'https://accounts.google.com/o/oauth2/iframerpc?action=checkOrigin'
 
-    expect(config.accessToken).toBe(VALID_TOKEN)
+    expect(() => validateConfig(base({ issueToken }))).toThrow(/action=issueToken/)
+  })
+
+  it('trims whitespace picked up when copying the URL', () => {
+    const { config } = validateConfig(base({ issueToken: `  ${TEST_ISSUE_TOKEN}\n` }))
+
+    expect(config.issueToken).toBe(TEST_ISSUE_TOKEN)
+  })
+
+  it('accepts cookies pasted with the header name in front', () => {
+    const { config } = validateConfig(base({ cookies: `Cookie: ${TEST_COOKIES}\n` }))
+
+    expect(config.cookies).toBe(TEST_COOKIES)
+  })
+
+  it('refuses cookies without the Google session cookie', () => {
+    expect(() => validateConfig(base({ cookies: 'NID=test-nid; OTZ=test-otz' }))).toThrow(/SID cookie/)
+  })
+
+  it('does not mistake a cookie that only ends in SID for the session cookie', () => {
+    expect(() => validateConfig(base({ cookies: 'HSID=test-hsid; SSID=test-ssid' }))).toThrow(/SID cookie/)
   })
 
   it('warns when pointed at the field-test servers', () => {

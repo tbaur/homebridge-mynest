@@ -7,9 +7,10 @@
  *
  * @fileoverview Redaction utilities that keep credentials out of logs.
  *
- * A Nest access token is a bearer credential for the whole home: anyone holding
- * it can read every sensor and change every thermostat and smoke alarm setting,
- * with no password and no second factor. Debug logs from a Homebridge instance
+ * The Google cookies sign in to the whole Google account, and every token the
+ * plugin derives from them is a bearer credential for the home: anyone holding
+ * one can read every sensor and change every thermostat and smoke alarm
+ * setting, with no password and no second factor. Debug logs from a Homebridge instance
  * routinely get pasted into public issue trackers, so redaction here is a real
  * control rather than hygiene theatre.
  *
@@ -47,9 +48,16 @@ const SECRET_PREVIEW_SALT = 'homebridge-mynest:secret-preview';
  * Adding a secret here covers it in all supported shapes automatically.
  */
 const SECRET_KEYS = [
-    // The session bearer, in every spelling the session and app_launch responses
-    // use for it, plus the cookie the web app carries it in.
-    { canonical: 'access_token', aliases: ['access_token', 'accessToken', 'cztoken'] },
+    // The session bearer and the Google OAuth token, in every spelling the
+    // session, issueToken and issue_jwt exchanges use.
+    { canonical: 'access_token', aliases: ['access_token', 'accessToken', 'google_oauth_access_token', 'id_token'] },
+    // The Nest token from issue_jwt.
+    { canonical: 'jwt', aliases: ['jwt'] },
+    // The sign-in configuration. The issueToken URL carries the account's email
+    // address as `login_hint`.
+    { canonical: 'issueToken', aliases: ['issueToken', 'issue_token'] },
+    { canonical: 'cookies', aliases: ['cookies'] },
+    { canonical: 'login_hint', aliases: ['login_hint'] },
     // Weave pairing material. Returned alongside the session and equivalent to
     // device-level credentials even though this plugin never uses it.
     { canonical: 'weave_token', aliases: ['weave_token', 'service_config', 'pairing_token'] },
@@ -60,14 +68,12 @@ const SECRET_KEYS = [
  * Cookie attributes and cookie names that carry nothing sensitive.
  *
  * Everything else in a cookie header is redacted, so this list failing to
- * mention a new Nest cookie costs a slightly noisier log rather than a
+ * mention a new cookie costs a slightly noisier log rather than a
  * disclosed credential.
  */
 const NON_SENSITIVE_COOKIE_NAMES = new Set([
     // Cookie attributes, which are not name/value pairs at all.
     'path', 'domain', 'expires', 'max-age', 'samesite', 'secure', 'httponly', 'version',
-    // Preference cookies the web app sets, observed on a live account.
-    'g_enabled_idps', 'eu_cookie_accepted', 'viewer-volume',
 ]);
 const escapeForPattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
@@ -100,6 +106,12 @@ const SENSITIVE_PATTERNS = [
     // `Authorization` header logged in full is the token logged in full.
     { pattern: /\bbasic\s+[^\s,"']+/gi, replacement: 'Basic ***' },
     { pattern: /\bbearer\s+[^\s,"']+/gi, replacement: 'Bearer ***' },
+    // Bare tokens, recognised by their prefixes: Google OAuth access tokens and
+    // Nest tokens.
+    { pattern: /\bya29\.[\w.-]+/g, replacement: 'ya29.***' },
+    { pattern: /\bg\.0\.[\w.-]+/g, replacement: 'g.0.***' },
+    // Email addresses, which identify the Google account.
+    { pattern: /[\w.+-]+(?:@|%40)[\w-]+(?:\.[\w-]+)+/gi, replacement: '***@***' },
     // The account's numeric user id is path-embedded in the app_launch URL. It is
     // not a credential, but it identifies the account across an issue tracker and
     // costs nothing to withhold.
@@ -122,8 +134,8 @@ const LONG_VALUE_PAIR = /\b([\w.~$-]+)=([\w%./+~-]{16,})/g;
 /**
  * Redact values the plugin cannot vouch for, by exception rather than by name.
  *
- * The session cookie header is a bare `name=value; name=value` string with no
- * `Cookie:` prefix, so the header rule above never sees it.
+ * The configured cookie header is a bare `name=value; name=value` string with
+ * no `Cookie:` prefix, so the header rule above never sees it.
  */
 function redactUnknownCookies(value) {
     const isCookieHeader = COOKIE_HEADER_SHAPE.test(value);
@@ -193,8 +205,8 @@ function previewSecret(secret) {
     }
     const fingerprint = (0, node_crypto_1.scryptSync)(secret, SECRET_PREVIEW_SALT, 4).toString('hex');
     const preview = `(${secret.length} chars, scrypt:${fingerprint})`;
-    // Bounded: keyed by the secret itself, and a plugin only ever sees a couple
-    // (the configured token and the session token it is exchanged for).
+    // Bounded: keyed by the secret itself, and a new Nest token arrives only
+    // about once an hour.
     if (previewCache.size >= MAX_PREVIEW_CACHE) {
         previewCache.clear();
     }

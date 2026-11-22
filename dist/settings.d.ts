@@ -53,7 +53,7 @@ export declare const WEB_APP_VERSION = "NlAppSDKVersion/8.15.0 NlSchemaVersion/2
 export interface NestEndpoints {
     /** Hostname of the Nest REST API. */
     readonly apiHostname: string;
-    /** `GET` here with the config token to open a session. */
+    /** `GET` here with a Nest token to open a session. */
     readonly sessionUrl: string;
     /** Origin of the HTTP/2 gRPC-web gateway that serves the Observe stream. */
     readonly grpcOrigin: string;
@@ -236,20 +236,44 @@ export declare const FORBIDDEN_FATAL_THRESHOLD = 3;
  */
 export declare const FORBIDDEN_REPROBE_MS: number;
 /**
- * How long a session is reused before it is re-established.
+ * Renew the session this long before its Nest token expires.
  *
- * Nest reports an `expires_in` far longer than this, but a token that has been
- * revoked server-side keeps working until first refusal. Re-opening on a fixed
- * cadence bounds how long the plugin can run on a dead session.
- */
-export declare const SESSION_REFRESH_MS: number;
-/**
- * Refresh a session this long before Nest's own reported expiry.
- *
- * Only used when `GET /session` reports `expires_in`; otherwise
- * {@link SESSION_REFRESH_MS} is the only trigger.
+ * Long enough that a slow or retried sign-in still finishes before the old
+ * token lapses. Sessions overlap safely: the old token keeps working until
+ * its own expiry, so a renewal never interrupts a stream.
  */
 export declare const SESSION_EXPIRY_MARGIN_MS: number;
+/**
+ * Lifetime requested for each Nest token, and assumed when the response does
+ * not state one.
+ */
+export declare const NEST_TOKEN_LIFETIME_SEC = 3600;
+/**
+ * A session this young that Nest refuses is a refusal of the sign-in itself.
+ *
+ * An older one may simply have outlived its token, so it is renewed once
+ * instead of stopping the plugin.
+ */
+export declare const SESSION_REJECT_GRACE_MS = 60000;
+/** Host of the issueToken endpoint. The only host the cookies are sent to. */
+export declare const GOOGLE_ISSUE_TOKEN_HOST = "accounts.google.com";
+/** Path of the issueToken endpoint. */
+export declare const GOOGLE_ISSUE_TOKEN_PATH = "/o/oauth2/iframerpc";
+/** Exchanges a Google OAuth access token for a Nest token. */
+export declare const NEST_ISSUE_JWT_URL = "https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt";
+/** Hard ceiling on each Google sign-in request. */
+export declare const GOOGLE_SIGN_IN_TIMEOUT_MS = 30000;
+/**
+ * Browser user agent sent on the Google sign-in requests.
+ *
+ * Google sees the same cookies arrive from a browser; a user agent that looks
+ * like one keeps the requests consistent with how the cookies were issued.
+ */
+export declare const GOOGLE_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+/** Directory under the Homebridge storage path for plugin state. */
+export declare const STATE_DIR = "homebridge-mynest";
+/** File in {@link STATE_DIR} holding the cookies Google has updated. */
+export declare const COOKIE_STATE_FILE = "google-cookies.json";
 /** Maximum attempts for a single REST request before surfacing the failure. */
 export declare const MAX_REQUEST_ATTEMPTS = 3;
 /**

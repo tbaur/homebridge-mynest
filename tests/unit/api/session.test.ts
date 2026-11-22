@@ -4,7 +4,7 @@
  * Licensed under the Apache License, Version 2.0
  * See LICENSE file for full license text
  *
- * @fileoverview Opening a Nest Account session.
+ * @fileoverview Opening a Nest session with a Nest token.
  */
 
 import { authenticatedHeaders, openSession } from '../../../src/api/session'
@@ -23,14 +23,19 @@ const endpoints = resolveEndpoints(false)
 const validSession = {
   access_token: 'session-token-value',
   userid: '5551234',
-  expires_in: 3600,
   urls: { transport_url: 'https://czfe123-front01-iad01.transport.home.nest.com' },
 }
 
-function open(body: unknown, accessToken = 'config-token') {
+const TOKEN_EXPIRES_AT = Date.now() + 60 * 60_000
+
+function nestToken(value = 'nest-token') {
+  return { value, expiresAt: TOKEN_EXPIRES_AT }
+}
+
+function open(body: unknown, tokenValue = 'nest-token') {
   const log = createRecordingLogger()
   const { fetch, calls } = jsonFetch(body)
-  return { log, calls, promise: openSession({ accessToken, endpoints, log, fetchImpl: fetch }) }
+  return { log, calls, promise: openSession({ token: nestToken(tokenValue), endpoints, log, fetchImpl: fetch }) }
 }
 
 describe('openSession', () => {
@@ -43,13 +48,13 @@ describe('openSession', () => {
     expect(session.openedAt).toBeGreaterThan(0)
   })
 
-  it('sends the configured token as Basic auth and as the cookie Nest expects', async () => {
-    const { calls, promise } = open(validSession, 'my-config-token')
+  it('sends the Nest token as Basic auth and no cookies', async () => {
+    const { calls, promise } = open(validSession, 'my-nest-token')
     await promise
 
     expect(calls[0].url).toBe(endpoints.sessionUrl)
-    expect(calls[0].headers.Authorization).toBe('Basic my-config-token')
-    expect(calls[0].headers.cookie).toContain('cztoken=my-config-token')
+    expect(calls[0].headers.Authorization).toBe('Basic my-nest-token')
+    expect(calls[0].headers.cookie).toBeUndefined()
   })
 
   it('accepts a numeric user id, which Nest sometimes returns', async () => {
@@ -106,17 +111,12 @@ describe('openSession', () => {
     expect(error).toBeInstanceOf(SessionShapeError)
   })
 
-  it('records the expiry Nest reports so it can beat the fixed refresh cadence', async () => {
-    const before = Date.now()
-    const session = await open({ ...validSession, expires_in: 3600 }).promise
+  it('expires with the Nest token, not with the session response', async () => {
+    // `/session` reports `expires_in` as a far-off date string that has
+    // nothing to do with when the Nest token stops working.
+    const session = await open({ ...validSession, expires_in: 'Tue, 01-Jan-2036 00:00:00 GMT' }).promise
 
-    expect(session.expiresAt).toBeGreaterThanOrEqual(before + 3_600_000)
-  })
-
-  it('leaves the expiry unset when Nest omits it', async () => {
-    const session = await open({ ...validSession, expires_in: undefined }).promise
-
-    expect(session.expiresAt).toBeUndefined()
+    expect(session.expiresAt).toBe(TOKEN_EXPIRES_AT)
   })
 
   it('refuses a plaintext transport URL', async () => {
@@ -142,13 +142,13 @@ describe('openSession', () => {
     expect(session.transportUrl).toContain('nestlabs.com')
   })
 
-  it.each([400, 401])('treats HTTP %i from the session endpoint as a rejected token', async (status) => {
+  it.each([400, 401])('treats HTTP %i from the session endpoint as a rejected Nest token', async (status) => {
     const { fetch } = jsonFetch(
       { error: 'invalid_request', error_description: 'missing user credentials' },
       { status },
     )
     const error = await openSession({
-      accessToken: 'config-token',
+      token: nestToken(),
       endpoints,
       log: createRecordingLogger(),
       fetchImpl: fetch,
@@ -161,7 +161,7 @@ describe('openSession', () => {
   it.each([403, 404, 408, 429, 499, 503])('retries on HTTP %i instead of stopping the plugin', async (status) => {
     const { fetch } = jsonFetch({}, { status })
     const error = await openSession({
-      accessToken: 'config-token',
+      token: nestToken(),
       endpoints,
       log: createRecordingLogger(),
       fetchImpl: fetch,
@@ -172,10 +172,10 @@ describe('openSession', () => {
   })
 
   it('never writes a token to the log', async () => {
-    const { log, promise } = open(validSession, 'super-secret-config-token')
+    const { log, promise } = open(validSession, 'super-secret-nest-token')
     await promise
 
-    expect(log.all()).not.toContain('super-secret-config-token')
+    expect(log.all()).not.toContain('super-secret-nest-token')
     expect(log.all()).not.toContain('session-token-value')
   })
 })
@@ -187,6 +187,7 @@ describe('authenticatedHeaders', () => {
       userId: '42',
       transportUrl: 'https://x.transport.home.nest.com',
       openedAt: 0,
+      expiresAt: 0,
     })
 
     expect(headers.Authorization).toBe('Basic abc')

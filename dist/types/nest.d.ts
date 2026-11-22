@@ -18,17 +18,10 @@ export interface NestSession {
     readonly userId: string;
     /** Per-account host the REST subscribe long-poll must be sent to. */
     readonly transportUrl: string;
-    /** When this session was opened, driving periodic refresh. */
+    /** When this session was opened. */
     readonly openedAt: number;
-    /**
-     * When Nest says this session expires, from `expires_in`.
-     *
-     * Absent when Nest omits it. Nest usually reports a window far longer than
-     * the plugin's own refresh cadence, but if it ever reports a shorter one the
-     * server's answer must win — otherwise the plugin runs on a dead session
-     * until the first refusal.
-     */
-    readonly expiresAt?: number;
+    /** When the Nest token behind this session expires; renewal is timed from it. */
+    readonly expiresAt: number;
 }
 /**
  * One versioned object from `app_launch` or `subscribe`.

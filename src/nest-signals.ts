@@ -31,18 +31,18 @@ export const SMOKE_SUMMARY = 'A Nest Protect detects smoke.'
 export const CO_SUMMARY = 'A Nest Protect detects carbon monoxide.'
 export const ALARM_FEED_STALE_SUMMARY =
   'Nest Protect smoke and CO readings are stale. HomeKit may not show an alarm.'
-export const TOKEN_REJECTED_SUMMARY =
-  'Nest rejected the access token. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
+export const SIGN_IN_REJECTED_SUMMARY =
+  'Google sign-in was rejected, or the account is not an admin of the home. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
 export const SESSION_FORMAT_SUMMARY =
   'Nest changed its session format. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
 export const CONFIG_INVALID_SUMMARY =
-  'The Nest access token in Homebridge is missing or invalid. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
+  'The Google sign-in settings in Homebridge are missing or invalid. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.'
 
 /** Why the plugin stopped. The summary depends on it. The signal name does not. */
-export type StopReason = 'token' | 'session' | 'config'
+export type StopReason = 'sign-in' | 'session' | 'config'
 
 const STOP_SUMMARIES: Record<StopReason, string> = {
-  token: TOKEN_REJECTED_SUMMARY,
+  'sign-in': SIGN_IN_REJECTED_SUMMARY,
   session: SESSION_FORMAT_SUMMARY,
   config: CONFIG_INVALID_SUMMARY,
 }
@@ -98,7 +98,7 @@ export class NestSignals {
     this.#armStaleTimer()
   }
 
-  /** Nest accepted the token. Clears auth-failed. */
+  /** Sign-in succeeded. Clears auth-failed. */
   noteConnected(): void {
     if (this.#isClosed || this.#hasStopped) {
       return
@@ -164,7 +164,7 @@ export class NestSignals {
     this.#writer.write(SIGNAL_AUTH_FAILED, {
       active: false,
       severity: 'error',
-      summary: TOKEN_REJECTED_SUMMARY,
+      summary: SIGN_IN_REJECTED_SUMMARY,
     })
   }
 

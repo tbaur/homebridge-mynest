@@ -24,11 +24,11 @@ export declare const ALARM_FEED_STALE_GRACE_MS: number;
 export declare const SMOKE_SUMMARY = "A Nest Protect detects smoke.";
 export declare const CO_SUMMARY = "A Nest Protect detects carbon monoxide.";
 export declare const ALARM_FEED_STALE_SUMMARY = "Nest Protect smoke and CO readings are stale. HomeKit may not show an alarm.";
-export declare const TOKEN_REJECTED_SUMMARY = "Nest rejected the access token. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.";
+export declare const SIGN_IN_REJECTED_SUMMARY = "Google sign-in was rejected, or the account is not an admin of the home. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.";
 export declare const SESSION_FORMAT_SUMMARY = "Nest changed its session format. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.";
-export declare const CONFIG_INVALID_SUMMARY = "The Nest access token in Homebridge is missing or invalid. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.";
+export declare const CONFIG_INVALID_SUMMARY = "The Google sign-in settings in Homebridge are missing or invalid. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.";
 /** Why the plugin stopped. The summary depends on it. The signal name does not. */
-export type StopReason = 'token' | 'session' | 'config';
+export type StopReason = 'sign-in' | 'session' | 'config';
 /** The subset of the store writer this class uses. */
 export interface SignalWriter {
     write(signal: string, state: SignalState): void;
@@ -55,7 +55,7 @@ export declare class NestSignals {
      * feed, so a restart cannot clear a real alarm.
      */
     start(): void;
-    /** Nest accepted the token. Clears auth-failed. */
+    /** Sign-in succeeded. Clears auth-failed. */
     noteConnected(): void;
     /** Record the Protects HomeKit is showing and whether their alarm feed is fresh. */
     update(protects: readonly ProtectState[], isFeedAvailable: boolean): void;

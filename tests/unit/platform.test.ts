@@ -35,6 +35,7 @@ import {
   UUID_PREFIX,
 } from '../../src/settings'
 import { createHomebridgeLogging, FakeHomebridgeApi } from '../helpers/homebridge'
+import { TEST_SIGN_IN } from '../helpers/sign-in'
 import {
   buildFrame,
   heatingThermostatTraits,
@@ -222,7 +223,7 @@ describe('MyNestPlatform', () => {
       log,
       {
         platform: PLATFORM_NAME,
-        accessToken: 'b'.repeat(120),
+        ...TEST_SIGN_IN,
         ...overrides,
       },
       api.asApi(),
@@ -237,20 +238,20 @@ describe('MyNestPlatform', () => {
     jest.advanceTimersByTime(250)
   }
 
-  it('refuses to start without a usable access token', async () => {
+  it('refuses to start without the sign-in settings', async () => {
     new MyNestPlatform(log, { platform: PLATFORM_NAME }, api.asApi())
     api.emit('didFinishLaunching')
     await Promise.resolve()
 
-    expect(log.errors.join('\n')).toMatch(/Access Token is required/)
+    expect(log.errors.join('\n')).toMatch(/Issue Token URL is required/)
     expect(api.registered).toHaveLength(0)
   })
 
-  it('retries a transient startup failure instead of blaming the token', async () => {
+  it('retries a transient startup failure instead of blaming the sign-in', async () => {
     // A Raspberry Pi that boots before its network is up rejects here with a
-    // NetworkError. Treating that as fatal disabled the plugin for the life of
-    // the process and told the user to paste a fresh token — and because
-    // `didFinishLaunching` fires once, nothing ever tried again.
+    // NetworkError. Treating that as fatal would disable the plugin for the
+    // life of the process — and because `didFinishLaunching` fires once,
+    // nothing would ever try again.
     pendingStartFailures.push(new NetworkError('Could not reach https://home.nest.com/session'))
 
     await launch()
@@ -258,7 +259,7 @@ describe('MyNestPlatform', () => {
     expect(log.warns).toContainEqual(
       expect.stringMatching(/^Could not connect to Nest \(network error\), retrying in \d+s$/),
     )
-    expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
+    expect(log.errors.join('\n')).not.toMatch(/sign-in was rejected/)
 
     // Backoff, then a successful second attempt.
     await jest.advanceTimersByTimeAsync(60_000)
@@ -267,12 +268,12 @@ describe('MyNestPlatform', () => {
     expect(log.infos.join('\n')).toContain('Connected to Nest')
   })
 
-  it('still treats a rejected token at startup as fatal', async () => {
+  it('still treats a rejected sign-in at startup as fatal', async () => {
     pendingStartFailures.push(new AuthenticationError())
 
     await launch()
 
-    expect(log.errors.join('\n')).toMatch(/Get a new token/)
+    expect(log.errors.join('\n')).toMatch(/Google sign-in was rejected/)
     expect(log.warns.join('\n')).not.toMatch(/retrying in the background/)
   })
 
@@ -285,9 +286,17 @@ describe('MyNestPlatform', () => {
     await launch()
 
     expect(log.errors).toContain(
-      'Nest rejected the token (HTTP 400). Get a new token from https://home.nest.com/session and restart Homebridge.',
+      'Google sign-in was rejected (HTTP 400). Copy a new Issue Token URL and Cookies as described in docs/AUTH.md, then restart Homebridge.',
     )
     expect(log.warns.join('\n')).not.toMatch(/Could not connect to Nest/)
+  })
+
+  it('logs the specific instruction a sign-in error carries', async () => {
+    pendingStartFailures.push(new AuthenticationError('raw', { status: 400, operatorMessage: 'Make the account an admin.' }))
+
+    await launch()
+
+    expect(log.errors).toContain('Make the account an admin.')
   })
 
   it('logs that thermostat control is enabled once, not on every startup retry', async () => {
@@ -489,7 +498,7 @@ describe('MyNestPlatform', () => {
 
     const platform = new MyNestPlatform(
       log,
-      { platform: PLATFORM_NAME, accessToken: 'b'.repeat(120) },
+      { platform: PLATFORM_NAME, ...TEST_SIGN_IN },
       api.asApi(),
     )
     platform.configureAccessory(ghost)
@@ -700,7 +709,7 @@ describe('MyNestPlatform', () => {
       log,
       {
         platform: PLATFORM_NAME,
-        accessToken: 'b'.repeat(120),
+        ...TEST_SIGN_IN,
       },
       api.asApi(),
     )
@@ -724,7 +733,7 @@ describe('MyNestPlatform', () => {
       log,
       {
         platform: PLATFORM_NAME,
-        accessToken: 'b'.repeat(120),
+        ...TEST_SIGN_IN,
       },
       api.asApi(),
     )
@@ -924,7 +933,7 @@ describe('MyNestPlatform', () => {
       log,
       {
         platform: PLATFORM_NAME,
-        accessToken: 'b'.repeat(120),
+        ...TEST_SIGN_IN,
       },
       api.asApi(),
     )
@@ -957,7 +966,7 @@ describe('MyNestPlatform', () => {
       log,
       {
         platform: PLATFORM_NAME,
-        accessToken: 'b'.repeat(120),
+        ...TEST_SIGN_IN,
       },
       api.asApi(),
     )
@@ -1009,7 +1018,7 @@ describe('MyNestPlatform', () => {
 
     const platform = new MyNestPlatform(
       log,
-      { platform: PLATFORM_NAME, accessToken: 'b'.repeat(120) },
+      { platform: PLATFORM_NAME, ...TEST_SIGN_IN },
       api.asApi(),
     )
     platform.configureAccessory(cached)
@@ -1030,7 +1039,7 @@ describe('MyNestPlatform', () => {
     await launch()
 
     expect(log.errors.join('\n')).toMatch(/session format/)
-    expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
+    expect(log.errors.join('\n')).not.toMatch(/sign-in was rejected/)
   })
 
   it('keeps cached accessories when configuration is unusable', async () => {
@@ -1053,7 +1062,7 @@ describe('MyNestPlatform', () => {
     await Promise.resolve()
 
     expect(api.unregistered).not.toContain(stale)
-    expect(log.errors.join('\n')).toContain('Access Token is required')
+    expect(log.errors.join('\n')).toContain('Issue Token URL is required')
   })
 
   it('logs the raw topaz fields at debug when a Protect object arrives', async () => {
@@ -1131,14 +1140,14 @@ describe('MyNestPlatform', () => {
     expect(smoke).toBeDefined()
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(true)
 
-    harness.options.onFatal(new AuthenticationError('Nest rejected the access token'))
+    harness.options.onFatal(new AuthenticationError())
     await Promise.resolve()
 
-    // Token expiry needs a manual paste + restart — not accessory churn.
+    // A revoked sign-in needs new cookies and a restart — not accessory churn.
     expect(api.unregistered).toHaveLength(0)
     expect(api.registered).toHaveLength(published)
-    expect(log.errors.join('\n')).toMatch(/home\.nest\.com\/session/)
-    expect(log.errors.join('\n')).toMatch(/Nest rejected the token/)
+    expect(log.errors.join('\n')).toMatch(/docs\/AUTH\.md/)
+    expect(log.errors.join('\n')).toMatch(/Google sign-in was rejected/)
     // Last readings stay, but must not look like a live all-clear after auth dies.
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusActive).value).toBe(false)
     expect(smoke!.getCharacteristic(api.hap.Characteristic.StatusFault).value)
@@ -1218,7 +1227,7 @@ describe('MyNestPlatform', () => {
       await launch({ pagerdutySignals: true })
       flushSync()
 
-      harness.options.onFatal(new AuthenticationError('Nest rejected the access token'))
+      harness.options.onFatal(new AuthenticationError())
       api.emit('shutdown')
 
       expect(readSignals()).toEqual(expect.objectContaining({ 'auth-failed': 1, 'alarm-feed-stale': 0 }))
@@ -1247,7 +1256,7 @@ describe('MyNestPlatform', () => {
       await jest.advanceTimersByTimeAsync(5 * 60_000)
 
       expect(readSignals()).toEqual({ 'auth-failed': 0, 'alarm-feed-stale': 1 })
-      expect(log.errors.join('\n')).not.toMatch(/Get a new token/)
+      expect(log.errors.join('\n')).not.toMatch(/sign-in was rejected/)
     })
 
     it('raises auth-failed when the configuration is unusable', async () => {

@@ -6,7 +6,7 @@
  *
  * Jest configuration for sandboxed testing.
  * All tests run in isolation against synthesized fixtures; none touch the
- * network, and none contain data captured from a live Nest account.
+ * network, and none contain data captured from a live account.
  */
 module.exports = {
   preset: 'ts-jest',

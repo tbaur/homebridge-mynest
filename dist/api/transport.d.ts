@@ -15,13 +15,15 @@
 import { type NestEndpoints } from '../settings';
 import type { BucketMap } from '../types/nest';
 import type { TraitUpdate } from './protobuf';
+import type { TokenSource } from './google-auth';
 import { type Http2Connect } from './observe';
 import type { FetchLike } from './http';
 import { type ThermostatSetpointWrite } from './thermostat-write';
 import { CircuitBreaker, type CircuitBreakerStatus } from './circuit-breaker';
 import type { Logger } from '../utils/logger';
 export interface NestTransportOptions {
-    accessToken: string;
+    /** Produces the Nest token behind each session. */
+    auth: TokenSource;
     endpoints: NestEndpoints;
     log: Logger;
     /** Called with every trait the Observe stream reports, snapshot or patch. */
@@ -139,7 +141,7 @@ export declare class NestTransport {
      * pushed as an update rather than being waited for. Blocking on it would
      * delay every REST-visible device behind the slower transport.
      *
-     * @throws {AuthenticationError} When the token is rejected.
+     * @throws {AuthenticationError} When the sign-in is rejected.
      * @throws {SessionShapeError} When the session is one this plugin cannot use.
      *   Nothing can proceed without a session, so both are surfaced rather than retried.
      */

@@ -9,7 +9,7 @@
 
 const nock = require('nock')
 
-// No test may reach the network. A Nest access token controls the home's
+// No test may reach the network. Sign-in credentials control the home's
 // thermostats and smoke alarms, so a stray real request from a test run is a
 // genuine hazard rather than merely a flaky test.
 beforeAll(() => {

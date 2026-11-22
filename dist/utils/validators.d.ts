@@ -6,11 +6,10 @@
  *
  * @fileoverview Configuration validation.
  *
- * The checks here are shaped by what users actually paste into this field.
- * `access_token` sits in a JSON blob next to half a dozen other tokens, and
- * getting the wrong one produces an opaque HTTP 401 at runtime with nothing
- * pointing back at the config. Catching the recognisable mistakes at startup
- * is worth more than a generic "required field" error.
+ * Both sign-in values are copied by hand from a browser's developer tools, so
+ * the checks here are shaped by the mistakes that copy makes: the wrong
+ * request's URL, a header name pasted along with its value, or a truncated
+ * value. Each otherwise fails at runtime as an unexplained Google error.
  *
  * Log copy uses the Homebridge UI titles (Title Case), not JSON keys.
  */

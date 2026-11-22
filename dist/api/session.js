@@ -5,37 +5,26 @@
  * Licensed under the Apache License, Version 2.0
  * See LICENSE file for full license text
  *
- * @fileoverview Nest Account session, the only authentication path supported.
+ * @fileoverview Nest session, opened with a Nest token from Google sign-in.
  *
  * Flow:
- *   1. `GET /session` with `Authorization: Basic <configured access_token>`.
+ *   1. `GET /session` with `Authorization: Basic <Nest token>` (see
+ *      `google-auth.ts` for where the token comes from).
  *   2. Use the `access_token`, `userid`, and `urls.transport_url` from that
- *      response for every subsequent REST and Observe call.
- *
- * Google account sign-in is deliberately not implemented. It requires
- * replaying a browser cookie through Google's own `issueToken` flow, which
- * Google changes without notice and which asks the user to paste a credential
- * covering their entire Google account rather than just their Nest home.
+ *      response for every subsequent REST and Observe call, until the Nest
+ *      token expires.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.authenticatedHeaders = authenticatedHeaders;
 exports.openSession = openSession;
 const errors_1 = require("../errors");
 const settings_1 = require("../settings");
-const sanitizers_1 = require("../utils/sanitizers");
 const http_1 = require("./http");
-/**
- * Build the headers Nest expects on a session request.
- *
- * The token is sent twice, as Basic auth and as the `cztoken` cookie, because
- * that is what the Nest web app does and the endpoint is its private backend.
- * Sending only one of the two is not reliably accepted.
- */
-function sessionHeaders(accessToken) {
+/** Build the headers Nest expects on a session request. */
+function sessionHeaders(token) {
     return {
-        Authorization: `Basic ${accessToken}`,
+        Authorization: `Basic ${token}`,
         'User-Agent': settings_1.USER_AGENT,
-        cookie: `G_ENABLED_IDPS=google; eu_cookie_accepted=1; viewer-volume=0.5; cztoken=${accessToken}`,
     };
 }
 /** Standard headers for an authenticated REST call, once a session exists. */
@@ -57,7 +46,7 @@ async function requestSession(options) {
     try {
         return await (0, http_1.requestJson)(options.endpoints.sessionUrl, {
             method: 'GET',
-            headers: sessionHeaders(options.accessToken),
+            headers: sessionHeaders(options.token.value),
             timeoutMs: settings_1.SESSION_TIMEOUT_MS,
             fetchImpl: options.fetchImpl,
             signal: options.signal,
@@ -71,18 +60,15 @@ async function requestSession(options) {
     }
 }
 /**
- * Exchange the configured access token for a usable session.
+ * Exchange a Nest token for a usable session.
  *
  * @throws {AuthenticationError} When Nest rejects the token (HTTP 400 or 401).
  * @throws {SessionShapeError} When the response is accepted but omits a field
  *   the plugin needs, or names a transport host off Nest infrastructure. Either
- *   means Nest changed the contract; a new token would not help.
+ *   means Nest changed the contract; signing in again would not help.
  */
 async function openSession(options) {
-    const { accessToken, log } = options;
-    if (log.debugEnabled) {
-        log.debug(`Opening a Nest session with the configured token ${(0, sanitizers_1.previewSecret)(accessToken)}`);
-    }
+    const { log } = options;
     const body = await requestSession(options);
     const token = typeof body.access_token === 'string' ? body.access_token : undefined;
     // Only a scalar. `String()` accepts anything, so an object would become
@@ -115,22 +101,13 @@ async function openSession(options) {
     // because a query or fragment on the raw string would turn the subscribe path
     // into query data and silently POST to `/` instead.
     const normalizedTransportUrl = assertNestTransportUrl(transportUrl);
-    const expiresInSec = typeof body.expires_in === 'number'
-        && Number.isFinite(body.expires_in)
-        && body.expires_in > 0
-        ? body.expires_in
-        : undefined;
-    if (log.debugEnabled) {
-        log.debug(`Nest session established; the session token is ${(0, sanitizers_1.previewSecret)(token)}`
-            + `${expiresInSec !== undefined ? ` and expires in ${expiresInSec}s` : ''}`);
-    }
-    const openedAt = Date.now();
+    log.debug('Nest session established');
     return {
         token: token,
         userId: userId,
         transportUrl: normalizedTransportUrl,
-        openedAt,
-        expiresAt: expiresInSec !== undefined ? openedAt + expiresInSec * 1_000 : undefined,
+        openedAt: Date.now(),
+        expiresAt: options.token.expiresAt,
     };
 }
 /** Hosts the session token may be sent to, beyond the fixed API endpoints. */

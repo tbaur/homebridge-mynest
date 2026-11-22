@@ -7,7 +7,7 @@
 [![Homebridge](https://img.shields.io/badge/homebridge-2.x-purple)](https://homebridge.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in Apple HomeKit through Homebridge, using a **Nest Account** access token only.
+Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in Apple HomeKit through Homebridge, signing in with a Google account.
 
 ## Features
 
@@ -21,15 +21,16 @@ Expose Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sens
 - **Dual transport:** Nest REST subscribe merged with HTTP/2 Observe, so Observe-only devices still appear
 
 ### Reliability
-- **No accessory churn** on a cloud blip or expired token. Devices leave HomeKit only after Nest-confirmed drops
+- **Signs itself in:** copy two values from a browser once; the plugin renews its Nest session about every hour
+- **No accessory churn** on a cloud blip or a rejected sign-in. Devices leave HomeKit only after Nest-confirmed drops
 - **Circuit breakers** on REST and Observe so a dead Nest edge fails fast
 - **Diagnostics** *(optional):* health heartbeats in the Homebridge log, with one warning when health becomes degraded
-- **PagerDuty** *(optional, off by default):* page when a Protect detects smoke or CO, the Protect alarm feed has been stale for 5 minutes, or the plugin has stopped because Nest rejected the token. Needs Node 22.13 or later. On an older Node 22 the plugin still runs and skips the page. See [PagerDuty](docs/README-DETAILED.md#pagerduty)
+- **PagerDuty** *(optional, off by default):* page when a Protect detects smoke or CO, the Protect alarm feed has been stale for 5 minutes, or the plugin has stopped because Google rejected the sign-in. Needs Node 22.13 or later. On an older Node 22 the plugin still runs and skips the page. See [PagerDuty](docs/README-DETAILED.md#pagerduty)
 
 ### Quality
 - A per-area test coverage floor, and a CI step that fails if the suite leaks an open handle
 - **Built for Homebridge 2:** stored getters and `updateValue(...)`, not the removed `getValue()`
-- **Secret hygiene:** access tokens are redacted from logs
+- **Secret hygiene:** cookies, tokens, and the account email are redacted from logs
 - **No analytics**
 
 Every option, occupancy caveat, and troubleshooting step is in [Detailed documentation](docs/README-DETAILED.md).
@@ -44,11 +45,11 @@ Every option, occupancy caveat, and troubleshooting step is in [Detailed documen
 npm install -g homebridge-mynest
 ```
 
-### 2. Get a Nest Account token
+### 2. Copy the sign-in values
 
-You need a Nest Account (not Google-only) access token from [home.nest.com/session](https://home.nest.com/session). Steps and threat model: [docs/AUTH.md](docs/AUTH.md).
+Sign in at [home.nest.com](https://home.nest.com) with a dedicated Google account that is an admin of your home, and copy the **Issue Token URL** and the **Cookies** from the browser's developer tools. Steps and threat model: [docs/AUTH.md](docs/AUTH.md).
 
-Treat that token like a password. Nest Account sessions are account-scoped credentials.
+Treat the Cookies like a password. They sign in to the whole Google account, which is why the account should be one used only for Homebridge.
 
 ### 3. Configure
 
@@ -60,7 +61,8 @@ Use the Homebridge UI, or add the platform to `config.json`:
     {
       "platform": "MyNest",
       "name": "MyNest",
-      "accessToken": "paste-access_token-from-home.nest.com/session"
+      "issueToken": "https://accounts.google.com/o/oauth2/iframerpc?action=issueToken&...",
+      "cookies": "SID=...; HSID=...; ..."
     }
   ]
 }
@@ -80,7 +82,7 @@ Thermostat control stays off until you enable **Allow thermostat control**. Opti
 | Nest Protect | Smoke + CO (+ optional occupancy / temp) | Smoke and CO stay published. A missing REST number faults that sensor. Occupancy is ~10-minute presence, not motion. |
 | Temperature Sensor | Temperature Sensor | Battery + temperature. A missing temperature faults the sensor. |
 
-Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes are out of scope.
+Cameras, doorbells, Yale locks, and Home/Away structure switches are out of scope.
 
 ## Configuration Options
 
@@ -89,7 +91,8 @@ Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account
 | Option | Default | Description |
 | --- | --- | --- |
 | `name` | `MyNest` | Required. Plugin instance name in Homebridge logs. |
-| `accessToken` | — | Required. Nest Account `access_token`. See [docs/AUTH.md](docs/AUTH.md). |
+| `issueToken` | — | Required. Issue Token URL from the Google sign-in. See [docs/AUTH.md](docs/AUTH.md). |
+| `cookies` | — | Required. Cookie header from the same sign-in. See [docs/AUTH.md](docs/AUTH.md). |
 | `allowThermostatControl` | `false` | Send mode/setpoint/Eco changes to Nest. |
 | `exposeGlobalEcoSwitch` | `false` | One switch that sets Eco on every thermostat. Writes still need `allowThermostatControl`. |
 | `exposeProtectOccupancy` | `true` | Occupancy from REST `auto_away` when that field is a boolean and the Protect is not reported as battery-powered. Unknown power does not hide a boolean Nest already sent. |
@@ -99,13 +102,13 @@ Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account
 | `diagnosticsInterval` | `0` | Seconds between health heartbeats; `0` off, else `30`–`86400`. |
 | `structuredLogs` | `false` | With diagnostics, also emit a JSON line. |
 | `pagerdutySignals` | `false` | Page through homebridge-pagerduty. Off until turned on. See [PagerDuty](docs/README-DETAILED.md#pagerduty). |
-| `debug` | `false` | Verbose logging; tokens are redacted. |
+| `debug` | `false` | Verbose logging; credentials are redacted. |
 
 The [detailed documentation](docs/README-DETAILED.md#full-configuration-reference) explains each option and what happens when REST or Observe is down.
 
 ## Not Working?
 
-1. **Authentication error:** token missing, truncated, Google JWT/`ya29.`, or revoked. Capture a fresh Nest Account token ([docs/AUTH.md](docs/AUTH.md)).
+1. **Google sign-in was rejected:** the account signed out, its password changed, or a value was copied incompletely. Copy both values again ([docs/AUTH.md](docs/AUTH.md)).
 2. **Thermostat missing:** modern thermostats are Observe-only on some accounts. Enable `debug` for stream detail.
 3. **Eco / setpoint changes snap back:** enable **Allow thermostat control**.
 4. **Protect smoke/CO shows a fault:** REST has not supplied that sensor's number, or the REST feed is stale. The tile stays. With `debug` on, a `REST topaz` line shows the raw `smoke_status` and `co_status` Nest sent.
@@ -115,7 +118,7 @@ The [full troubleshooting list](docs/README-DETAILED.md#troubleshooting) covers 
 
 ## Security
 
-This plugin holds a Nest Account `access_token` in Homebridge's plaintext `config.json`. Anyone who can read that file can act as the Nest web app for the home. Secure the host, rotate the token if it may have leaked, and never paste tokens into issues or logs.
+This plugin holds Google sign-in cookies in Homebridge's plaintext `config.json`. Anyone who can read that file can sign in to that Google account and control the home. Use a dedicated account, secure the host, sign the account out if the cookies may have leaked, and never paste them into issues or logs.
 
 See [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
 
@@ -123,7 +126,7 @@ See [SECURITY.md](SECURITY.md) and [docs/AUTH.md](docs/AUTH.md).
 
 - **Homebridge 2.x**
 - **Node.js 22, 24, or 26.** PagerDuty signals need 22.13 or later; the rest of the plugin does not
-- A Nest Account (not Google-only) with an `access_token` from [home.nest.com/session](https://home.nest.com/session)
+- A Google account that is an admin of the home with your Nest devices
 
 ## More Info
 

@@ -11,7 +11,7 @@ import {
   ALARM_FEED_STALE_GRACE_MS,
   NestSignals,
   SESSION_FORMAT_SUMMARY,
-  TOKEN_REJECTED_SUMMARY,
+  SIGN_IN_REJECTED_SUMMARY,
   type SignalWriter,
 } from '../../src/nest-signals'
 import type { SignalState } from '../../src/pagerduty-signals'
@@ -130,12 +130,12 @@ describe('NestSignals', () => {
   it('raises one auth-failed page on a stop and then holds every signal', () => {
     signals.update([{ ...CLEAR, smoke: 'emergency' }], true)
     signals.update([CLEAR], false)
-    signals.noteStopped('token')
+    signals.noteStopped('sign-in')
 
     expect(writer.latest.get('auth-failed')).toEqual({
       active: true,
       severity: 'error',
-      summary: TOKEN_REJECTED_SUMMARY,
+      summary: SIGN_IN_REJECTED_SUMMARY,
     })
     expect(writer.latest.get('alarm-feed-stale')?.active).toBe(false)
 
@@ -150,7 +150,7 @@ describe('NestSignals', () => {
 
   it('names the session format when that is why the plugin stopped', () => {
     signals.noteStopped('session')
-    signals.noteStopped('token')
+    signals.noteStopped('sign-in')
 
     expect(writer.latest.get('auth-failed')?.summary).toBe(SESSION_FORMAT_SUMMARY)
   })
@@ -175,7 +175,7 @@ describe('NestSignals', () => {
     signals.start()
     signals.update([{ ...CLEAR, smoke: 'emergency' }], true)
     signals.noteConnected()
-    signals.noteStopped('token')
+    signals.noteStopped('sign-in')
 
     expect(writer.close).toHaveBeenCalledTimes(1)
     expect(writer.latest.size).toBe(0)

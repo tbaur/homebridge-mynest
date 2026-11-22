@@ -18,6 +18,8 @@ const settings_1 = require("./settings");
 const device_1 = require("./types/device");
 const errors_1 = require("./errors");
 const transport_1 = require("./api/transport");
+const cookie_store_1 = require("./api/cookie-store");
+const google_auth_1 = require("./api/google-auth");
 const nest_signals_1 = require("./nest-signals");
 const pagerduty_signals_1 = require("./pagerduty-signals");
 const thermostat_write_1 = require("./api/thermostat-write");
@@ -66,8 +68,8 @@ const UPDATE_COALESCE_MS = 250;
  * only remaining signal that HomeKit's values are frozen.
  */
 const FATAL_REMINDER_MS = 60 * 60_000;
-function tokenRejectedMessage(status) {
-    return `Nest rejected the token (HTTP ${status}). Get a new token from https://home.nest.com/session and restart Homebridge.`;
+function signInRejectedMessage(status) {
+    return `Google sign-in was rejected (HTTP ${status}). Copy a new Issue Token URL and Cookies as described in docs/AUTH.md, then restart Homebridge.`;
 }
 /** A few words for the startup retry line; the full error goes to debug. */
 function describeStartupFailure(error) {
@@ -96,7 +98,7 @@ function stopReasonFor(error) {
     if (error instanceof errors_1.SessionShapeError) {
         return 'session';
     }
-    return error instanceof errors_1.ConfigurationError ? 'config' : 'token';
+    return error instanceof errors_1.ConfigurationError ? 'config' : 'sign-in';
 }
 /** Device kinds as they read in the log. */
 const KIND_LABELS = {
@@ -266,11 +268,11 @@ class MyNestPlatform {
     async #start() {
         if (!this.#config) {
             // Accessories are kept, for the same reason #handleFatal keeps them: a
-            // typo, a half-edited config.json, or a truncated token would otherwise
+            // typo, a half-edited config.json, or a truncated cookie would otherwise
             // destroy every room assignment, scene membership, and automation target
             // in the Home app — and fixing the config does not bring them back,
             // because HomeKit treats the re-registered accessories as new devices.
-            // A config error is less severe than a revoked token, so it cannot
+            // A config error is less severe than a revoked sign-in, so it cannot
             // warrant a more destructive response.
             this.#log.error('Invalid configuration; accessories kept but will not update until it is corrected.');
             this.#holdUnpublishedProtectAlarms();
@@ -282,7 +284,12 @@ class MyNestPlatform {
         this.#startedAt = Date.now();
         const diagnostics = this.#diagnostics;
         const transport = new transport_1.NestTransport({
-            accessToken: this.#config.accessToken,
+            auth: new google_auth_1.GoogleAuth({
+                issueToken: this.#config.issueToken,
+                cookies: this.#config.cookies,
+                store: new cookie_store_1.FileCookieStore(this.api.user.storagePath(), this.#log),
+                log: this.#log,
+            }),
             endpoints: (0, settings_1.resolveEndpoints)(this.#config.fieldTest),
             log: this.#log,
             onTraits: (traits) => this.#applyTraits(traits),
@@ -313,12 +320,10 @@ class MyNestPlatform {
         catch (error) {
             // Only an unrecoverable failure may reach #handleFatal. `start()` opens a
             // session and runs one app_launch, so it also rejects for DNS, TLS,
-            // timeout, 5xx, and breaker errors — none of which mean the token is bad.
-            // Treating those as fatal permanently disabled the plugin for the life of
-            // the process and told the user to paste a fresh token, which is exactly
-            // what a Raspberry Pi that boots before its network is up would see.
-            // Steady state already classifies these correctly; this is the boot path
-            // catching up.
+            // timeout, 5xx, and breaker errors — none of which mean the sign-in is
+            // bad. Treating those as fatal would disable the plugin for the life of
+            // the process, which is exactly what a Raspberry Pi that boots before its
+            // network is up would see.
             if ((0, errors_1.isFatalTransportError)(error)) {
                 this.#handleFatal(error instanceof Error ? error : new Error(String(error)));
                 return;
@@ -402,16 +407,15 @@ class MyNestPlatform {
     }
     /**
      * A failure nothing can recover from without a config change — almost always
-     * an expired or revoked Nest Account access token.
+     * Google sign-in cookies that were signed out or revoked.
      *
      * Homebridge has no way for a plugin to unload itself, so the transports are
-     * stopped and the reason is logged once. Retrying a token Nest has refused
-     * only produces the same refusal every few seconds.
+     * stopped and the reason is logged once. Retrying a sign-in Google has
+     * refused only produces the same refusal every few seconds.
      *
-     * Accessories stay in HomeKit: Nest auth is a pasted session token that the
-     * user must refresh manually, and tearing down rooms/automations for that
-     * would be worse than showing last-known values until they restart with a
-     * fresh token.
+     * Accessories stay in HomeKit: tearing down rooms and automations would be
+     * worse than showing last-known values until the user restarts with new
+     * cookies.
      */
     #handleFatal(error) {
         if (this.#hasFatal) {
@@ -420,7 +424,7 @@ class MyNestPlatform {
         this.#hasFatal = true;
         const isSessionShape = error instanceof errors_1.SessionShapeError;
         const message = error instanceof errors_1.AuthenticationError
-            ? tokenRejectedMessage(error.httpStatus)
+            ? error.operatorMessage ?? signInRejectedMessage(error.httpStatus)
             : error.message;
         this.#log.error(message);
         this.#log.debug(`Stopped by: ${(0, sanitizers_1.sanitizeError)(error)}`);

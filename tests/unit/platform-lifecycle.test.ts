@@ -21,6 +21,7 @@ import { AuthenticationError } from '../../src/errors'
 import { GLOBAL_ECO_DEVICE_ID, PLATFORM_NAME, UUID_PREFIX } from '../../src/settings'
 import type { BucketMap } from '../../src/types/nest'
 import { createHomebridgeLogging, FakeHomebridgeApi } from '../helpers/homebridge'
+import { TEST_SIGN_IN } from '../helpers/sign-in'
 import { buildFrame, heatingThermostatTraits, protectTraits } from '../helpers/observe-fixtures'
 
 let options: NestTransportOptions
@@ -122,7 +123,7 @@ describe('MyNestPlatform lifecycle', () => {
   ): Promise<void> {
     const platform = new MyNestPlatform(
       log,
-      { platform: PLATFORM_NAME, accessToken: 'b'.repeat(120), ...config },
+      { platform: PLATFORM_NAME, ...TEST_SIGN_IN, ...config },
       api.asApi(),
     )
     for (const accessory of cached) {

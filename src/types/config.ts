@@ -13,14 +13,13 @@ export interface MyNestPlatformConfig {
   name?: string
 
   /**
-   * Nest Account `access_token`, copied from https://home.nest.com/session.
-   *
-   * This plugin deliberately supports only Nest Account tokens. Google account
-   * sign-in requires replaying a browser cookie through Google's own auth flow,
-   * which breaks without warning and asks users to paste a credential far more
-   * powerful than this one.
+   * The `issueToken` request URL from a browser signed in to the Google
+   * account, as described in docs/AUTH.md.
    */
-  accessToken?: unknown
+  issueToken?: unknown
+
+  /** The `Cookie` header sent with that sign-in, for the same account. */
+  cookies?: unknown
 
   /** Talk to Nest's field-test environment instead of production. */
   fieldTest?: unknown
@@ -78,7 +77,8 @@ export interface ResolvedConfig {
    * the plugin only resolves it so the value it reports is the one in effect.
    */
   name: string
-  accessToken: string
+  issueToken: string
+  cookies: string
   fieldTest: boolean
   allowThermostatControl: boolean
   exposeGlobalEcoSwitch: boolean

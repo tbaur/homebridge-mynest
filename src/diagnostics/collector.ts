@@ -414,7 +414,7 @@ interface CounterValues {
 /**
  * Build a redacted echo of the plugin config for snapshots.
  *
- * The access token is never included; the ignored-device list is reduced to a
+ * Sign-in credentials are never included; the ignored-device list is reduced to a
  * count so the echo stays free of device identifiers.
  */
 function redactConfig(config: ResolvedConfig): Record<string, unknown> {

@@ -23,32 +23,33 @@ If you discover a security vulnerability, please report it responsibly:
    - Potential impact
    - Any suggested fixes
 
-## The Nest Account access token
+## The Google sign-in cookies
 
-How to capture the token is in [docs/AUTH.md](docs/AUTH.md). This section is the threat model.
+How to copy the sign-in values is in [docs/AUTH.md](docs/AUTH.md). This section is the threat model.
 
-Nest publishes no consumer API. This plugin authenticates with a Nest Account `access_token` copied from `https://home.nest.com/session`. Understand what that token is before you configure the plugin:
+Nest publishes no consumer API. This plugin signs in the way the Nest web app does: it sends the configured Google cookies to Google's issueToken endpoint, exchanges the resulting OAuth token for an hour-long Nest token, and renews it before it expires. Understand what the cookies are before you configure the plugin:
 
-- **It is account-scoped Nest credentials**, not a HomeKit pairing code. Anyone who has it can act as the Nest web app for that account.
-- **It is stored in plaintext.** Homebridge keeps plugin configuration in `config.json` on disk, unencrypted. Anyone who can read that file — or a backup of it — holds a durable credential to the Nest home.
-- **Google cookies and OAuth tokens are rejected on purpose.** They cover a broader Google identity than Nest Account access and are a different auth surface this plugin does not implement.
+- **They sign in to the whole Google account**, not only to Nest. Anyone who has them can use that account's other Google services. Use a dedicated Google account that is an admin of the home and is used for nothing else.
+- **They are stored in plaintext.** Homebridge keeps plugin configuration in `config.json` on disk, unencrypted. The cookies Google updates during sign-in are kept in `homebridge-mynest/google-cookies.json` under the Homebridge storage path, readable only by the Homebridge user. Anyone who can read either file, or a backup of it, holds a working sign-in to that account.
+- **They are sent only to Google.** The Issue Token URL must be `https://accounts.google.com/o/oauth2/iframerpc`; any other host, port, or path is refused at startup.
 
-Treat the token as a password-equivalent credential. Do not paste it into issues, logs, screenshots, or chat.
+Treat the cookies as a password-equivalent credential. Do not paste them into issues, logs, screenshots, or chat.
 
-**Revoking it.** Sign out Nest sessions / rotate Nest account credentials from Nest's account settings, then capture a fresh token and update Homebridge.
+**Revoking them.** Remove the dedicated account from the home in the Google Home app, or change its password, or sign it out of all sessions from its Google Account security page. Then copy new values if you want the plugin to keep working.
 
 ## Security Measures
 
 This plugin implements:
 
-- Nest Account tokens only — Google JWT / `ya29.` shapes are rejected at config validation
-- Secret redaction in structured logs
+- The Issue Token URL is restricted to Google's issueToken endpoint, so the cookies cannot be sent elsewhere
+- Redaction of cookies, Google and Nest tokens, and the account email in logs and diagnostics
 - Transport URL host allowlisting before the session token is sent
+- Saved cookies are written owner-only (`0600`) and are discarded when the configured cookies change
 - Thermostat mode/setpoint/Eco writes use Nest BatchUpdateState behind opt-in `allowThermostatControl` (off by default)
 - No analytics or telemetry
 
 ## Scope limits
 
-Out-of-scope devices are listed in the [README](README.md#supported-devices): cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes.
+Out-of-scope devices are listed in the [README](README.md#supported-devices): cameras, doorbells, Yale locks, and Home/Away structure switches.
 
 Life-safety alarm state for Protects is only treated as live while Nest REST can refresh it. A missing number or a stale REST feed leaves the smoke and CO sensors published, inactive, and faulted, so HomeKit does not keep a frozen all-clear. An `app_launch` that is empty or under half the previous object count still merges the objects it contains, and it does not refresh that clock.
