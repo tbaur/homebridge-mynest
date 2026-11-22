@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [3.0.1](https://github.com/tbaur/homebridge-mynest/compare/v3.0.0...v3.0.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* stop the Home app thermostat target from bouncing after a change ([de2a13d](https://github.com/tbaur/homebridge-mynest/commit/de2a13d50833ddef3515c5ee98296a80c2814476))
+
 ## [3.0.0](https://github.com/tbaur/homebridge-mynest/compare/v2.1.4...v3.0.0) (2026-11-22)
 
 
