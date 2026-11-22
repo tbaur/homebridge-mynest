@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. From the first release onward, [release-please](https://github.com/googleapis/release-please) owns this file — do not hand-edit version headings after `0.1.0` ships.
 
+## [3.0.0](https://github.com/tbaur/homebridge-mynest/compare/v2.1.4...v3.0.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* sign in with a Google account
+
+### Features
+
+* sign in with a Google account ([b79b9fd](https://github.com/tbaur/homebridge-mynest/commit/b79b9fd0d35bbeeafd0dc5742de6b2b72d17b0a8))
+
 ## [2.1.4](https://github.com/tbaur/homebridge-mynest/compare/v2.1.3...v2.1.4) (2026-11-17)
 
 
