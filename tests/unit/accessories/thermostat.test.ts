@@ -664,6 +664,21 @@ describe('ThermostatAccessory', () => {
       expect(sent.at(-1)).toMatchObject({ mode: 'heat', targetTemperatureHeatC: 22 })
     })
 
+    it('keeps showing the latest write when Nest echoes an earlier one', async () => {
+      const heating = { ...offWithRange, mode: 'heat' as const, targetTemperatureC: 22, targetTemperatureLowC: 22 }
+      const { service, handler, device } = buildWriting(heating)
+      const target = service.getCharacteristic(Characteristic.TargetTemperature)
+
+      await target.handleSetRequest(23)
+      await target.handleSetRequest(24)
+      handler.update({ ...device, state: { ...heating, targetTemperatureC: 23, targetTemperatureLowC: 23 } })
+      expect(target.value).toBe(24)
+
+      handler.update({ ...device, state: { ...heating, targetTemperatureC: 24, targetTemperatureLowC: 24 } })
+      handler.update({ ...device, state: { ...heating, targetTemperatureC: 21, targetTemperatureLowC: 21 } })
+      expect(target.value).toBe(21)
+    })
+
     it('stops holding a sent write that Nest never confirms', async () => {
       jest.useFakeTimers({ now: 0 })
       try {
