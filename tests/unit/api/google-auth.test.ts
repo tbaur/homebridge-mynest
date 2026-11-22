@@ -162,6 +162,14 @@ describe('GoogleAuth', () => {
     await expect(createAuth(fetch).auth.mintToken()).rejects.toBeInstanceOf(AuthenticationError)
   })
 
+  it('treats HTTP 400 from the Nest auth proxy as a rejected sign-in that names the admin requirement', async () => {
+    const { fetch } = signInFetch([GOOGLE_OK], [{ status: 400, body: {} }])
+
+    const error = await createAuth(fetch).auth.mintToken().catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(AuthenticationError)
+    expect(error).toMatchObject({ message: expect.stringMatching(/admin of the home/) })
+  })
+
   it('reports a Nest auth proxy answer without a token as an unexpected response', async () => {
     const { fetch } = signInFetch([GOOGLE_OK], [{ body: { claims: {} } }])
 

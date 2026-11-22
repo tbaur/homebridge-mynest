@@ -174,6 +174,9 @@ class GoogleAuth {
             fetchImpl: this.#options.fetchImpl,
             signal,
         });
+        if (response.status === 400) {
+            throw new errors_1.AuthenticationError(`Nest would not issue a token for this Google account (HTTP 400). Make sure the account is an admin of the home, then copy a new Issue Token URL and Cookies as described in docs/AUTH.md.`, { status: 400 });
+        }
         if (response.status >= 400) {
             throw (0, errors_1.createApiError)(response.status, `${(0, sanitizers_1.sanitizeUrl)(settings_1.NEST_ISSUE_JWT_URL)} returned HTTP ${response.status}`);
         }
