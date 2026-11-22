@@ -10,11 +10,12 @@
 import { DiagnosticsCollector } from '../../../src/diagnostics/collector'
 import type { DiagnosticsReaders } from '../../../src/diagnostics/collector'
 import type { ResolvedConfig } from '../../../src/types/config'
+import { TEST_SIGN_IN } from '../../helpers/sign-in'
 import { formatDiagnosticLine } from '../../../src/diagnostics/format'
 
 const baseConfig = (): ResolvedConfig => ({
   name: 'MyNest',
-  accessToken: 'b'.repeat(120),
+  ...TEST_SIGN_IN,
   fieldTest: false,
   allowThermostatControl: false,
   exposeGlobalEcoSwitch: false,
@@ -119,7 +120,7 @@ describe('DiagnosticsCollector', () => {
     expect(second.session.logins).toBe(0)
   })
 
-  it('includes a redacted config echo on snapshots and never the access token', () => {
+  it('includes a redacted config echo on snapshots and never the sign-in credentials', () => {
     const m = makeReaders()
     const collector = new DiagnosticsCollector({ pluginVersion: '0.1.0', config: baseConfig() })
     const snap = collector.snapshot('diagnostics.start', m.readers)
@@ -130,7 +131,7 @@ describe('DiagnosticsCollector', () => {
       debug: false,
     })
     expect(JSON.stringify(snap.config)).not.toContain('bbbb')
-    expect(snap.config).not.toHaveProperty('accessToken')
+    expect(snap.config).not.toHaveProperty('cookies')
   })
 
   it('marks health degraded for fatal auth and dead transports', () => {

@@ -1,8 +1,8 @@
 # Protocol notes
 
-User-facing options and troubleshooting: [README-DETAILED.md](README-DETAILED.md). Token capture: [AUTH.md](AUTH.md).
+User-facing options and troubleshooting: [README-DETAILED.md](README-DETAILED.md). Sign-in setup: [AUTH.md](AUTH.md).
 
-Nest publishes no consumer API. Everything below was confirmed with a probe kit against a live Nest Account. Treat this as a working map of private backends, not a promise Nest will keep them stable.
+Nest publishes no consumer API. Everything below was confirmed with a probe kit against a live account. Treat this as a working map of private backends, not a promise Nest will keep them stable.
 
 ## Dual transport
 
@@ -29,18 +29,20 @@ HomeKit accessories are unregistered only when Nest has confirmed a device is go
 | Observe never connected this session | Do not unregister (REST-only view cannot prove thermostats are gone) |
 | Cached accessory not named by Nest since the restart | Two settled Observe snapshots that both omit it before prune |
 | Device absent from the Observe ∪ REST inventory after the above | Unregister from HomeKit |
-| Expired, revoked or missing access token (HTTP 401 anywhere, HTTP 400 from `/session`, or a session this plugin cannot use) | Stop updates; **keep** accessories. Any other failure, including HTTP 403 from either host, retries and does not stop the plugin, including when both transports exhaust their budget. Each transport probes again after the cooldown. Nest Account auth is a manually pasted session token, so unregistering would bounce rooms and automations until the user pastes a fresh token and restarts |
+| Rejected sign-in (Google refuses the cookies, Nest refuses a session opened less than a minute ago with HTTP 401, or HTTP 400 from `/session`), or a session this plugin cannot use | Stop updates; **keep** accessories. A session in use for longer that Nest refuses is renewed once instead. Any other failure, including HTTP 403 from either host, retries and does not stop the plugin, including when both transports exhaust their budget. Each transport probes again after the cooldown. Recovering needs new cookies and a restart, so unregistering would bounce rooms and automations in the meantime |
 
-Unusable plugin config at startup (missing/invalid token shape, etc.) **keeps** the cached accessories, for the same reason an expired token does. A typo, a half-edited `config.json`, or a truncated token would otherwise destroy every room assignment, scene membership, and automation target in the Home app — and fixing the config does not bring them back, because HomeKit treats the re-registered accessories as new devices. A config error cannot warrant a more destructive response than a revoked token. The plugin logs why and publishes nothing until it is restarted with a usable config.
+Unusable plugin config at startup (a missing or malformed Issue Token URL or Cookies, etc.) **keeps** the cached accessories, for the same reason a rejected sign-in does. A typo, a half-edited `config.json`, or a truncated cookie would otherwise destroy every room assignment, scene membership, and automation target in the Home app — and fixing the config does not bring them back, because HomeKit treats the re-registered accessories as new devices. A config error cannot warrant a more destructive response than a revoked sign-in. The plugin logs why and publishes nothing until it is restarted with a usable config.
 
 A transient failure at startup (DNS, TLS, a timeout, a 5xx) is **not** fatal: it is retried with backoff, because `didFinishLaunching` fires only once and a host that boots before its network is up would otherwise stay idle for the lifetime of the process.
 
 ## Session
 
-1. Config holds Nest Account `access_token` from `https://home.nest.com/session`.
-2. Plugin calls `GET /session` with `Authorization: Basic <token>` and the web app's `cztoken` cookie.
-3. Response yields session `access_token`, `userid`, and `urls.transport_url`.
-4. REST calls use Basic auth with the session token; Observe uses the same token against `grpc-web.production.nest.com`.
+1. Config holds the Google `issueToken` URL and `Cookie` header from a sign-in at `home.nest.com`.
+2. Plugin calls the issueToken URL (`https://accounts.google.com/o/oauth2/iframerpc?action=issueToken&...`) with those cookies, `X-Requested-With: XmlHttpRequest`, and `Sec-Fetch-Mode: cors`. Google answers with a Google OAuth `access_token` (`ya29.`, about one hour). A signed-out cookie gets HTTP 200 with an `error` field instead. Google also sends `Set-Cookie` updates for some cookies (`SIDCC` and similar) on every call; the plugin merges them and saves the result.
+3. Plugin calls `POST https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt` with `Authorization: Bearer <Google token>` and body `{"embed_google_oauth_access_token": true, "expire_after": "3600s", "google_oauth_access_token": "<Google token>", "policy_id": "authproxy-oauth-policy"}`. Response yields `jwt` (a Nest token beginning `g.0.`) and `claims.expirationTime`.
+4. Plugin calls `GET /session` with `Authorization: Basic <Nest token>`. Response yields session `access_token` (the same Nest token), `userid`, and `urls.transport_url`. Its `expires_in` is a date string unrelated to the Nest token's lifetime and is ignored.
+5. REST calls use Basic auth with the session token; Observe uses the same token against `grpc-web.production.nest.com`.
+6. Ten minutes before `claims.expirationTime`, the plugin repeats steps 2 to 4. A previous session stays valid until its own expiry, so streams move to the new session without a gap.
 
 ## REST
 
@@ -69,7 +71,7 @@ What Nest does publish is `auto_away` in REST `topaz`: roughly a ten-minute pres
 
 Alarm status is taken from REST `topaz` (`smoke_status` / `co_status`), and only while the REST feed can refresh it. Observe streams `safety_alarm_*` traits, but no public schema maps them and captured samples have all been all-clear. Inferring "no smoke" from an unverified enum is refused.
 
-Every Protect gets smoke and CO HomeKit services. A missing `smoke_status` or `co_status` leaves that sensor inactive and faulted and does not write a clear. REST counts as unavailable when any of these is true: the subscribe circuit breaker is not closed (open or half-open), the HTTP 403 budget is exhausted, the REST loop has exited, no subscribe return or complete `app_launch` arrived in the last 3 minutes, or Nest has not actually answered (a complete `app_launch` or a subscribe that got an HTTP response) in the last 8 minutes. A subscribe that the client timed out still counts toward the 3-minute clock but not the 8-minute one. On a quiet house the plugin runs an `app_launch` after 5 minutes without an answer, so a healthy account never reaches the 8-minute limit. When REST is unavailable, smoke and CO services stay published with last-known values but `StatusActive=false` and `StatusFault=GENERAL_FAULT`. An incomplete `app_launch` moves neither clock, and an empty one counts as incomplete. `app_launch` has its own circuit breaker, so an outage on its host does not stop the subscribe that carries alarms. Leaving a frozen clear that still looks live would be dishonest, and tearing services down would break HomeKit rooms and automations on every Nest blip. Battery-low status can still come from Observe. The smoke and CO tiles stay inactive while that sensor has no REST number or the REST feed is stale, including when Observe says the Protect is online. HTTP 403 does not mean the token is revoked. The plugin keeps probing.
+Every Protect gets smoke and CO HomeKit services. A missing `smoke_status` or `co_status` leaves that sensor inactive and faulted and does not write a clear. REST counts as unavailable when any of these is true: the subscribe circuit breaker is not closed (open or half-open), the HTTP 403 budget is exhausted, the REST loop has exited, no subscribe return or complete `app_launch` arrived in the last 3 minutes, or Nest has not actually answered (a complete `app_launch` or a subscribe that got an HTTP response) in the last 8 minutes. A subscribe that the client timed out still counts toward the 3-minute clock but not the 8-minute one. On a quiet house the plugin runs an `app_launch` after 5 minutes without an answer, so a healthy account never reaches the 8-minute limit. When REST is unavailable, smoke and CO services stay published with last-known values but `StatusActive=false` and `StatusFault=GENERAL_FAULT`. An incomplete `app_launch` moves neither clock, and an empty one counts as incomplete. `app_launch` has its own circuit breaker, so an outage on its host does not stop the subscribe that carries alarms. Leaving a frozen clear that still looks live would be dishonest, and tearing services down would break HomeKit rooms and automations on every Nest blip. Battery-low status can still come from Observe. The smoke and CO tiles stay inactive while that sensor has no REST number or the REST feed is stale, including when Observe says the Protect is online. HTTP 403 does not mean the sign-in is revoked. The plugin keeps probing.
 
 ## Thermostat writes
 

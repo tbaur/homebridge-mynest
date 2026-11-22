@@ -21,6 +21,8 @@ import {
   REDISCOVERY_INTERVAL_MS,
   REST_ALARM_FEED_STALE_MS,
   REST_RESPONSE_STALE_MS,
+  SESSION_EXPIRY_MARGIN_MS,
+  SESSION_REJECT_GRACE_MS,
   resolveEndpoints,
 } from '../../../src/settings'
 import { AuthenticationError } from '../../../src/errors'
@@ -29,6 +31,7 @@ import type { BucketMap } from '../../../src/types/nest'
 import type { TraitUpdate } from '../../../src/api/protobuf'
 import { createFakeHttp2 } from '../../helpers/http2'
 import { createRecordingLogger } from '../../helpers/logger'
+import { createTokenSource } from '../../helpers/sign-in'
 import { buildFrame, heatingThermostatTraits } from '../../helpers/observe-fixtures'
 
 jest.mock('../../../src/utils/retry', () => {
@@ -122,7 +125,7 @@ function createTransport(overrides: Partial<ConstructorParameters<typeof NestTra
   const fatals: Error[] = []
 
   const transport = new NestTransport({
-    accessToken: 'config-token',
+    auth: createTokenSource(),
     endpoints,
     log,
     fetchImpl: fetch,
@@ -651,7 +654,7 @@ describe('NestTransport', () => {
     transport.stop()
 
     expect(fatals.length).toBeGreaterThanOrEqual(1)
-    expect(fatals[0]?.message).toMatch(/access token|HTTP 401/i)
+    expect(fatals[0]?.message).toMatch(/sign-in|HTTP 401/i)
   })
 
   it('stops the Observe loop after repeated HTTP 403 without killing a healthy REST path', async () => {
@@ -707,7 +710,7 @@ describe('NestTransport', () => {
 
     expect(fatals).toHaveLength(0)
     expect(log.errors.join('\n')).toMatch(/blocked by Nest \(HTTP 403\)/)
-    expect(log.errors.join('\n')).not.toMatch(/paste a fresh token/)
+    expect(log.errors.join('\n')).not.toMatch(/Copy a new Issue Token URL/)
     expect(log.warns.join('\n')).toContain('HTTP 403')
   })
 
@@ -967,15 +970,18 @@ describe('NestTransport loop recovery', () => {
   })
 
   it('stops both loops when a later session open returns a shape it cannot use', async () => {
-    // An expiry inside the refresh margin makes every loop call re-open the session.
+    // A token expiring inside the renewal margin makes every loop call re-open the session.
     const { fetch, counts } = routedFetch({
       session: () => new Response(JSON.stringify(
         counts.session <= 2
-          ? { ...SESSION_BODY, expires_in: 1 }
+          ? SESSION_BODY
           : { userid: '5551234', urls: SESSION_BODY.urls },
       ), { status: 200 }),
     })
-    const { transport, fatals } = createTransport({ fetchImpl: fetch })
+    const { transport, fatals } = createTransport({
+      fetchImpl: fetch,
+      auth: createTokenSource({ lifetimeMs: 1_000 }),
+    })
 
     await transport.start()
     await waitUntil(() => fatals.length > 0)
@@ -985,6 +991,81 @@ describe('NestTransport loop recovery', () => {
 
     expect(fatals.map((error) => error.name)).toContain('SessionShapeError')
     expect(counts.session).toBeLessThanOrEqual(opensAtFatal + 1)
+  })
+
+  it('signs in again before the Nest token expires', async () => {
+    const clock = shiftableClock()
+    const auth = createTokenSource({ lifetimeMs: SESSION_EXPIRY_MARGIN_MS + 60_000 })
+    const { transport, http2, fatals } = createTransport({ auth })
+
+    await transport.start()
+    expect(auth.minted).toHaveLength(1)
+
+    clock.advance(2 * 60_000)
+    const connection = await http2.session()
+    connection.failStream('stream reset')
+    await waitUntil(() => auth.minted.length >= 2)
+    transport.stop()
+    clock.restore()
+
+    expect(auth.minted.length).toBeGreaterThanOrEqual(2)
+    expect(fatals).toHaveLength(0)
+  })
+
+  it('keeps using a session until its token nears expiry', async () => {
+    const auth = createTokenSource()
+    const { transport, http2 } = createTransport({ auth })
+
+    await transport.start()
+    const connection = await http2.session()
+    connection.failStream('stream reset')
+    await waitUntil(() => http2.origins.length >= 2)
+    transport.stop()
+
+    expect(auth.minted).toHaveLength(1)
+  })
+
+  it('signs in again instead of stopping when Nest refuses a session in use for a while', async () => {
+    const clock = shiftableClock()
+    const auth = createTokenSource()
+    const { transport, http2, fatals } = createTransport({ auth })
+
+    await transport.start()
+    clock.advance(SESSION_REJECT_GRACE_MS + 1_000)
+    const connection = await http2.session()
+    connection.respond(401)
+    await waitUntil(() => auth.minted.length >= 2)
+    transport.stop()
+    clock.restore()
+
+    expect(auth.minted).toHaveLength(2)
+    expect(fatals).toHaveLength(0)
+  })
+
+  it('stops when Google rejects the sign-in during a renewal', async () => {
+    const clock = shiftableClock()
+    let isRevoked = false
+    const working = createTokenSource({ lifetimeMs: SESSION_EXPIRY_MARGIN_MS + 60_000 })
+    const auth = {
+      mintToken: async () => {
+        if (isRevoked) {
+          throw new AuthenticationError(undefined, { status: 401 })
+        }
+        return working.mintToken()
+      },
+    }
+    const { transport, http2, fatals } = createTransport({ auth })
+
+    await transport.start()
+    isRevoked = true
+    clock.advance(2 * 60_000)
+    const connection = await http2.session()
+    connection.failStream('stream reset')
+    await waitUntil(() => fatals.length > 0)
+    transport.stop()
+    clock.restore()
+
+    expect(fatals[0]).toBeInstanceOf(AuthenticationError)
   })
 
   it('keeps the base reconnect delay after productive Observe sessions that reset', async () => {

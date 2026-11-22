@@ -67,7 +67,7 @@ describeWithSqlite('PagerDutySignals', () => {
   })
 
   it('writes a row that a separate connection reads back', () => {
-    signals.write('auth-failed', { active: true, severity: 'error', summary: 'Nest rejected the access token.' })
+    signals.write('auth-failed', { active: true, severity: 'error', summary: 'Google rejected the sign-in.' })
 
     expect(readRows()).toEqual([
       expect.objectContaining({
@@ -75,7 +75,7 @@ describeWithSqlite('PagerDutySignals', () => {
         signal: 'auth-failed',
         active: 1,
         severity: 'error',
-        summary: 'Nest rejected the access token.',
+        summary: 'Google rejected the sign-in.',
       }),
     ])
   })

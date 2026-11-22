@@ -53,6 +53,8 @@ import {
   isFatalTransportError,
 } from './errors'
 import { NestTransport } from './api/transport'
+import { FileCookieStore } from './api/cookie-store'
+import { GoogleAuth } from './api/google-auth'
 import type { TraitUpdate } from './api/protobuf'
 import { NestSignals, PAGERDUTY_STARTUP_LOG, type StopReason } from './nest-signals'
 import { PagerDutySignals } from './pagerduty-signals'
@@ -115,8 +117,8 @@ const UPDATE_COALESCE_MS = 250
  */
 const FATAL_REMINDER_MS = 60 * 60_000
 
-function tokenRejectedMessage(status: number): string {
-  return `Nest rejected the token (HTTP ${status}). Get a new token from https://home.nest.com/session and restart Homebridge.`
+function signInRejectedMessage(status: number): string {
+  return `Google sign-in was rejected (HTTP ${status}). Copy a new Issue Token URL and Cookies as described in docs/AUTH.md, then restart Homebridge.`
 }
 
 /** A few words for the startup retry line; the full error goes to debug. */
@@ -148,7 +150,7 @@ function stopReasonFor(error: Error): StopReason {
   if (error instanceof SessionShapeError) {
     return 'session'
   }
-  return error instanceof ConfigurationError ? 'config' : 'token'
+  return error instanceof ConfigurationError ? 'config' : 'sign-in'
 }
 
 /** Device kinds as they read in the log. */
@@ -335,11 +337,11 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
   async #start(): Promise<void> {
     if (!this.#config) {
       // Accessories are kept, for the same reason #handleFatal keeps them: a
-      // typo, a half-edited config.json, or a truncated token would otherwise
+      // typo, a half-edited config.json, or a truncated cookie would otherwise
       // destroy every room assignment, scene membership, and automation target
       // in the Home app — and fixing the config does not bring them back,
       // because HomeKit treats the re-registered accessories as new devices.
-      // A config error is less severe than a revoked token, so it cannot
+      // A config error is less severe than a revoked sign-in, so it cannot
       // warrant a more destructive response.
       this.#log.error(
         'Invalid configuration; accessories kept but will not update until it is corrected.',
@@ -356,7 +358,12 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
     const diagnostics = this.#diagnostics
     const transport = new NestTransport({
-      accessToken: this.#config.accessToken,
+      auth: new GoogleAuth({
+        issueToken: this.#config.issueToken,
+        cookies: this.#config.cookies,
+        store: new FileCookieStore(this.api.user.storagePath(), this.#log),
+        log: this.#log,
+      }),
       endpoints: resolveEndpoints(this.#config.fieldTest),
       log: this.#log,
       onTraits: (traits) => this.#applyTraits(traits),
@@ -387,12 +394,10 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     } catch (error) {
       // Only an unrecoverable failure may reach #handleFatal. `start()` opens a
       // session and runs one app_launch, so it also rejects for DNS, TLS,
-      // timeout, 5xx, and breaker errors — none of which mean the token is bad.
-      // Treating those as fatal permanently disabled the plugin for the life of
-      // the process and told the user to paste a fresh token, which is exactly
-      // what a Raspberry Pi that boots before its network is up would see.
-      // Steady state already classifies these correctly; this is the boot path
-      // catching up.
+      // timeout, 5xx, and breaker errors — none of which mean the sign-in is
+      // bad. Treating those as fatal would disable the plugin for the life of
+      // the process, which is exactly what a Raspberry Pi that boots before its
+      // network is up would see.
       if (isFatalTransportError(error)) {
         this.#handleFatal(error instanceof Error ? error : new Error(String(error)))
         return
@@ -492,16 +497,15 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
 
   /**
    * A failure nothing can recover from without a config change — almost always
-   * an expired or revoked Nest Account access token.
+   * Google sign-in cookies that were signed out or revoked.
    *
    * Homebridge has no way for a plugin to unload itself, so the transports are
-   * stopped and the reason is logged once. Retrying a token Nest has refused
-   * only produces the same refusal every few seconds.
+   * stopped and the reason is logged once. Retrying a sign-in Google has
+   * refused only produces the same refusal every few seconds.
    *
-   * Accessories stay in HomeKit: Nest auth is a pasted session token that the
-   * user must refresh manually, and tearing down rooms/automations for that
-   * would be worse than showing last-known values until they restart with a
-   * fresh token.
+   * Accessories stay in HomeKit: tearing down rooms and automations would be
+   * worse than showing last-known values until the user restarts with new
+   * cookies.
    */
   #handleFatal(error: Error): void {
     if (this.#hasFatal) {
@@ -510,7 +514,7 @@ export class MyNestPlatform implements DynamicPlatformPlugin {
     this.#hasFatal = true
     const isSessionShape = error instanceof SessionShapeError
     const message = error instanceof AuthenticationError
-      ? tokenRejectedMessage(error.httpStatus)
+      ? signInRejectedMessage(error.httpStatus)
       : error.message
     this.#log.error(message)
     this.#log.debug(`Stopped by: ${sanitizeError(error)}`)

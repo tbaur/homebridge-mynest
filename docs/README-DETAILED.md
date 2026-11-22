@@ -22,7 +22,8 @@ Install and a short options table live in the [README](../README.md). This page 
     {
       "platform": "MyNest",
       "name": "MyNest",
-      "accessToken": "paste-access_token-from-home.nest.com/session",
+      "issueToken": "https://accounts.google.com/o/oauth2/iframerpc?action=issueToken&...",
+      "cookies": "SID=...; HSID=...; ...",
       "allowThermostatControl": false,
       "exposeGlobalEcoSwitch": false,
       "exposeProtectOccupancy": true,
@@ -41,7 +42,8 @@ Install and a short options table live in the [README](../README.md). This page 
 | Option | Default | Description |
 | --- | --- | --- |
 | `name` | `MyNest` | Required by Homebridge. Log prefix for this instance. |
-| `accessToken` | — | Required. Nest Account `access_token` from [AUTH.md](AUTH.md). Google JWT and `ya29.` shapes are rejected. |
+| `issueToken` | — | Required. The issueToken request URL from a Google sign-in at home.nest.com. Must be on `https://accounts.google.com/o/oauth2/iframerpc`. See [AUTH.md](AUTH.md). |
+| `cookies` | — | Required. The `Cookie` header from the same sign-in. Must include Google's `SID` cookie. See [AUTH.md](AUTH.md). |
 | `allowThermostatControl` | `false` | Opt in to send mode, setpoint, and Eco changes through Nest BatchUpdateState. With this off, HomeKit can still move the tile (Home needs that), but the plugin does not send the change to Nest and moves the tile back. |
 | `exposeGlobalEcoSwitch` | `false` | Publish a Nest Eco Mode switch that sets Eco on every thermostat. Writes still require `allowThermostatControl`. |
 | `exposeProtectOccupancy` | `true` | Occupancy from REST `auto_away` when that field is a boolean and the Protect is not reported as battery-powered. Unknown power does not hide a boolean Nest already sent. See [Protect occupancy](#protect-occupancy). |
@@ -51,7 +53,7 @@ Install and a short options table live in the [README](../README.md). This page 
 | `diagnosticsInterval` | `0` | Seconds between health heartbeats in the log. `0` is off. Otherwise `30`–`86400` (24h). |
 | `structuredLogs` | `false` | When diagnostics are on, also emit a machine-readable JSON line next to each human summary. |
 | `pagerdutySignals` | `false` | Write alert conditions to homebridge-pagerduty's signal store. See [PagerDuty](#pagerduty). |
-| `debug` | `false` | Verbose logging. Tokens are redacted. |
+| `debug` | `false` | Verbose logging. Credentials are redacted. |
 
 `name` is required by Homebridge verified plugins. The plugin uses it as the log prefix.
 
@@ -63,9 +65,9 @@ Install and a short options table live in the [README](../README.md). This page 
 | Nest Protect | Smoke + CO (+ optional occupancy / temp) | Both sensors are always published. A missing REST number faults that sensor. Battery-low status can still come from Observe. The smoke and CO tiles stay inactive while that sensor has no REST number or the REST feed is stale, including when Observe says the Protect is online. |
 | Temperature Sensor | Temperature Sensor | Battery + temperature (`kryptonite`). A missing temperature faults the sensor. HomeKit's 0°C default is not a reading. |
 
-Cameras, doorbells, Yale locks, Home/Away structure switches, and Google-account-only homes are out of scope. That list is also in [SECURITY.md](../SECURITY.md).
+Cameras, doorbells, Yale locks, and Home/Away structure switches are out of scope. That list is also in [SECURITY.md](../SECURITY.md).
 
-A device leaves HomeKit only after Nest-confirmed drops (two-strike and truncation guards on Observe and REST). After a restart, a cached device that Nest has not named yet stays until two settled Observe snapshots both omit it. A cloud blip, a REST-only boot, or an expired access token stops updates but does not unregister thermostats, Protects, or temp sensors. Paste a fresh token and restart.
+A device leaves HomeKit only after Nest-confirmed drops (two-strike and truncation guards on Observe and REST). After a restart, a cached device that Nest has not named yet stays until two settled Observe snapshots both omit it. A cloud blip, a REST-only boot, or a rejected sign-in stops updates but does not unregister thermostats, Protects, or temp sensors. After a rejected sign-in, copy new values and restart.
 
 ## Protect occupancy
 
@@ -132,13 +134,13 @@ Each condition below then opens a PagerDuty alert while it is present, and resol
 | `smoke` | critical | Any Protect reports a smoke warning or emergency |
 | `co` | critical | Any Protect reports a carbon monoxide warning or emergency |
 | `alarm-feed-stale` | error | The Protect alarm feed has been unavailable for 5 minutes, whatever the cause, so HomeKit may not show a smoke or CO alarm |
-| `auth-failed` | error | The plugin stopped because Nest rejected the token (HTTP 400 or 401), the token in the config is missing or invalid, or Nest changed its session format |
+| `auth-failed` | error | The plugin stopped because Google rejected the sign-in or Nest rejected a fresh session (HTTP 400 or 401), the sign-in settings in the config are missing or invalid, or Nest changed its session format |
 
 Each signal covers the whole house. The summary does not name the Protect, so check the Nest app for which one is alarming. While the alarm feed is stale, `smoke` and `co` keep their last value. They do not clear until fresh readings arrive. While `auth-failed` is active, `alarm-feed-stale` stays off, so a stopped plugin sends one page. Any other failure, such as HTTP 403, an unfamiliar error code or a network outage, keeps retrying and pages `alarm-feed-stale` if it lasts 5 minutes. The plugin writes `auth-failed` and `alarm-feed-stale` at startup, so homebridge-pagerduty lists it even if Nest never answers.
 
 ## Troubleshooting
 
-1. **Authentication error.** Token missing, truncated, Google JWT/`ya29.`, or revoked. Capture a fresh Nest Account token ([AUTH.md](AUTH.md)).
+1. **Google sign-in was rejected.** The account signed out, its password changed, Google ended the session, or a value was copied incompletely. Copy both values again ([AUTH.md](AUTH.md)). A member that is not an admin of the home signs in but sees no devices.
 2. **Thermostat missing.** Modern thermostats are Observe-only on some accounts. With default logging the plugin warns within about a minute if Observe produced no frames, and again every five minutes if a connected stream goes quiet. Set `debug: true` for stream detail. From a git checkout you can also run `npm run verify` against the live account. See [DEVELOPMENT.md](../DEVELOPMENT.md).
 3. **Thermostat in Settings but no room tile.** Remove and re-add the **MyNest** child bridge in the Home app (or whatever you set as **Name**), then assign rooms again. Same-UUID republish does not clear Apple Home's stuck presentation.
 4. **Eco / setpoint changes snap back.** Enable **Allow thermostat control**. With control off, HomeKit can still move the UI (required for tiles), but the plugin does not send the change to Nest and moves the tile back.
@@ -150,7 +152,7 @@ Restart Homebridge after any `config.json` edit.
 ## Related docs
 
 - [README](../README.md): install and short options table
-- [AUTH.md](AUTH.md): capturing the Nest Account token
+- [AUTH.md](AUTH.md): Google sign-in and copying the two values
 - [PROTOCOL.md](PROTOCOL.md): reverse-engineered Nest behaviour
 - [DEVELOPMENT.md](../DEVELOPMENT.md): architecture and local setup
 - [SECURITY.md](../SECURITY.md)

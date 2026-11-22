@@ -29,11 +29,12 @@ import {
   REDISCOVERY_INTERVAL_MS,
   REST_PROOF_OF_LIFE_MS,
   SESSION_EXPIRY_MARGIN_MS,
-  SESSION_REFRESH_MS,
+  SESSION_REJECT_GRACE_MS,
   STATUS_HEARTBEAT_MS,
   type NestEndpoints,
 } from '../settings'
 import {
+  AuthenticationError,
   CircuitBreakerError,
   ConfigurationError,
   ForbiddenError,
@@ -49,6 +50,7 @@ import type { TraitUpdate } from './protobuf'
 import { decodeFrame } from './protobuf'
 import { ObjectList, appLaunch, subscribeOnce } from './rest'
 import { openSession } from './session'
+import type { TokenSource } from './google-auth'
 import { runObserveSession, type Http2Connect } from './observe'
 import type { FetchLike } from './http'
 import { postBatchUpdateState } from './batch-update'
@@ -69,7 +71,8 @@ import { computeBackoffMs, sleep, withRetry } from '../utils/retry'
 import { sanitizeError } from '../utils/sanitizers'
 
 export interface NestTransportOptions {
-  accessToken: string
+  /** Produces the Nest token behind each session. */
+  auth: TokenSource
   endpoints: NestEndpoints
   log: Logger
   /** Called with every trait the Observe stream reports, snapshot or patch. */
@@ -196,6 +199,8 @@ export class NestTransport {
   #session: NestSession | null = null
   /** In-flight session open, shared so concurrent callers cannot stampede. */
   #sessionRefresh: Promise<NestSession> | null = null
+  /** Refusals of a sign-in itself, which are final rather than a reason to renew. */
+  readonly #signInFailures = new WeakSet<AuthenticationError>()
   #isStopped = false
   /** Consecutive failures per transport, for log escalation. */
   #observeFailureStreak = 0
@@ -396,7 +401,7 @@ export class NestTransport {
    * pushed as an update rather than being waited for. Blocking on it would
    * delay every REST-visible device behind the slower transport.
    *
-   * @throws {AuthenticationError} When the token is rejected.
+   * @throws {AuthenticationError} When the sign-in is rejected.
    * @throws {SessionShapeError} When the session is one this plugin cannot use.
    *   Nothing can proceed without a session, so both are surfaced rather than retried.
    */
@@ -477,6 +482,11 @@ export class NestTransport {
       // Success is logged by the accessory with the HomeKit display name.
     } catch (error) {
       this.#options.metrics?.apiRequest?.(Date.now() - started, false, { networked: true })
+      // The next write or loop cycle signs in again instead of reusing a
+      // session Nest has refused.
+      if (error instanceof AuthenticationError && this.#session === session) {
+        this.#session = null
+      }
       // Accessory handlers log once and revert HomeKit — do not warn here too.
       throw error
     }
@@ -520,8 +530,8 @@ export class NestTransport {
     const startedAt = Date.now()
     try {
       const session = await withRetry(
-        () => openSession({
-          accessToken: this.#options.accessToken,
+        async () => openSession({
+          token: await this.#options.auth.mintToken(this.#abort.signal),
           endpoints: this.#options.endpoints,
           log: this.#options.log,
           fetchImpl: this.#options.fetchImpl,
@@ -542,17 +552,16 @@ export class NestTransport {
       return session
     } catch (error) {
       this.#options.metrics?.apiRequest?.(Date.now() - startedAt, false)
+      if (error instanceof AuthenticationError) {
+        this.#signInFailures.add(error)
+      }
       throw error
     }
   }
 
   /**
-   * Re-open the session when it has aged out.
-   *
-   * A rejected session (HTTP 401) is fatal rather than a refresh trigger: the
-   * session is derived from the configured token, so a new one would be
-   * rejected too. When Nest reports an expiry sooner than the fixed cadence,
-   * that wins.
+   * Sign in again and open a new session when the current token is close to
+   * expiry.
    *
    * Concurrent callers share one refresh. Four call sites can race — both run
    * loops, `app_launch`, and every BatchUpdateState write — and each caller
@@ -579,13 +588,34 @@ export class NestTransport {
     return this.#sessionRefresh
   }
 
-  /** Whether a session has aged out, by Nest's own expiry or the fixed cadence. */
+  /** Whether a session's token is within the renewal margin of its expiry. */
   #isSessionStale(session: NestSession): boolean {
-    const now = Date.now()
-    if (session.expiresAt !== undefined && now >= session.expiresAt - SESSION_EXPIRY_MARGIN_MS) {
+    return Date.now() >= session.expiresAt - SESSION_EXPIRY_MARGIN_MS
+  }
+
+  /**
+   * Whether Nest refusing the current session should be answered by signing
+   * in again rather than stopping.
+   *
+   * Only a session that has been in use for a while qualifies; its token may
+   * have lapsed early. Dropping it makes the next cycle sign in, and if that
+   * fresh session is refused too, the refusal is final.
+   */
+  #renewRejectedSession(error: unknown): boolean {
+    if (!(error instanceof AuthenticationError) || this.#signInFailures.has(error)) {
+      return false
+    }
+    const session = this.#session
+    if (session === null) {
+      // The other loop already dropped it; the next cycle signs in.
       return true
     }
-    return now - session.openedAt > SESSION_REFRESH_MS
+    if (Date.now() - session.openedAt < SESSION_REJECT_GRACE_MS) {
+      return false
+    }
+    this.#session = null
+    this.#options.log.debug('Nest refused the session; signing in again')
+    return true
   }
 
   /** Pull the whole account and publish it. */
@@ -1017,6 +1047,10 @@ export class NestTransport {
   ): boolean {
     if (this.#abort.signal.aborted) {
       return false
+    }
+
+    if (this.#renewRejectedSession(error)) {
+      return true
     }
 
     if (isFatalTransportError(error)) {

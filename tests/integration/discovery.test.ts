@@ -19,6 +19,7 @@ import { ObserveState } from '../../src/state/observe-state'
 import { buildInventory, listDevices } from '../../src/state/registry'
 import { createFakeHttp2 } from '../helpers/http2'
 import { createRecordingLogger } from '../helpers/logger'
+import { createTokenSource } from '../helpers/sign-in'
 import { buildFrame, heatingThermostatTraits, protectTraits } from '../helpers/observe-fixtures'
 
 jest.mock('../../src/utils/retry', () => {
@@ -73,7 +74,7 @@ describe('discovery integration', () => {
     }) as unknown as FetchLike
 
     const transport = new NestTransport({
-      accessToken: 'b'.repeat(120),
+      auth: createTokenSource(),
       endpoints,
       log,
       fetchImpl: fetch,

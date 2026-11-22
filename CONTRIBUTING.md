@@ -19,7 +19,7 @@ Use Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, …).
 ## Rules of the road
 
 - **Do not copy** code from `chrisjshull/homebridge-nest` or other Nest plugins. Reimplement from probes and Nest behaviour.
-- **No Google auth.** Nest Account `access_token` only.
+- **Google account sign-in only.** Credentials come from the configured Issue Token URL and Cookies; nothing else is accepted.
 - **No secrets in the repo.** Use `.env` (gitignored) for live scripts; never commit tokens or probe captures that contain account data.
 - **Life-safety honesty.** Do not invent Protect all-clear or motion from unverified Observe fields.
 - **Homebridge 2 update path.** Use `CharacteristicBinder` / `updateValue(reader())` — never `getValue()` for pushes, never `updateValue(characteristic.value)`.
@@ -28,7 +28,7 @@ Use Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, …).
 
 ```bash
 cp .env.example .env
-# paste NEST_ACCESS_TOKEN
+# set NEST_ISSUE_TOKEN and NEST_COOKIES
 npm run verify
 ```
 

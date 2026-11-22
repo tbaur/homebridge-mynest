@@ -5,10 +5,11 @@
  * Licensed under the Apache License, Version 2.0
  * See LICENSE file for full license text
  *
- * @fileoverview Live read-only check of the compiled plugin against a Nest Account.
+ * @fileoverview Live read-only check of the compiled plugin against a Google account.
  *
- * Drives code in `dist/` (session → app_launch → inventory merge → short Observe
- * listen) so a mapping bug shows up here rather than only in someone's Home app.
+ * Drives code in `dist/` (config validation → Google sign-in → session →
+ * app_launch → inventory merge → short Observe listen) so a mapping bug shows
+ * up here rather than only in someone's Home app.
  *
  * Run `npm run build` first.
  *
@@ -17,8 +18,9 @@
  *   node scripts/verify.mjs --listen 90  listen longer
  *   node scripts/verify.mjs --verbose    include per-trait stream detail
  *
- * Requires `NEST_ACCESS_TOKEN` in the environment or in a gitignored `.env`.
- * Read-only. Does not write setpoints or modes.
+ * Requires `NEST_ISSUE_TOKEN` and `NEST_COOKIES` in the environment or in a
+ * gitignored `.env`. Read-only. Does not write setpoints or modes, and does not
+ * save the cookies Google updates.
  */
 
 import { createRequire } from 'node:module'
@@ -39,12 +41,13 @@ if (!existsSync(join(distDir, 'index.js'))) {
 
 loadDotEnv(join(root, '.env'))
 
-const accessToken = process.env.NEST_ACCESS_TOKEN?.trim()
-if (!accessToken) {
-  stdout.write('Set NEST_ACCESS_TOKEN in the environment or in .env (see .env.example).\n')
+if (!process.env.NEST_ISSUE_TOKEN?.trim() || !process.env.NEST_COOKIES?.trim()) {
+  stdout.write('Set NEST_ISSUE_TOKEN and NEST_COOKIES in the environment or in .env (see .env.example).\n')
   process.exit(1)
 }
 
+const { validateConfig } = require(join(distDir, 'utils/validators.js'))
+const { GoogleAuth } = require(join(distDir, 'api/google-auth.js'))
 const { openSession } = require(join(distDir, 'api/session.js'))
 const { appLaunch, ObjectList } = require(join(distDir, 'api/rest.js'))
 const { runObserveSession } = require(join(distDir, 'api/observe.js'))
@@ -142,8 +145,19 @@ function reportDevice(device) {
 
 async function main() {
   const endpoints = resolveEndpoints(isFieldTest)
+  const { config } = validateConfig({
+    platform: 'MyNest',
+    issueToken: process.env.NEST_ISSUE_TOKEN,
+    cookies: process.env.NEST_COOKIES,
+  })
+
+  stdout.write('\n── Google sign-in ──\n')
+  const auth = new GoogleAuth({ issueToken: config.issueToken, cookies: config.cookies, log })
+  const token = await auth.mintToken()
+  stdout.write(`  Nest token expires in ${Math.round((token.expiresAt - Date.now()) / 60_000)} min\n`)
+
   stdout.write('\n── Session ──\n')
-  const session = await openSession({ accessToken, endpoints, log })
+  const session = await openSession({ token, endpoints, log })
   // userid and full transport_url identify the account; print a redacted form.
   stdout.write(`  user ${sanitizeString(`/user/${session.userId}`).replace(/^.*\//, '')}\n`)
   stdout.write(`  transport ${sanitizeUrl(session.transportUrl)}\n`)

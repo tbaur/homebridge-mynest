@@ -15,8 +15,8 @@
  * nothing external will tell you when it changes.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.SESSION_EXPIRY_MARGIN_MS = exports.SESSION_REFRESH_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.THERMOSTAT_WRITE_ECHO_MAX_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
-exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = void 0;
+exports.MAX_RESPONSE_BYTES = exports.MIN_RETRY_AFTER_MS = exports.MAX_RETRY_AFTER_MS = exports.OBSERVE_SILENCE_CHECK_MS = exports.FRAME_DECODE_FAILURE_RATIO = exports.FRAME_DECODE_WINDOW = exports.STATUS_HEARTBEAT_MS = exports.LOOP_FAILURE_WARN_EVERY = exports.BATCH_UPDATE_MAX_ATTEMPTS = exports.MAX_REQUEST_ATTEMPTS = exports.COOKIE_STATE_FILE = exports.STATE_DIR = exports.GOOGLE_USER_AGENT = exports.GOOGLE_SIGN_IN_TIMEOUT_MS = exports.NEST_ISSUE_JWT_URL = exports.GOOGLE_ISSUE_TOKEN_PATH = exports.GOOGLE_ISSUE_TOKEN_HOST = exports.SESSION_REJECT_GRACE_MS = exports.NEST_TOKEN_LIFETIME_SEC = exports.SESSION_EXPIRY_MARGIN_MS = exports.FORBIDDEN_REPROBE_MS = exports.FORBIDDEN_FATAL_THRESHOLD = exports.OBSERVE_SNAPSHOT_ABANDON_MS = exports.OBSERVE_SNAPSHOT_SETTLE_MS = exports.OBSERVE_STARTUP_WARN_MS = exports.MIN_SUBSCRIBE_CYCLE_MS = exports.RECONNECT_MAX_MS = exports.RECONNECT_BASE_MS = exports.OBSERVE_IDLE_TIMEOUT_MS = exports.OBSERVE_CONNECT_TIMEOUT_MS = exports.OBSERVE_PING_INTERVAL_MS = exports.OBSERVE_SESSION_MS = exports.REST_RESPONSE_STALE_MS = exports.REST_PROOF_OF_LIFE_MS = exports.REST_ALARM_FEED_STALE_MS = exports.SUBSCRIBE_IDLE_MIN_ELAPSED_RATIO = exports.SUBSCRIBE_TIMEOUT_MS = exports.THERMOSTAT_WRITE_ECHO_MAX_MS = exports.BATCH_UPDATE_TIMEOUT_MS = exports.APP_LAUNCH_TIMEOUT_MS = exports.SESSION_TIMEOUT_MS = exports.APP_LAUNCH_BUCKET_TYPES = exports.WEB_APP_VERSION = exports.USER_AGENT = exports.MANUFACTURER = exports.GLOBAL_ECO_DISPLAY_NAME = exports.GLOBAL_ECO_DEVICE_ID = exports.UUID_PREFIX = exports.PLATFORM_NAME = exports.PLUGIN_NAME = void 0;
+exports.REPORTED_TEMPERATURE_STEP_C = exports.MAX_REPORTED_TEMPERATURE_C = exports.MIN_REPORTED_TEMPERATURE_C = exports.MIN_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_SPAN_C = exports.DEFAULT_SETPOINT_C = exports.SETPOINT_STEP_C = exports.MAX_SETPOINT_C = exports.MIN_SETPOINT_C = exports.PROTECT_OCCUPANCY_HOLD_OFF_SEC = exports.MAX_DIAGNOSTICS_INTERVAL_SEC = exports.MIN_DIAGNOSTICS_INTERVAL_SEC = exports.REDISCOVERY_INTERVAL_MS = void 0;
 exports.resolveEndpoints = resolveEndpoints;
 exports.appLaunchUrl = appLaunchUrl;
 /** Name used to register the plugin with Homebridge (must match package.json name). */
@@ -259,20 +259,47 @@ exports.FORBIDDEN_FATAL_THRESHOLD = 3;
  */
 exports.FORBIDDEN_REPROBE_MS = 15 * 60_000;
 /**
- * How long a session is reused before it is re-established.
+ * Renew the session this long before its Nest token expires.
  *
- * Nest reports an `expires_in` far longer than this, but a token that has been
- * revoked server-side keeps working until first refusal. Re-opening on a fixed
- * cadence bounds how long the plugin can run on a dead session.
+ * Long enough that a slow or retried sign-in still finishes before the old
+ * token lapses. Sessions overlap safely: the old token keeps working until
+ * its own expiry, so a renewal never interrupts a stream.
  */
-exports.SESSION_REFRESH_MS = 6 * 60 * 60_000;
+exports.SESSION_EXPIRY_MARGIN_MS = 10 * 60_000;
 /**
- * Refresh a session this long before Nest's own reported expiry.
- *
- * Only used when `GET /session` reports `expires_in`; otherwise
- * {@link SESSION_REFRESH_MS} is the only trigger.
+ * Lifetime requested for each Nest token, and assumed when the response does
+ * not state one.
  */
-exports.SESSION_EXPIRY_MARGIN_MS = 5 * 60_000;
+exports.NEST_TOKEN_LIFETIME_SEC = 3_600;
+/**
+ * A session this young that Nest refuses is a refusal of the sign-in itself.
+ *
+ * An older one may simply have outlived its token, so it is renewed once
+ * instead of stopping the plugin.
+ */
+exports.SESSION_REJECT_GRACE_MS = 60_000;
+// ---------------------------------------------------------------------------
+// Google sign-in
+// ---------------------------------------------------------------------------
+/** Host of the issueToken endpoint. The only host the cookies are sent to. */
+exports.GOOGLE_ISSUE_TOKEN_HOST = 'accounts.google.com';
+/** Path of the issueToken endpoint. */
+exports.GOOGLE_ISSUE_TOKEN_PATH = '/o/oauth2/iframerpc';
+/** Exchanges a Google OAuth access token for a Nest token. */
+exports.NEST_ISSUE_JWT_URL = 'https://nestauthproxyservice-pa.googleapis.com/v1/issue_jwt';
+/** Hard ceiling on each Google sign-in request. */
+exports.GOOGLE_SIGN_IN_TIMEOUT_MS = 30_000;
+/**
+ * Browser user agent sent on the Google sign-in requests.
+ *
+ * Google sees the same cookies arrive from a browser; a user agent that looks
+ * like one keeps the requests consistent with how the cookies were issued.
+ */
+exports.GOOGLE_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+/** Directory under the Homebridge storage path for plugin state. */
+exports.STATE_DIR = 'homebridge-mynest';
+/** File in {@link STATE_DIR} holding the cookies Google has updated. */
+exports.COOKIE_STATE_FILE = 'google-cookies.json';
 /** Maximum attempts for a single REST request before surfacing the failure. */
 exports.MAX_REQUEST_ATTEMPTS = 3;
 /**

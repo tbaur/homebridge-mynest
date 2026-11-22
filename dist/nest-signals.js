@@ -13,7 +13,7 @@
  * summary.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NestSignals = exports.CONFIG_INVALID_SUMMARY = exports.SESSION_FORMAT_SUMMARY = exports.TOKEN_REJECTED_SUMMARY = exports.ALARM_FEED_STALE_SUMMARY = exports.CO_SUMMARY = exports.SMOKE_SUMMARY = exports.ALARM_FEED_STALE_GRACE_MS = exports.SIGNAL_AUTH_FAILED = exports.SIGNAL_ALARM_FEED_STALE = exports.SIGNAL_CO = exports.SIGNAL_SMOKE = exports.PAGERDUTY_STARTUP_LOG = void 0;
+exports.NestSignals = exports.CONFIG_INVALID_SUMMARY = exports.SESSION_FORMAT_SUMMARY = exports.SIGN_IN_REJECTED_SUMMARY = exports.ALARM_FEED_STALE_SUMMARY = exports.CO_SUMMARY = exports.SMOKE_SUMMARY = exports.ALARM_FEED_STALE_GRACE_MS = exports.SIGNAL_AUTH_FAILED = exports.SIGNAL_ALARM_FEED_STALE = exports.SIGNAL_CO = exports.SIGNAL_SMOKE = exports.PAGERDUTY_STARTUP_LOG = void 0;
 /** Logged once, in this order, when the setting is on. */
 exports.PAGERDUTY_STARTUP_LOG = 'homebridge-pagerduty support is enabled (smoke, co, alarm-feed-stale, auth-failed)';
 exports.SIGNAL_SMOKE = 'smoke';
@@ -25,11 +25,11 @@ exports.ALARM_FEED_STALE_GRACE_MS = 5 * 60_000;
 exports.SMOKE_SUMMARY = 'A Nest Protect detects smoke.';
 exports.CO_SUMMARY = 'A Nest Protect detects carbon monoxide.';
 exports.ALARM_FEED_STALE_SUMMARY = 'Nest Protect smoke and CO readings are stale. HomeKit may not show an alarm.';
-exports.TOKEN_REJECTED_SUMMARY = 'Nest rejected the access token. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.';
+exports.SIGN_IN_REJECTED_SUMMARY = 'Google sign-in was rejected. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.';
 exports.SESSION_FORMAT_SUMMARY = 'Nest changed its session format. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.';
-exports.CONFIG_INVALID_SUMMARY = 'The Nest access token in Homebridge is missing or invalid. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.';
+exports.CONFIG_INVALID_SUMMARY = 'The Google sign-in settings in Homebridge are missing or invalid. This plugin has stopped, so Protect smoke and CO no longer reach HomeKit.';
 const STOP_SUMMARIES = {
-    token: exports.TOKEN_REJECTED_SUMMARY,
+    'sign-in': exports.SIGN_IN_REJECTED_SUMMARY,
     session: exports.SESSION_FORMAT_SUMMARY,
     config: exports.CONFIG_INVALID_SUMMARY,
 };
@@ -74,7 +74,7 @@ class NestSignals {
         this.#writeFeedStale(false);
         this.#armStaleTimer();
     }
-    /** Nest accepted the token. Clears auth-failed. */
+    /** Sign-in succeeded. Clears auth-failed. */
     noteConnected() {
         if (this.#isClosed || this.#hasStopped) {
             return;
@@ -136,7 +136,7 @@ class NestSignals {
         this.#writer.write(exports.SIGNAL_AUTH_FAILED, {
             active: false,
             severity: 'error',
-            summary: exports.TOKEN_REJECTED_SUMMARY,
+            summary: exports.SIGN_IN_REJECTED_SUMMARY,
         });
     }
     #writeFeedStale(active) {

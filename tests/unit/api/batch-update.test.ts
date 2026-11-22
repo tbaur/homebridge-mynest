@@ -20,6 +20,7 @@ const session: NestSession = {
   userId: '555',
   transportUrl: 'https://czfe123.transport.home.nest.com',
   openedAt: Date.now(),
+  expiresAt: Date.now() + 60 * 60_000,
 }
 
 describe('postBatchUpdateState', () => {

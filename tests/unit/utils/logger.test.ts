@@ -32,7 +32,7 @@ describe('createScopedLogger', () => {
 
     log.debug(`token: Basic ${TOKEN}`)
     log.info(`{"access_token":"${TOKEN}"}`)
-    log.warn(`cztoken=${TOKEN}`)
+    log.warn(`token=${TOKEN}`)
     log.error(`Authorization: Bearer ${TOKEN}`)
 
     expect(base.all()).not.toContain(TOKEN)

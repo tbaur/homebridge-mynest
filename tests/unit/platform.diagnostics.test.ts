@@ -10,6 +10,7 @@
 import type { NestTransportOptions, TransportStatus } from '../../src/api/transport'
 import { PLATFORM_NAME } from '../../src/settings'
 import { createHomebridgeLogging, FakeHomebridgeApi } from '../helpers/homebridge'
+import { TEST_SIGN_IN } from '../helpers/sign-in'
 
 interface TransportHarness {
   options: NestTransportOptions
@@ -105,7 +106,7 @@ describe('MyNestPlatform diagnostics', () => {
       log,
       {
         platform: PLATFORM_NAME,
-        accessToken: 'b'.repeat(120),
+        ...TEST_SIGN_IN,
         diagnosticsInterval: 60,
         ...overrides,
       },

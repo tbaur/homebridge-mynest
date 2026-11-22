@@ -25,6 +25,7 @@ const session: NestSession = {
   userId: '5551234',
   transportUrl: 'https://czfe123.transport.home.nest.com',
   openedAt: Date.now(),
+  expiresAt: Date.now() + 60 * 60_000,
 }
 
 function start(overrides: Partial<Parameters<typeof runObserveSession>[0]> = {}) {

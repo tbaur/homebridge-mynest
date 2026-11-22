@@ -2,11 +2,11 @@
   "pluginAlias": "MyNest",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Exposes Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in HomeKit using a Nest Account access token (not Google cookie auth).\n\nHow to get the token: [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).",
-  "footerDisplay": "Thermostat mode/setpoints/Eco write through Nest BatchUpdateState only when Allow thermostat control is enabled (off by default). Each thermostat gets an Eco Mode switch; optionally enable Expose global Eco switch for all-at-once. Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the access token like a password.",
+  "headerDisplay": "Exposes Nest thermostats, Nest Protect smoke/CO alarms, and Nest Temperature Sensors in HomeKit. Signs in with a Google account that is an admin of the home.\n\nHow to copy the two sign-in values: [docs/AUTH.md](https://github.com/tbaur/homebridge-mynest/blob/main/docs/AUTH.md).",
+  "footerDisplay": "Thermostat mode/setpoints/Eco write through Nest BatchUpdateState only when Allow thermostat control is enabled (off by default). Each thermostat gets an Eco Mode switch; optionally enable Expose global Eco switch for all-at-once. Protect occupancy is Nest's ~10-minute presence verdict (auto_away), not motion. Treat the Cookies like a password: they sign in to the whole Google account.",
   "schema": {
     "type": "object",
-    "required": ["name", "accessToken"],
+    "required": ["name", "issueToken", "cookies"],
     "properties": {
       "name": {
         "title": "Name",
@@ -14,14 +14,22 @@
         "default": "MyNest",
         "description": "Name shown in the Homebridge log."
       },
-      "accessToken": {
-        "title": "Nest access token",
+      "issueToken": {
+        "title": "Issue Token URL",
         "type": "string",
-        "minLength": 32,
+        "pattern": "^https://accounts\\.google\\.com/o/oauth2/iframerpc\\?",
         "x-schema-form": {
           "type": "password"
         },
-        "description": "The access_token value from https://home.nest.com/session while signed in to a Nest Account. Google account JWTs and ya29. OAuth tokens will not work."
+        "description": "The full URL of the issueToken request, copied from the browser's developer tools while signing in at home.nest.com. Starts with https://accounts.google.com/o/oauth2/iframerpc?action=issueToken."
+      },
+      "cookies": {
+        "title": "Cookies",
+        "type": "string",
+        "x-schema-form": {
+          "type": "password"
+        },
+        "description": "The Cookie request header of the oauth2/iframe request from the same sign-in. Gives access to the whole Google account, so use a dedicated account."
       },
       "allowThermostatControl": {
         "title": "Allow thermostat control",
@@ -91,7 +99,7 @@
         "title": "Debug logging",
         "type": "boolean",
         "default": false,
-        "description": "Emit verbose diagnostics. Tokens are redacted, but review any log before sharing it publicly."
+        "description": "Emit verbose diagnostics. Credentials are redacted, but review any log before sharing it publicly."
       }
     }
   },
@@ -99,7 +107,7 @@
     {
       "type": "fieldset",
       "title": "Account",
-      "items": ["name", "accessToken"]
+      "items": ["name", "issueToken", "cookies"]
     },
     {
       "type": "fieldset",

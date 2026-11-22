@@ -1,6 +1,6 @@
 # Development
 
-User-facing install and options: [README.md](README.md). Full options, occupancy caveats, and troubleshooting: [docs/README-DETAILED.md](docs/README-DETAILED.md). Token capture: [docs/AUTH.md](docs/AUTH.md). Wire-level notes: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+User-facing install and options: [README.md](README.md). Full options, occupancy caveats, and troubleshooting: [docs/README-DETAILED.md](docs/README-DETAILED.md). Sign-in setup: [docs/AUTH.md](docs/AUTH.md). Wire-level notes: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Architecture
 
@@ -12,7 +12,9 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 | `src/nest-signals.ts` | Which Nest conditions raise and clear each PagerDuty signal |
 | `src/pagerduty-signals.ts` | Signal store writer, copied unchanged from homebridge-pagerduty's `docs/SIGNALS-AGENT.md` |
 | `src/diagnostics/` | Opt-in health heartbeats and rollup (mirrors sibling plugins) |
-| `src/api/session.ts` | Nest Account session (`GET /session`) |
+| `src/api/google-auth.ts` | Google sign-in: cookies → Google OAuth token → Nest token, with cookie updates |
+| `src/api/cookie-store.ts` | Saves the cookies Google updates, owner-only, across restarts |
+| `src/api/session.ts` | Nest session (`GET /session`) from a Nest token |
 | `src/api/rest.ts` | `app_launch` + `/v5/subscribe` |
 | `src/api/observe.ts` | HTTP/2 Observe stream |
 | `src/api/framing.ts` / `protobuf.ts` | Length-delimited frames and trait decode |
@@ -33,7 +35,7 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 
 ## Design principles
 
-- **Nest Account tokens only.** Google JWT / `ya29.` shapes are rejected at config validation.
+- **Google account sign-in only.** The Issue Token URL is restricted to Google's issueToken endpoint, so the cookies go nowhere else. Sessions renew from the Nest token's expiry.
 - **Observe ∪ REST.** Neither transport is a superset; thermostats are Observe-first; Observe-only Protects must appear.
 - **Life-safety honesty.** No invented Protect all-clear or motion from unverified Observe fields.
 - **HB2 update path.** Store getters; push with `updateValue(reader())` — never `getValue()`, never `updateValue(characteristic.value)`.
@@ -42,7 +44,7 @@ Two layers, meeting at the platform. Above it, accessories speak HomeKit. Below 
 - **Babel stays on 7.** Jest's `babel-preset-current-node-syntax` 1.2.0 still depends on syntax plugins that peer `@babel/core` 7 only, so Babel 8 fails `npm ci`. Take it when that preset publishes plugins that accept Babel 8.
 - **TypeScript stays on 6.0.3.** `ts-jest` 29 accepts `typescript` below 7. TypeScript 7.0 is out, and 7.1 is still a beta.
 - **protobufjs stays on 7.6.6.** 8.8.1 throws `illegal tag: field number 0` on the framed Observe buffer this plugin decodes. 7.6.6 accepts that buffer.
-- **Secrets never reach the log.** Tokens, Basic headers, and user ids are redacted.
+- **Secrets never reach the log.** Cookies, tokens, Basic and Bearer headers, emails, and user ids are redacted.
 
 ## Local workflow
 
@@ -54,7 +56,7 @@ npm run build
 npm run lint    # type-aware; needs a successful install
 ```
 
-Live read-only check (requires `.env` with `NEST_ACCESS_TOKEN` — never commit it):
+Live read-only check (requires `.env` with `NEST_ISSUE_TOKEN` and `NEST_COOKIES` — never commit it):
 
 ```bash
 cp .env.example .env
@@ -81,7 +83,7 @@ Do not bump them casually — an incompatible schema version can change trait sh
 
 Unit tests live under `tests/unit/` and use synthesized fixtures only — never live capture. Accessory tests run against real `hap-nodejs` services so the HB2 value-cache bug can actually reproduce.
 
-Integration tests live under `tests/integration/` and exercise discovery / transport wiring against fixtures (no live Nest account):
+Integration tests live under `tests/integration/` and exercise discovery / transport wiring against fixtures (no live account):
 
 ```bash
 npm run test:integration

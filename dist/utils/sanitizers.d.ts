@@ -6,9 +6,10 @@
  *
  * @fileoverview Redaction utilities that keep credentials out of logs.
  *
- * A Nest access token is a bearer credential for the whole home: anyone holding
- * it can read every sensor and change every thermostat and smoke alarm setting,
- * with no password and no second factor. Debug logs from a Homebridge instance
+ * The Google cookies sign in to the whole Google account, and every token the
+ * plugin derives from them is a bearer credential for the home: anyone holding
+ * one can read every sensor and change every thermostat and smoke alarm
+ * setting, with no password and no second factor. Debug logs from a Homebridge instance
  * routinely get pasted into public issue trackers, so redaction here is a real
  * control rather than hygiene theatre.
  *
